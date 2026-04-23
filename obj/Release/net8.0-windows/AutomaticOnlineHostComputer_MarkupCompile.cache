@@ -10,11 +10,11 @@ none
 false
 TRACE;RELEASE;NET;NET8_0;NETCOREAPP;WINDOWS;WINDOWS7_0;NET5_0_OR_GREATER;NET6_0_OR_GREATER;NET7_0_OR_GREATER;NET8_0_OR_GREATER;NETCOREAPP3_0_OR_GREATER;NETCOREAPP3_1_OR_GREATER;WINDOWS7_0_OR_GREATER
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\App.xaml
-3-341111503
+8-2090853258
 
-3-1214329826
+8-1845431992
 198185795992
-MainWindow.xaml;Themes\Colors.xaml;Themes\Styles.xaml;
+MainWindow.xaml;Themes\Colors.xaml;Themes\Styles.xaml;Views\ControllerManagementView.xaml;Views\CraneManagementView.xaml;Views\HomeView.xaml;Views\MachineManagementView.xaml;Views\ProcessManagementView.xaml;
 
 False
 

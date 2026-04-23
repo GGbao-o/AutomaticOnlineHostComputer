@@ -1,0 +1,75 @@
+<Window x:Class="AutomaticOnlineHostComputer.Views.Home.Dialogs.AddTaskDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="添加任务"
+        Width="340" Height="500"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        Background="#F0F2F5">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Padding="12" Background="White" BorderBrush="#BFC8D6" BorderThickness="1">
+            <TextBlock Text="添加任务" FontSize="18" FontWeight="Bold"/>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="0,12,0,12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="110"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="版型编号" Margin="0,6" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" Margin="0,6"/>
+            <TextBlock Grid.Row="1" Text="版型内径" Margin="0,6" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,6"/>
+            <TextBlock Grid.Row="2" Text="版型外径" Margin="0,6" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="2" Grid.Column="1" Margin="0,6"/>
+            <TextBlock Grid.Row="3" Text="版型长度" Margin="0,6" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="3" Grid.Column="1" Margin="0,6"/>
+            <TextBlock Grid.Row="4" Text="打印内容" Margin="0,6" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="4" Grid.Column="1" Margin="0,6"/>
+            <TextBlock Grid.Row="5" Text="左端头厚度" Margin="0,6" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="5" Grid.Column="1" Margin="0,6"/>
+            <TextBlock Grid.Row="6" Text="右端头厚度" Margin="0,6" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="6" Grid.Column="1" Margin="0,6"/>
+            <TextBlock Grid.Row="7" Text="内孔斜度" Margin="0,6" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="7" Grid.Column="1" Margin="0,6"/>
+            <TextBlock Grid.Row="8" Text="斜车工艺" Margin="0,6" VerticalAlignment="Center"/>
+            <ComboBox Grid.Row="8" Grid.Column="1" Margin="0,6">
+                <ComboBoxItem Content="1"/>
+                <ComboBoxItem Content="2"/>
+            </ComboBox>
+            <TextBlock Grid.Row="9" Text="工艺名称" Margin="0,6" VerticalAlignment="Center"/>
+            <ComboBox Grid.Row="9" Grid.Column="1" Margin="0,6">
+                <ComboBoxItem Content="工艺A"/>
+                <ComboBoxItem Content="工艺B"/>
+                <ComboBoxItem Content="工艺C"/>
+            </ComboBox>
+            <TextBlock Grid.Row="10" Text="物料架取料" Margin="0,6" VerticalAlignment="Center"/>
+            <CheckBox Grid.Row="10" Grid.Column="1" Margin="0,6" Content="启用" IsChecked="False"/>
+        </Grid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="确定" Width="80" Height="30" Margin="0,0,8,0"/>
+            <Button Content="取消" Width="80" Height="30" Click="Cancel_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

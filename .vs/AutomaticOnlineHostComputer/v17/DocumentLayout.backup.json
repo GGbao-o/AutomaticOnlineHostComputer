@@ -3,16 +3,32 @@
   "WorkspaceRootPath": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\home\\dialogs\\addtaskdialog.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\home\\dialogs\\addtaskdialog.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\home\\dialogs\\addtaskdialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\home\\dialogs\\addtaskdialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\home\\homeview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\home\\homeview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\home\\dialogs\\routeselectdialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\home\\dialogs\\routeselectdialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
       "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\app.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:app.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}",
-      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}"
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\home\\dialogs\\routeselectdialog.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\home\\dialogs\\routeselectdialog.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
     }
   ],
   "DocumentGroupContainers": [
@@ -48,51 +64,101 @@
         },
         {
           "DockedHeight": 147,
-          "SelectedChildIndex": 3,
+          "SelectedChildIndex": 7,
           "Children": [
             {
               "$type": "Bookmark",
               "Name": "ST:0:0:{3ae79031-e1bc-11d0-8f78-00a0c9110057}"
             },
             {
-              "$type": "Document",
-              "DocumentIndex": 1,
-              "Title": "MainWindow.xaml.cs",
-              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\MainWindow.xaml.cs",
-              "RelativeDocumentMoniker": "MainWindow.xaml.cs",
-              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\MainWindow.xaml.cs",
-              "RelativeToolTip": "MainWindow.xaml.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-04-22T05:13:02.775Z"
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{34e76e81-ee4a-11d0-ae2e-00a0c90fffc3}"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
-              "Title": "README.md",
-              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\README.md",
-              "RelativeDocumentMoniker": "README.md",
-              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\README.md",
-              "RelativeToolTip": "README.md",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001818|",
-              "WhenOpened": "2026-04-22T05:13:02.1Z"
+              "DocumentIndex": 5,
+              "Title": "App.xaml",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\App.xaml",
+              "RelativeDocumentMoniker": "App.xaml",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\App.xaml",
+              "RelativeToolTip": "App.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-04-23T06:16:33.826Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 4,
               "Title": "MainWindow.xaml",
               "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\MainWindow.xaml",
               "RelativeDocumentMoniker": "MainWindow.xaml",
               "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\MainWindow.xaml",
               "RelativeToolTip": "MainWindow.xaml",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
-              "WhenOpened": "2026-04-21T08:42:28.208Z",
+              "WhenOpened": "2026-04-23T06:08:35.357Z",
               "EditorCaption": ""
             },
             {
-              "$type": "Bookmark",
-              "Name": "ST:0:0:{34e76e81-ee4a-11d0-ae2e-00a0c90fffc3}"
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "RouteSelectDialog.xaml.cs",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\Dialogs\\RouteSelectDialog.xaml.cs",
+              "RelativeDocumentMoniker": "Views\\Home\\Dialogs\\RouteSelectDialog.xaml.cs",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\Dialogs\\RouteSelectDialog.xaml.cs",
+              "RelativeToolTip": "Views\\Home\\Dialogs\\RouteSelectDialog.xaml.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAswAQAAAAVAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-23T05:27:14.495Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "AddTaskDialog.xaml.cs",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\Dialogs\\AddTaskDialog.xaml.cs",
+              "RelativeDocumentMoniker": "Views\\Home\\Dialogs\\AddTaskDialog.xaml.cs",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\Dialogs\\AddTaskDialog.xaml.cs",
+              "RelativeToolTip": "Views\\Home\\Dialogs\\AddTaskDialog.xaml.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAIAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-23T05:26:37.777Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "RouteSelectDialog.xaml",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\Dialogs\\RouteSelectDialog.xaml",
+              "RelativeDocumentMoniker": "Views\\Home\\Dialogs\\RouteSelectDialog.xaml",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\Dialogs\\RouteSelectDialog.xaml",
+              "RelativeToolTip": "Views\\Home\\Dialogs\\RouteSelectDialog.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-04-23T05:03:38.591Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "AddTaskDialog.xaml",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\Dialogs\\AddTaskDialog.xaml",
+              "RelativeDocumentMoniker": "Views\\Home\\Dialogs\\AddTaskDialog.xaml",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\Dialogs\\AddTaskDialog.xaml",
+              "RelativeToolTip": "Views\\Home\\Dialogs\\AddTaskDialog.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-04-23T05:03:36.476Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "HomeView.xaml",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\HomeView.xaml",
+              "RelativeDocumentMoniker": "Views\\Home\\HomeView.xaml",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\HomeView.xaml",
+              "RelativeToolTip": "Views\\Home\\HomeView.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-04-23T05:03:32.003Z",
+              "EditorCaption": ""
             }
           ]
         }
