@@ -1,0 +1,102 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 1,
+      "VerticalTabListWidth": 247,
+      "DocumentGroups": [
+        {
+          "DockedHeight": 272,
+          "SelectedChildIndex": -1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{b1e99781-ab81-11d0-b683-00aa00a3ee26}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{eefa5220-e298-11d0-8f78-00a0c9110057}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:128:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:129:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            }
+          ]
+        },
+        {
+          "DockedHeight": 147,
+          "SelectedChildIndex": 4,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{3ae79031-e1bc-11d0-8f78-00a0c9110057}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{34e76e81-ee4a-11d0-ae2e-00a0c90fffc3}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "MainWindow.xaml.cs",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\MainWindow.xaml.cs",
+              "RelativeDocumentMoniker": "MainWindow.xaml.cs",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\MainWindow.xaml.cs",
+              "RelativeToolTip": "MainWindow.xaml.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-22T05:13:02.775Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "README.md",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\README.md",
+              "RelativeDocumentMoniker": "README.md",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\README.md",
+              "RelativeToolTip": "README.md",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001818|",
+              "WhenOpened": "2026-04-22T05:13:02.1Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainWindow.xaml",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\MainWindow.xaml",
+              "RelativeDocumentMoniker": "MainWindow.xaml",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\MainWindow.xaml",
+              "RelativeToolTip": "MainWindow.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-04-21T08:42:28.208Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
