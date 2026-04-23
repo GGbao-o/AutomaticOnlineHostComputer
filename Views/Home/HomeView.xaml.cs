@@ -10,7 +10,11 @@ public partial class HomeView : UserControl
     {
         InitializeComponent();
     }
-
+    /// <summary>
+    /// 任务添加按钮 打开添加任务页面
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
     private void AddTask_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new AddTaskDialog
@@ -19,7 +23,11 @@ public partial class HomeView : UserControl
         };
         dialog.ShowDialog();
     }
-
+    /// <summary>
+    /// 线路选取按钮 打开页面
+    /// </summary>
+    /// <param name="sender"></param>
+    /// <param name="e"></param>
     private void RouteSelect_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new RouteSelectDialog

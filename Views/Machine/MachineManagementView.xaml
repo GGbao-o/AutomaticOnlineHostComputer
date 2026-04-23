@@ -58,7 +58,7 @@
 
         <Border Grid.Column="1" Margin="8,0,0,0" BorderBrush="#BFC8D6" BorderThickness="1" Background="White">
             <StackPanel Margin="8">
-                <Button Content="添加机器" Height="34" Margin="0,0,0,8"/>
+                <Button Content="添加机器" Height="34" Margin="0,0,0,8" Click="AddMachine_click"/>
                 <Button Content="编辑机器" Height="34" Margin="0,0,0,8"/>
                 <Button Content="删除机器" Height="34" Margin="0,0,0,8"/>
                 <Button Content="刷新图标" Height="34" Margin="0,0,0,8"/>

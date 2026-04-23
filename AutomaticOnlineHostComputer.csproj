@@ -15,9 +15,6 @@
     <Page Remove="Views\新文件夹\**" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Views\Controller\Dialogs\" />
     <Folder Include="Views\Crane\Dialogs\" />
-    <Folder Include="Views\Machine\Dialogs\" />
-    <Folder Include="Views\Process\Dialogs\" />
   </ItemGroup>
 </Project>
