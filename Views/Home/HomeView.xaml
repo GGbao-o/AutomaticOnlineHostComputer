@@ -150,28 +150,808 @@
         <!-- 4: 全厂下位机 / 流程图机器状态（必须滚动） -->
         <Border Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="4" BorderBrush="#BFC8D6" BorderThickness="1" Background="White">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="6" MinWidth="1900" MinHeight="520">
+                <StackPanel Margin="6" MinWidth="2800" MinHeight="520">
                     <TextBlock Text="全厂下位机状态 / 全流程机器状态图" FontSize="16" FontWeight="Bold" Margin="2,2,2,10"/>
 
-                    <WrapPanel>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="01总上料架" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="02机械手1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="03中转站1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="04中转站2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="05中转站3" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="11货叉1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="12货叉2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="18双头镗床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="19打标机" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="25二号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="26三号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="研磨机1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="研磨机2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="研磨机3" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8"><TextBlock Text="研磨机4" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/></Border>
-                    </WrapPanel>
+                    <!-- ========== 第0行：左侧设备 + 上方主要流程线 ========== -->
+                    <StackPanel Orientation="Horizontal">
+
+                        <!-- 01总上料架 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="01总上料架" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_01, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_01, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 02机械手1 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="02机械手1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_02, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_02, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 间距 -->
+                        <Border Width="20" Background="Transparent"/>
+
+                        <!-- 11货叉1(上料架1) -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="11货叉1(上料架1)" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_11, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_11, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 18一号双头镗 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="18一号双头镗" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_18, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_18, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 19一号打号机 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="19一号打号机" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_19, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_19, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 03中转站1 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="03中转站1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_03_1, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_03_1, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 03中转站2 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="03中转站2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_03_2, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_03_2, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 03中转站3 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="03中转站3" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_03_3, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_03_3, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 20一号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="20一号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_20, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_20, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 21二号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="21二号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_21, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_21, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 22三号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="22三号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_22, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_22, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 23四号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="23四号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_23, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_23, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 24五号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="24五号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_24, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_24, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 13下料架1 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="13下料架1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_13, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_13, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 05机械手2 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="05机械手2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_05, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_05, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 06机械手3 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="06机械手3" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_06, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_06, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 15下料架2(研磨机上料架) -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="15下料架2&#x0a;(研磨机上料架)" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_15, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_15, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 17研磨机上料5 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="17研磨机上料5" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_17_5, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_17_5, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 17研磨机上料6 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="17研磨机上料6" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_17_6, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_17_6, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 17研磨机上料7 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="17研磨机上料7" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_17_7, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_17_7, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 32研磨机1 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="32研磨机1" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_32_1, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_32_1, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 32研磨机2 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="32研磨机2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_32_2, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_32_2, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 32研磨机3 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="32研磨机3" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_32_3, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_32_3, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 32研磨机4 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="32研磨机4" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_32_4, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_32_4, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 17研磨机下料架 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="17研磨机下料架" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_17_D, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_17_D, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                    </StackPanel>
+
+                    <!-- ========== 第1行：第二排设备 ========== -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
+
+                        <!-- 左侧空白占位，与第0行对齐 -->
+                        <Border Width="176" Background="Transparent"/>
+                        <Border Width="176" Background="Transparent"/>
+
+                        <!-- 间距 -->
+                        <Border Width="20" Background="Transparent"/>
+
+                        <!-- 12货叉2(上料架2) -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="12货叉2(上料架2)" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_12, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_12, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 25二号双头镗 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="25二号双头镗" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_25, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_25, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 26二号打号机 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="26二号打号机" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_26, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_26, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 04中转站4 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="04中转站4" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_04_4, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_04_4, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 04中转站5 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="04中转站5" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_04_5, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_04_5, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 04中转站6 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="04中转站6" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_04_6, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_04_6, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 27六号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="27六号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_27, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_27, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 28七号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="28七号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_28, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_28, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 29八号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="29八号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_29, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_29, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 30九号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="30九号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_30, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_30, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 31十号斜床 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="31十号斜床" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_31, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_31, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- 14下料架3 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="14下料架3" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_14, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_14, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <!-- 16下料架4 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="16下料架4" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_16, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_16, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                    </StackPanel>
+
+                    <!-- ========== 第2行：第三排设备（下方）- 修正后的动平衡位置 ========== -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
+
+                        <!-- 左侧空白占位：与01总上料架对齐 -->
+                        <Border Width="176" Background="Transparent"/>
+                        <Border Width="176" Background="Transparent"/>
+                        <Border Width="20" Background="Transparent"/>
+
+                        <!-- 空白占位：与11货叉1~26二号打号机区域对齐（12个设备宽度） -->
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <!--<Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>-->
+                        <!--<Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>-->
+                       
+
+                        <!-- 空白占位：与13下料架1对齐 --><!--
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+
+                        --><!-- 空白占位：与05机械手2对齐 --><!--
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>-->
+
+                        <!-- 空白占位：与06机械手3对齐 -->
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+
+                        <!-- 空白占位：与15下料架2对齐 -->
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+
+                        <!-- 空白占位：与17研磨机上料5对齐 -->
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+
+                        <!-- 空白占位：与17研磨机上料6对齐 -->
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+
+                        <!-- 空白占位：与17研磨机上料7对齐 -->
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+
+                        <!-- 空白占位：与32研磨机1对齐 -->
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+
+                        <!-- 空白占位：与32研磨机2对齐 -->
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+
+                        <!-- 空白占位：与32研磨机3对齐 -->
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+
+                        <!-- 07动平衡上料架 - 位于14下料架3正下方 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="07动平衡上料架" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_07, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_07, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <Border Width="170" Height="110" Margin="3" Background="Transparent"/>
+                        <!-- 08动平衡下料架 - 位于16下料架4正下方 -->
+                        <Border Width="170" Height="110" Margin="3" BorderBrush="#CED4DE" BorderThickness="1" Background="#EEF3F8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="08动平衡下料架" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                <Border Grid.Row="1" Background="#D6E4F0" Margin="4,2,4,1" Padding="2">
+                                    <TextBlock Text="{Binding Status1_08, FallbackValue=未知}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border Grid.Row="2" Background="#D6E4F0" Margin="4,1,4,4" Padding="2">
+                                    <TextBlock Text="{Binding Status2_08, FallbackValue=无}" HorizontalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                    </StackPanel>
+
                 </StackPanel>
             </ScrollViewer>
         </Border>
+
     </Grid>
 </UserControl>

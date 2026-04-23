@@ -3,16 +3,24 @@
   "WorkspaceRootPath": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\home\\homeview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\home\\homeview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\crane\\dialogs\\addcranedialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\crane\\dialogs\\addcranedialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\controller\\dialogs\\addcontrollerdialog.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\controller\\dialogs\\addcontrollerdialog.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\controller\\controllermanagementview.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\controller\\controllermanagementview.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\controller\\dialogs\\addcontrollerdialog.xaml.cs||{8B382828-6202-11D1-8870-0000F87579D2}|",
       "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\controller\\dialogs\\addcontrollerdialog.xaml.cs||{8B382828-6202-11D1-8870-0000F87579D2}|"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\controller\\dialogs\\addcontrollerdialog.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
-      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\controller\\dialogs\\addcontrollerdialog.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\controller\\controllermanagementview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
@@ -29,10 +37,6 @@
     {
       "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\process\\dialogs\\addprocessdialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\process\\dialogs\\addprocessdialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\crane\\dialogs\\addcranedialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|solutionrelative:views\\crane\\dialogs\\addcranedialog.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{C5B3B6A4-2A61-4B2C-9F45-5C7A9A9B3B1D}|AutomaticOnlineHostComputer.csproj|d:\\bsh\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\v4.4.0 - dis-0928-1\\automatic online host computer\\views\\process\\dialogs\\addprocessdialog.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
@@ -71,31 +75,42 @@
             {
               "$type": "Document",
               "DocumentIndex": 0,
+              "Title": "HomeView.xaml",
+              "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\HomeView.xaml",
+              "RelativeDocumentMoniker": "Views\\Home\\HomeView.xaml",
+              "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Home\\HomeView.xaml",
+              "RelativeToolTip": "Views\\Home\\HomeView.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-04-23T09:24:06.989Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
               "Title": "ControllerManagementView.xaml.cs",
               "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Controller\\ControllerManagementView.xaml.cs",
               "RelativeDocumentMoniker": "Views\\Controller\\ControllerManagementView.xaml.cs",
               "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Controller\\ControllerManagementView.xaml.cs",
               "RelativeToolTip": "Views\\Controller\\ControllerManagementView.xaml.cs",
-              "ViewState": "AgIAAAQAAAAAAAAAAAAswA0AAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAAAQAAAAAAAAAAAAswBMAAAAOAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-04-23T09:08:50.734Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 5,
               "Title": "ControllerManagementView.xaml",
               "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Controller\\ControllerManagementView.xaml",
               "RelativeDocumentMoniker": "Views\\Controller\\ControllerManagementView.xaml",
               "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Controller\\ControllerManagementView.xaml",
               "RelativeToolTip": "Views\\Controller\\ControllerManagementView.xaml",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
-              "WhenOpened": "2026-04-23T09:08:44.697Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-04-23T09:08:44.697Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 4,
               "Title": "AddControllerDialog.xaml.cs",
               "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Controller\\Dialogs\\AddControllerDialog.xaml.cs",
               "RelativeDocumentMoniker": "Views\\Controller\\Dialogs\\AddControllerDialog.xaml.cs",
@@ -120,7 +135,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 7,
+              "DocumentIndex": 1,
               "Title": "AddCraneDialog.xaml.cs",
               "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Crane\\Dialogs\\AddCraneDialog.xaml.cs",
               "RelativeDocumentMoniker": "Views\\Crane\\Dialogs\\AddCraneDialog.xaml.cs",
@@ -133,7 +148,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 6,
+              "DocumentIndex": 8,
               "Title": "AddProcessDialog.xaml.cs",
               "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Process\\Dialogs\\AddProcessDialog.xaml.cs",
               "RelativeDocumentMoniker": "Views\\Process\\Dialogs\\AddProcessDialog.xaml.cs",
@@ -141,12 +156,11 @@
               "RelativeToolTip": "Views\\Process\\Dialogs\\AddProcessDialog.xaml.cs",
               "ViewState": "AgIAAAcAAAAAAAAAAAAIwBIAAAAQAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-04-23T09:06:39.889Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-04-23T09:06:39.889Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 5,
+              "DocumentIndex": 7,
               "Title": "ProcessManagementView.xaml.cs",
               "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Process\\ProcessManagementView.xaml.cs",
               "RelativeDocumentMoniker": "Views\\Process\\ProcessManagementView.xaml.cs",
@@ -154,32 +168,29 @@
               "RelativeToolTip": "Views\\Process\\ProcessManagementView.xaml.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABIAAAARAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-04-23T09:06:30.16Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-04-23T09:06:30.16Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 4,
+              "DocumentIndex": 6,
               "Title": "ProcessManagementView.xaml",
               "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Process\\ProcessManagementView.xaml",
               "RelativeDocumentMoniker": "Views\\Process\\ProcessManagementView.xaml",
               "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Process\\ProcessManagementView.xaml",
               "RelativeToolTip": "Views\\Process\\ProcessManagementView.xaml",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
-              "WhenOpened": "2026-04-23T09:06:26.445Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-04-23T09:06:26.445Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 8,
+              "DocumentIndex": 9,
               "Title": "AddProcessDialog.xaml",
               "DocumentMoniker": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Process\\Dialogs\\AddProcessDialog.xaml",
               "RelativeDocumentMoniker": "Views\\Process\\Dialogs\\AddProcessDialog.xaml",
               "ToolTip": "D:\\BSH\\hateshujukejicode\\\u81EA\u52A8\u7EBF\u4E0A\u4F4D\u673A\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\Views\\Process\\Dialogs\\AddProcessDialog.xaml",
               "RelativeToolTip": "Views\\Process\\Dialogs\\AddProcessDialog.xaml",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
-              "WhenOpened": "2026-04-23T09:06:16.167Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-04-23T09:06:16.167Z"
             }
           ]
         },
