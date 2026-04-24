@@ -4,29 +4,30 @@
              Background="#F0F2F5">
     <Grid Margin="4">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="140"/>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="140" />
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" BorderBrush="#BFC8D6" BorderThickness="1" Background="White">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Orientation="Horizontal" Margin="4">
-                    <TextBlock Text="机器管理" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" Margin="4,0,10,0"/>
+                    <TextBlock Text="机器管理" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" Margin="4,0,10,0" />
                 </StackPanel>
 
                 <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                     <Grid MinWidth="1500" MinHeight="700">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <DataGrid Margin="8,0,8,0"
+                        <DataGrid x:Name="MachineGrid"
+                                  Margin="8,0,8,0"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
@@ -34,23 +35,28 @@
                                   GridLinesVisibility="Horizontal"
                                   HorizontalGridLinesBrush="#D9E0EA"
                                   VerticalGridLinesBrush="#D9E0EA"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.ScrollUnit="Pixel"
+                                  VirtualizingPanel.VirtualizationMode="Recycling"
+                                  EnableRowVirtualization="True"
+                                  EnableColumnVirtualization="True"
                                   MinHeight="90">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="机号" Binding="{Binding Id}" Width="70"/>
-                                <DataGridTextColumn Header="机器名称" Binding="{Binding Name}" Width="150"/>
-                                <DataGridTextColumn Header="位置" Binding="{Binding Position}" Width="120"/>
-                                <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="120"/>
-                                <DataGridTextColumn Header="X坐标" Binding="{Binding X}" Width="90"/>
-                                <DataGridTextColumn Header="Y坐标" Binding="{Binding Y}" Width="90"/>
-                                <DataGridTextColumn Header="Z坐标" Binding="{Binding Z}" Width="90"/>
-                                <DataGridTextColumn Header="X轴对坐标" Binding="{Binding XOffset}" Width="110"/>
-                                <DataGridTextColumn Header="Y轴偏移" Binding="{Binding YOffset}" Width="100"/>
-                                <DataGridTextColumn Header="Z轴偏移" Binding="{Binding ZOffset}" Width="100"/>
-                                <DataGridTextColumn Header="抖动" Binding="{Binding Shake}" Width="80"/>
+                                <DataGridTextColumn Header="机号" Binding="{Binding Id}" Width="70" />
+                                <DataGridTextColumn Header="机器名称" Binding="{Binding Name}" Width="150" />
+                                <DataGridTextColumn Header="位置" Binding="{Binding Position}" Width="120" />
+                                <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="120" />
+                                <DataGridTextColumn Header="X坐标" Binding="{Binding X}" Width="90" />
+                                <DataGridTextColumn Header="Y坐标" Binding="{Binding Y}" Width="90" />
+                                <DataGridTextColumn Header="Z坐标" Binding="{Binding Z}" Width="90" />
+                                <DataGridTextColumn Header="X轴对坐标" Binding="{Binding XOffset}" Width="110" />
+                                <DataGridTextColumn Header="Y轴偏移" Binding="{Binding YOffset}" Width="100" />
+                                <DataGridTextColumn Header="Z轴偏移" Binding="{Binding ZOffset}" Width="100" />
+                                <DataGridTextColumn Header="抖动" Binding="{Binding Shake}" Width="80" />
                             </DataGrid.Columns>
                         </DataGrid>
 
-                        
+
                     </Grid>
                 </ScrollViewer>
             </Grid>
@@ -58,10 +64,10 @@
 
         <Border Grid.Column="1" Margin="8,0,0,0" BorderBrush="#BFC8D6" BorderThickness="1" Background="White">
             <StackPanel Margin="8">
-                <Button Content="添加机器" Height="34" Margin="0,0,0,8" Click="AddMachine_click"/>
-                <Button Content="编辑机器" Height="34" Margin="0,0,0,8"/>
-                <Button Content="删除机器" Height="34" Margin="0,0,0,8"/>
-                <Button Content="刷新图标" Height="34" Margin="0,0,0,8"/>
+                <Button Content="添加机器" Height="34" Margin="0,0,0,8" Click="AddMachine_click" />
+                <Button Content="编辑机器" Height="34" Margin="0,0,0,8" Click="EditMachine_Click" />
+                <Button Content="删除机器" Height="34" Margin="0,0,0,8" />
+                <Button Content="刷新图标" Height="34" Margin="0,0,0,8" />
             </StackPanel>
         </Border>
     </Grid>

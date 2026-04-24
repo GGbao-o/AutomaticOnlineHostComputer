@@ -4,30 +4,31 @@
              Background="#F0F2F5">
     <Grid Margin="4">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="140"/>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="140" />
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" BorderBrush="#BFC8D6" BorderThickness="1" Background="White">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Orientation="Horizontal" Margin="4">
-                    <TextBlock Text="天车管理" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" Margin="4,0,10,0"/>
-                    <TextBlock Text=""/>
+                    <TextBlock Text="天车管理" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" Margin="4,0,10,0" />
+                    <TextBlock Text="" />
                 </StackPanel>
 
                 <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                     <Grid MinWidth="1200" MinHeight="650">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <DataGrid Margin="8,0,8,0"
+                        <DataGrid x:Name="CraneGrid"
+                                  Margin="8,0,8,0"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
@@ -35,25 +36,30 @@
                                   GridLinesVisibility="Horizontal"
                                   HorizontalGridLinesBrush="#D9E0EA"
                                   VerticalGridLinesBrush="#D9E0EA"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.ScrollUnit="Pixel"
+                                  VirtualizingPanel.VirtualizationMode="Recycling"
+                                  EnableRowVirtualization="True"
+                                  EnableColumnVirtualization="True"
                                   MinHeight="90">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="编号" Binding="{Binding Id}" Width="60"/>
-                                <DataGridTextColumn Header="天车名称" Binding="{Binding Name}" Width="140"/>
-                                <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="110"/>
-                                <DataGridTextColumn Header="X坐标" Binding="{Binding X}" Width="90"/>
-                                <DataGridTextColumn Header="Y坐标" Binding="{Binding Y}" Width="90"/>
-                                <DataGridTextColumn Header="Z坐标" Binding="{Binding Z}" Width="90"/>
-                                <DataGridTextColumn Header="IP地址" Binding="{Binding Ip}" Width="140"/>
-                                <DataGridTextColumn Header="天车端口" Binding="{Binding Port}" Width="100"/>
-                                <DataGridTextColumn Header="编码器IP" Binding="{Binding EncoderIp}" Width="140"/>
-                                <DataGridTextColumn Header="编码器端口" Binding="{Binding EncoderPort}" Width="100"/>
-                                <DataGridTextColumn Header="编码器机号" Binding="{Binding EncoderNo}" Width="100"/>
-                                <DataGridTextColumn Header="天车宽度" Binding="{Binding Width}" Width="100"/>
-                                <DataGridTextColumn Header="天车状态" Binding="{Binding State}" Width="100"/>
+                                <DataGridTextColumn Header="编号" Binding="{Binding Id}" Width="60" />
+                                <DataGridTextColumn Header="天车名称" Binding="{Binding Name}" Width="140" />
+                                <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="110" />
+                                <DataGridTextColumn Header="X坐标" Binding="{Binding X}" Width="90" />
+                                <DataGridTextColumn Header="Y坐标" Binding="{Binding Y}" Width="90" />
+                                <DataGridTextColumn Header="Z坐标" Binding="{Binding Z}" Width="90" />
+                                <DataGridTextColumn Header="IP地址" Binding="{Binding Ip}" Width="140" />
+                                <DataGridTextColumn Header="天车端口" Binding="{Binding Port}" Width="100" />
+                                <DataGridTextColumn Header="编码器IP" Binding="{Binding EncoderIp}" Width="140" />
+                                <DataGridTextColumn Header="编码器端口" Binding="{Binding EncoderPort}" Width="100" />
+                                <DataGridTextColumn Header="编码器机号" Binding="{Binding EncoderNo}" Width="100" />
+                                <DataGridTextColumn Header="天车宽度" Binding="{Binding Width}" Width="100" />
+                                <DataGridTextColumn Header="天车状态" Binding="{Binding State}" Width="100" />
                             </DataGrid.Columns>
                         </DataGrid>
 
-                       
+
                     </Grid>
                 </ScrollViewer>
             </Grid>
@@ -61,10 +67,10 @@
 
         <Border Grid.Column="1" Margin="8,0,0,0" BorderBrush="#BFC8D6" BorderThickness="1" Background="White">
             <StackPanel Margin="8">
-                <Button Content="添加天车" Height="34" Margin="0,0,0,8" Click="AddCrane_Click"/>
-                <Button Content="编辑天车" Height="34" Margin="0,0,0,8"/>
-                <Button Content="删除天车" Height="34" Margin="0,0,0,8"/>
-                <Button Content="刷新图标" Height="34" Margin="0,0,0,8"/>
+                <Button Content="添加天车" Height="34" Margin="0,0,0,8" Click="AddCrane_Click" />
+                <Button Content="编辑天车" Height="34" Margin="0,0,0,8" Click="EditCrane_Click" />
+                <Button Content="删除天车" Height="34" Margin="0,0,0,8" />
+                <Button Content="刷新图标" Height="34" Margin="0,0,0,8" />
             </StackPanel>
         </Border>
     </Grid>

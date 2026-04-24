@@ -1,33 +1,120 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using AutomaticOnlineHostComputer.Infrastructure.Config;
+using AutomaticOnlineHostComputer.Infrastructure.Data;
+using AutomaticOnlineHostComputer.Presentation.ViewModels.Controller;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
 
-namespace AutomaticOnlineHostComputer.Views.Controller.Dialogs
+namespace AutomaticOnlineHostComputer.Views.Controller.Dialogs;
+
+/// <summary>
+/// 控制器新增/编辑弹窗逻辑。
+/// </summary>
+public partial class AddControllerDialog : Window
 {
-    /// <summary>
-    /// AddControllerDialog.xaml 的交互逻辑
-    /// </summary>
-    public partial class AddControllerDialog : Window
-    {
-        public AddControllerDialog()
-        {
-            InitializeComponent();
-        }
+    private readonly ManagementCommandService _commandService;
+    private readonly int? _editId;
 
-        private void Close_Click(object sender, RoutedEventArgs e)
+    public AddControllerDialog()
+    {
+        InitializeComponent();
+        _commandService = new ManagementCommandService(DbSettingsProvider.GetConnectionString());
+    }
+
+    /// <summary>
+    /// 编辑模式构造函数。
+    /// </summary>
+    public AddControllerDialog(ControllerManagementRowVm row) : this()
+    {
+        _editId = row.SourceId;
+        Title = "编辑控制器";
+        FillForm(row);
+    }
+
+    /// <summary>
+    /// 保存（新增/编辑复用）。
+    /// </summary>
+    private async void Save_Click(object sender, RoutedEventArgs e)
+    {
+        try
         {
+            var input = new AddControllerInput
+            {
+                Name = RequireText(NameTextBox.Text, "名称"),
+                TypeName = RequireText(TypeTextBox.Text, "类型"),
+                Ip = IpTextBox.Text.Trim(),
+                Port = ParseInt(PortTextBox.Text, "端口"),
+                DeviceNo = ParseInt(DeviceNoTextBox.Text, "设备号"),
+                State = GetStateCode(StateComboBox)
+            };
+
+            if (_editId.HasValue)
+            {
+                await _commandService.UpdateControllerAsync(_editId.Value, input);
+            }
+            else
+            {
+                await _commandService.AddControllerAsync(input);
+            }
+
+            DialogResult = true;
             Close();
         }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"保存控制器失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void FillForm(ControllerManagementRowVm row)
+    {
+        NameTextBox.Text = row.Name;
+        TypeTextBox.Text = row.Type;
+        IpTextBox.Text = row.Ip;
+        PortTextBox.Text = row.Port.ToString();
+        DeviceNoTextBox.Text = row.DeviceNo.ToString();
+        SelectComboByText(StateComboBox, row.State);
+    }
+
+    private static void SelectComboByText(ComboBox comboBox, string text)
+    {
+        foreach (var item in comboBox.Items)
+        {
+            if (item is ComboBoxItem cbItem && string.Equals(cbItem.Content?.ToString(), text, StringComparison.OrdinalIgnoreCase))
+            {
+                comboBox.SelectedItem = cbItem;
+                break;
+            }
+        }
+    }
+
+    private static int GetStateCode(ComboBox comboBox)
+    {
+        var text = (comboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "启用";
+        return text switch
+        {
+            "启用" => 1,
+            "检修" => 2,
+            _ => 0
+        };
+    }
+
+    private static string RequireText(string? text, string field)
+    {
+        var value = (text ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(value))
+            throw new InvalidOperationException($"{field}不能为空。");
+        return value;
+    }
+
+    private static int ParseInt(string? text, string field)
+    {
+        if (!int.TryParse(text, out var value))
+            throw new InvalidOperationException($"{field}必须是整数。");
+        return value;
+    }
+
+    private void Close_Click(object sender, RoutedEventArgs e)
+    {
+        Close();
     }
 }

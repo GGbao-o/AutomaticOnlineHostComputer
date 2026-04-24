@@ -18,10 +18,7 @@ public partial class MainWindow : Window
 
     private void MenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem menuItem || menuItem.Tag is null)
-        {
-            return;
-        }
+        if (sender is not MenuItem menuItem || menuItem.Tag is null) return;
 
         ContentHost.Content = menuItem.Tag.ToString() switch
         {
@@ -30,7 +27,7 @@ public partial class MainWindow : Window
             "machine" => new MachineManagementView(),
             "controller" => new ControllerManagementView(),
             "process" => new ProcessManagementView(),
-            _ => new HomeView(),
+            _ => new HomeView()
         };
     }
 }

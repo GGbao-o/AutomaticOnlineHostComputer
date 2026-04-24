@@ -4,29 +4,30 @@
              Background="#F0F2F5">
     <Grid Margin="4">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="140"/>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="140" />
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" BorderBrush="#BFC8D6" BorderThickness="1" Background="White">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Orientation="Horizontal" Margin="4">
-                    <TextBlock Text="工艺管理" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" Margin="4,0,10,0"/>
+                    <TextBlock Text="工艺管理" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" Margin="4,0,10,0" />
                 </StackPanel>
 
                 <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                     <Grid MinWidth="1300" MinHeight="700">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <DataGrid Margin="8,0,8,0"
+                        <DataGrid x:Name="ProcessGrid"
+                                  Margin="8,0,8,0"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
@@ -34,24 +35,29 @@
                                   GridLinesVisibility="Horizontal"
                                   HorizontalGridLinesBrush="#D9E0EA"
                                   VerticalGridLinesBrush="#D9E0EA"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.ScrollUnit="Pixel"
+                                  VirtualizingPanel.VirtualizationMode="Recycling"
+                                  EnableRowVirtualization="True"
+                                  EnableColumnVirtualization="True"
                                   MinHeight="90">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="机号" Binding="{Binding Id}" Width="70"/>
-                                <DataGridTextColumn Header="工艺名称" Binding="{Binding Name}" Width="140"/>
-                                <DataGridTextColumn Header="工序1" Binding="{Binding Step1}" Width="90"/>
-                                <DataGridTextColumn Header="工序2" Binding="{Binding Step2}" Width="90"/>
-                                <DataGridTextColumn Header="工序3" Binding="{Binding Step3}" Width="90"/>
-                                <DataGridTextColumn Header="工序4" Binding="{Binding Step4}" Width="90"/>
-                                <DataGridTextColumn Header="工序5" Binding="{Binding Step5}" Width="90"/>
-                                <DataGridTextColumn Header="工序6" Binding="{Binding Step6}" Width="90"/>
-                                <DataGridTextColumn Header="工序7" Binding="{Binding Step7}" Width="90"/>
-                                <DataGridTextColumn Header="工序8" Binding="{Binding Step8}" Width="90"/>
-                                <DataGridTextColumn Header="工序9" Binding="{Binding Step9}" Width="90"/>
-                                <DataGridTextColumn Header="工序10" Binding="{Binding Step10}" Width="90"/>
+                                <DataGridTextColumn Header="机号" Binding="{Binding Id}" Width="70" />
+                                <DataGridTextColumn Header="工艺名称" Binding="{Binding Name}" Width="140" />
+                                <DataGridTextColumn Header="工序1" Binding="{Binding Step1}" Width="90" />
+                                <DataGridTextColumn Header="工序2" Binding="{Binding Step2}" Width="90" />
+                                <DataGridTextColumn Header="工序3" Binding="{Binding Step3}" Width="90" />
+                                <DataGridTextColumn Header="工序4" Binding="{Binding Step4}" Width="90" />
+                                <DataGridTextColumn Header="工序5" Binding="{Binding Step5}" Width="90" />
+                                <DataGridTextColumn Header="工序6" Binding="{Binding Step6}" Width="90" />
+                                <DataGridTextColumn Header="工序7" Binding="{Binding Step7}" Width="90" />
+                                <DataGridTextColumn Header="工序8" Binding="{Binding Step8}" Width="90" />
+                                <DataGridTextColumn Header="工序9" Binding="{Binding Step9}" Width="90" />
+                                <DataGridTextColumn Header="工序10" Binding="{Binding Step10}" Width="90" />
                             </DataGrid.Columns>
                         </DataGrid>
 
-                       
+
                     </Grid>
                 </ScrollViewer>
             </Grid>
@@ -59,9 +65,9 @@
 
         <Border Grid.Column="1" Margin="8,0,0,0" BorderBrush="#BFC8D6" BorderThickness="1" Background="White">
             <StackPanel Margin="8">
-                <Button Content="添加工艺" Height="34" Margin="0,0,0,8" Click="AddProcess_click"/>
-                <Button Content="编辑工艺" Height="34" Margin="0,0,0,8"/>
-                <Button Content="删除工艺" Height="34" Margin="0,0,0,8"/>
+                <Button Content="添加工艺" Height="34" Margin="0,0,0,8" Click="AddProcess_click" />
+                <Button Content="编辑工艺" Height="34" Margin="0,0,0,8" Click="EditProcess_Click" />
+                <Button Content="删除工艺" Height="34" Margin="0,0,0,8" />
             </StackPanel>
         </Border>
     </Grid>

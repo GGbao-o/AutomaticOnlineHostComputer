@@ -10,8 +10,9 @@ public partial class HomeView : UserControl
     {
         InitializeComponent();
     }
+
     /// <summary>
-    /// 任务添加按钮 打开添加任务页面
+    /// 锟斤拷锟斤拷锟斤拷锟接帮拷钮 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷页锟斤拷
     /// </summary>
     /// <param name="sender"></param>
     /// <param name="e"></param>
@@ -23,8 +24,9 @@ public partial class HomeView : UserControl
         };
         dialog.ShowDialog();
     }
+
     /// <summary>
-    /// 线路选取按钮 打开页面
+    /// 锟斤拷路选取锟斤拷钮 锟斤拷页锟斤拷
     /// </summary>
     /// <param name="sender"></param>
     /// <param name="e"></param>

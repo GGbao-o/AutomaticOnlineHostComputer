@@ -1,24 +1,67 @@
+using AutomaticOnlineHostComputer.Infrastructure.Config;
+using AutomaticOnlineHostComputer.Infrastructure.Data;
+using AutomaticOnlineHostComputer.Presentation.ViewModels.Process;
+using AutomaticOnlineHostComputer.Views.Process.Dialogs;
 using System.Windows;
 using System.Windows.Controls;
 
-
-// ÔÚÎÄ¼ş¶¥²¿Ìí¼Ó¶ÔÓ¦µÄÃüÃû¿Õ¼ä
-using AutomaticOnlineHostComputer.Views.Process.Dialogs;  // ¸ù¾İÄãµÄÊµ¼ÊÂ·¾¶µ÷Õû
 namespace AutomaticOnlineHostComputer.Views.Process;
+
 public partial class ProcessManagementView : UserControl
 {
+    private readonly ManagementQueryService _queryService;
+
     public ProcessManagementView()
     {
         InitializeComponent();
+        var connectionString = DbSettingsProvider.GetConnectionString();
+        _queryService = new ManagementQueryService(connectionString);
+        Loaded += async (_, _) => await LoadGridDataAsync();
     }
 
-    private void AddProcess_click(object sender, System.Windows.RoutedEventArgs e)
+    /// <summary>
+    /// å¼‚æ­¥åŠ è½½å·¥è‰ºåˆ—è¡¨ã€‚
+    /// </summary>
+    private async Task LoadGridDataAsync()
     {
-        var dialog = new AddProcessDialog
+        try
         {
-            Owner = Window.GetWindow(this)
-        };
-        dialog.ShowDialog();
-        
+            ProcessGrid.ItemsSource = null;
+            ProcessGrid.ItemsSource = await _queryService.GetProcessRowsAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"åŠ è½½å·¥è‰ºæ•°æ®å¤±è´¥ï¼š{ex.Message}", "é”™è¯¯", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    /// <summary>
+    /// æ–°å¢å·¥è‰ºã€‚
+    /// </summary>
+    private async void AddProcess_click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new AddProcessDialog { Owner = Window.GetWindow(this) };
+        if (dialog.ShowDialog() == true)
+        {
+            await LoadGridDataAsync();
+        }
+    }
+
+    /// <summary>
+    /// ç¼–è¾‘å·¥è‰ºã€‚
+    /// </summary>
+    private async void EditProcess_Click(object sender, RoutedEventArgs e)
+    {
+        if (ProcessGrid.SelectedItem is not ProcessManagementRowVm row)
+        {
+            MessageBox.Show("è¯·å…ˆé€‰ä¸­è¦ç¼–è¾‘çš„å·¥è‰ºã€‚", "æç¤º", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new AddProcessDialog(row) { Owner = Window.GetWindow(this) };
+        if (dialog.ShowDialog() == true)
+        {
+            await LoadGridDataAsync();
+        }
     }
 }

@@ -7,14 +7,36 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>AutomaticOnlineHostComputer</RootNamespace>
     <AssemblyName>AutomaticOnlineHostComputer</AssemblyName>
+    <!-- 关键：不要禁用默认编译项，让 SDK 自动包含所有 .cs 和 .xaml -->
+    <!-- 不设置 EnableDefaultCompileItems 和 EnableDefaultPageItems -->
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="Views\新文件夹\**" />
-    <EmbeddedResource Remove="Views\新文件夹\**" />
-    <None Remove="Views\新文件夹\**" />
-    <Page Remove="Views\新文件夹\**" />
+    <Folder Include="Infrastructure\Data\" />
+    <Folder Include="Presentation\ViewModels\Controller\" />
+    <Folder Include="Presentation\ViewModels\Crane\" />
+    <Folder Include="Presentation\ViewModels\Machine\" />
+    <Folder Include="Presentation\ViewModels\Process\" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Views\Crane\Dialogs\" />
+    <PackageReference Include="MySql.Data" Version="9.7.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- 数据库配置文件，发布/运行时复制到输出目录 -->
+    <None Update="dbsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- 默认包含规则会自动包含项目目录下所有 .cs 和 .xaml 文件，递归子文件夹 -->
+  <!-- 自动排除 bin, obj, .vs, .idea 等临时文件夹 -->
+  <!-- 因此您无需手动编写任何 Compile 或 Page 条目 -->
+
+  <!-- 如果有些文件夹您确实不想包含在项目中（例如备份文件夹），可以取消注释下面的代码 -->
+  <!--
+  <ItemGroup>
+    <Compile Remove="OldBackup\**" />
+    <Page Remove="OldBackup\**" />
+  </ItemGroup>
+  -->
 </Project>

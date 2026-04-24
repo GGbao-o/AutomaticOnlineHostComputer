@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:views="clr-namespace:AutomaticOnlineHostComputer.Views"
         mc:Ignorable="d"
         Title="自动线上位机"
         Width="1200" Height="750"
@@ -11,18 +10,18 @@
         Background="#F0F2F5">
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="34"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="34" />
+            <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <Menu Grid.Row="0" Background="#F7F8FA">
-            <MenuItem Header="主界面" Tag="main" Click="MenuItem_Click"/>
-            <MenuItem Header="天车管理" Tag="crane" Click="MenuItem_Click"/>
-            <MenuItem Header="机器管理" Tag="machine" Click="MenuItem_Click"/>
-            <MenuItem Header="控制器管理" Tag="controller" Click="MenuItem_Click"/>
-            <MenuItem Header="工艺管理" Tag="process" Click="MenuItem_Click"/>
+            <MenuItem Header="主界面" Tag="main" Click="MenuItem_Click" />
+            <MenuItem Header="天车管理" Tag="crane" Click="MenuItem_Click" />
+            <MenuItem Header="机器管理" Tag="machine" Click="MenuItem_Click" />
+            <MenuItem Header="控制器管理" Tag="controller" Click="MenuItem_Click" />
+            <MenuItem Header="工艺管理" Tag="process" Click="MenuItem_Click" />
         </Menu>
 
-        <ContentControl x:Name="ContentHost" Grid.Row="1" Margin="4"/>
+        <ContentControl x:Name="ContentHost" Grid.Row="1" Margin="4" />
     </Grid>
 </Window>
