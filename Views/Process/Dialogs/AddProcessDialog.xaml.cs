@@ -70,8 +70,16 @@ public partial class AddProcessDialog : Window
     private void FillForm(ProcessManagementRowVm row)
     {
         ProcessNameTextBox.Text = row.Name;
-        StepNoTextBox.Text = "1";
-        StepNameTextBox.Text = !string.IsNullOrWhiteSpace(row.Step1) ? row.Step1 : row.Step2;
+        StepNoTextBox.Text = row.StepNo.ToString();
+        StepNameTextBox.Text = !string.IsNullOrWhiteSpace(row.StepName)
+            ? row.StepName
+            : (!string.IsNullOrWhiteSpace(row.Step1) ? row.Step1 : row.Step2);
+        ExecuteTimeTextBox.Text = row.ExecuteTime.ToString();
+        DeviceTextBox.Text = row.Device;
+        MachineNoTextBox.Text = row.MachineNo.ToString();
+        SafePositionTextBox.Text = row.SafePosition;
+        EnabledCheckBox.IsChecked = row.Enabled;
+        ZHomeCheckBox.IsChecked = row.ZAxisBackHome;
     }
 
     private static string RequireText(string? text, string field)

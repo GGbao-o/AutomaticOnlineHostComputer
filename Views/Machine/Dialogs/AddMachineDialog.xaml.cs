@@ -53,47 +53,60 @@ public partial class AddMachineDialog : Window
         }
     }
 
+    /// <summary>
+    /// 将界面字段转换为机器输入模型。
+    /// </summary>
     private AddMachineInput BuildInput()
     {
         return new AddMachineInput
         {
             LineNo = GetLineNo(LineNoComboBox),
-            StationCode = StationCodeTextBox.Text.Trim(),
+            StationCode = string.Empty,
             Name = RequireText(NameTextBox.Text, "机器名称"),
-            TypeName = RequireText(TypeNameTextBox.Text, "机器类型"),
-            AreaName = AreaNameTextBox.Text.Trim(),
-            MachineNo = ParseInt(MachineNoTextBox.Text, "机号"),
-            Ip = IpTextBox.Text.Trim(),
-            Port = ParseInt(PortTextBox.Text, "端口"),
-            X = ParseInt(XTextBox.Text, "X"),
-            Y = ParseInt(YTextBox.Text, "Y"),
-            Z = ParseInt(ZTextBox.Text, "Z"),
+            TypeName = GetComboText(TypeNameComboBox),
+            AreaName = string.Empty,
+            MachineNo = 0,
+            Ip = string.Empty,
+            Port = 0,
+            X = ParseInt(XTextBox.Text, "X坐标"),
+            Y = ParseInt(YTextBox.Text, "Y坐标"),
+            Z = ParseInt(ZTextBox.Text, "Z坐标"),
+            SafeZDown = ParseInt(DownZTextBox.Text, "下降Z坐标"),
+            SafeZUp = ParseInt(UpZTextBox.Text, "上升Z坐标"),
+            AbsolutePos = ParseInt(AbsolutePosTextBox.Text, "绝对坐标"),
             XDis = XDisTextBox.Text.Trim(),
             YDis = YDisTextBox.Text.Trim(),
             ZDis = ZDisTextBox.Text.Trim(),
-            DisShake = ParseInt(DisShakeTextBox.Text, "抖动"),
-            State = GetStateCode(StateComboBox)
+            DisShake = ParseInt(DisShakeTextBox.Text, "抖动距离"),
+            ProcessRange = WorkRangeTextBox.Text.Trim(),
+            State = 1
         };
     }
 
+    /// <summary>
+    /// 编辑时回填页面。
+    /// </summary>
     private void FillForm(MachineManagementRowVm row)
     {
-        SelectComboByText(LineNoComboBox, row.LineNo == 2 ? "2号线" : "1号线");
-        StationCodeTextBox.Text = row.StationCode;
+        SelectComboByText(LineNoComboBox, row.LineNo == 2 ? "二号线" : "一号线");
         NameTextBox.Text = row.Name;
-        TypeNameTextBox.Text = row.TypeName;
-        AreaNameTextBox.Text = row.AreaName;
-        MachineNoTextBox.Text = row.MachineNo.ToString();
-        IpTextBox.Text = row.Ip;
-        PortTextBox.Text = row.Port.ToString();
+        SelectComboByText(TypeNameComboBox, row.TypeName);
         XTextBox.Text = row.X.ToString("0");
         YTextBox.Text = row.Y.ToString("0");
         ZTextBox.Text = row.Z.ToString("0");
+        DownZTextBox.Text = row.SafeZDown.ToString();
+        UpZTextBox.Text = row.SafeZUp.ToString();
+        AbsolutePosTextBox.Text = row.AbsolutePos.ToString();
         XDisTextBox.Text = row.XOffset.ToString("0");
         YDisTextBox.Text = row.YOffset.ToString("0");
         ZDisTextBox.Text = row.ZOffset.ToString("0");
         DisShakeTextBox.Text = row.Shake.ToString("0");
-        SelectComboByText(StateComboBox, row.State);
+        WorkRangeTextBox.Text = row.ProcessRange;
+    }
+
+    private static string GetComboText(ComboBox comboBox)
+    {
+        return (comboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? string.Empty;
     }
 
     private static void SelectComboByText(ComboBox comboBox, string text)
@@ -110,19 +123,8 @@ public partial class AddMachineDialog : Window
 
     private static int GetLineNo(ComboBox comboBox)
     {
-        var text = (comboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "1号线";
-        return text.Contains("2") ? 2 : 1;
-    }
-
-    private static int GetStateCode(ComboBox comboBox)
-    {
-        var text = (comboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "启用";
-        return text switch
-        {
-            "启用" => 1,
-            "检修" => 2,
-            _ => 0
-        };
+        var text = GetComboText(comboBox);
+        return text.Contains("二") || text.Contains("2") ? 2 : 1;
     }
 
     private static string RequireText(string? text, string field)

@@ -66,7 +66,7 @@
             <StackPanel Margin="8">
                 <Button Content="添加机器" Height="34" Margin="0,0,0,8" Click="AddMachine_click" />
                 <Button Content="编辑机器" Height="34" Margin="0,0,0,8" Click="EditMachine_Click" />
-                <Button Content="删除机器" Height="34" Margin="0,0,0,8" />
+                <Button Content="删除机器" Height="34" Margin="0,0,0,8" Click="DeleteMachine_Click" />
                 <Button Content="刷新图标" Height="34" Margin="0,0,0,8" />
             </StackPanel>
         </Border>

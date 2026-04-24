@@ -63,7 +63,7 @@
             <StackPanel Margin="8">
                 <Button Content="添加设备" Height="34" Margin="0,0,0,8" Click="AddController_click" />
                 <Button Content="编辑设备" Height="34" Margin="0,0,0,8" Click="EditController_Click" />
-                <Button Content="删除设备" Height="34" Margin="0,0,0,8" />
+                <Button Content="删除设备" Height="34" Margin="0,0,0,8" Click="DeleteController_Click" />
                 <Button Content="刷新图标" Height="34" Margin="0,0,0,8" />
             </StackPanel>
         </Border>

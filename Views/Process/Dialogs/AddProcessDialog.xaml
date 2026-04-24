@@ -2,51 +2,99 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="添加工艺"
-        Width="560" Height="460"
+        Width="1020" Height="700"
         WindowStartupLocation="CenterOwner"
-        Background="#F0F2F5">
-    <Grid Margin="12">
-        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <Border Background="White" BorderBrush="#BFC8D6" BorderThickness="1" Padding="12">
-            <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+        ResizeMode="CanResize"
+        Background="#E9E9E9">
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-                <TextBlock Text="工艺名称" Margin="0,6" VerticalAlignment="Center"/>
-                <TextBox x:Name="ProcessNameTextBox" Grid.Column="1" Margin="0,6" Width="220" HorizontalAlignment="Left"/>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Row="1" Text="工序编号" Margin="0,6" VerticalAlignment="Center"/>
-                <TextBox x:Name="StepNoTextBox" Grid.Row="1" Grid.Column="1" Margin="0,6" Width="220" HorizontalAlignment="Left"/>
+            <!-- 左侧录入区 -->
+            <Border Grid.Column="0" Background="#E9E9E9" BorderBrush="#D0D0D0" BorderThickness="1" Padding="8">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="82" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="2" Text="工序名称" Margin="0,6" VerticalAlignment="Center"/>
-                <TextBox x:Name="StepNameTextBox" Grid.Row="2" Grid.Column="1" Margin="0,6" Width="220" HorizontalAlignment="Left"/>
+                        <TextBlock Text="工艺名称" Margin="0,8" VerticalAlignment="Center"/>
+                        <TextBox x:Name="ProcessNameTextBox" Grid.Column="1" Margin="4,4,0,4" Height="28"/>
 
-                <TextBlock Grid.Row="3" Text="执行时间(秒)" Margin="0,6" VerticalAlignment="Center"/>
-                <TextBox x:Name="ExecuteTimeTextBox" Grid.Row="3" Grid.Column="1" Margin="0,6" Width="220" HorizontalAlignment="Left" Text="0"/>
+                        <TextBlock Grid.Row="1" Text="工序编号" Margin="0,8" VerticalAlignment="Center"/>
+                        <TextBox x:Name="StepNoTextBox" Grid.Row="1" Grid.Column="1" Margin="4,4,0,4" Height="28"/>
 
-                <TextBlock Grid.Row="4" Text="使用设备" Margin="0,6" VerticalAlignment="Center"/>
-                <TextBox x:Name="DeviceTextBox" Grid.Row="4" Grid.Column="1" Margin="0,6" Width="220" HorizontalAlignment="Left"/>
+                        <TextBlock Grid.Row="2" Text="工序名称" Margin="0,8" VerticalAlignment="Center"/>
+                        <TextBox x:Name="StepNameTextBox" Grid.Row="2" Grid.Column="1" Margin="4,4,0,4" Height="28"/>
 
-                <TextBlock Grid.Row="5" Text="机号" Margin="0,6" VerticalAlignment="Center"/>
-                <TextBox x:Name="MachineNoTextBox" Grid.Row="5" Grid.Column="1" Margin="0,6" Width="220" HorizontalAlignment="Left" Text="0"/>
+                        <TextBlock Grid.Row="3" Text="执行时间" Margin="0,8" VerticalAlignment="Center"/>
+                        <TextBox x:Name="ExecuteTimeTextBox" Grid.Row="3" Grid.Column="1" Margin="4,4,0,4" Height="28" Text="0"/>
 
-                <TextBlock Grid.Row="6" Text="安全位置" Margin="0,6" VerticalAlignment="Center"/>
-                <TextBox x:Name="SafePositionTextBox" Grid.Row="6" Grid.Column="1" Margin="0,6" Width="220" HorizontalAlignment="Left"/>
+                        <TextBlock Grid.Row="4" Text="使用设备" Margin="0,8" VerticalAlignment="Center"/>
+                        <TextBox x:Name="DeviceTextBox" Grid.Row="4" Grid.Column="1" Margin="4,4,0,4" Height="28"/>
 
-                <TextBlock Grid.Row="7" Text="工序使能" Margin="0,6" VerticalAlignment="Center"/>
-                <CheckBox x:Name="EnabledCheckBox" Grid.Row="7" Grid.Column="1" Margin="0,6" Content="启用" IsChecked="True"/>
+                        <TextBlock Grid.Row="5" Text="机号" Margin="0,8" VerticalAlignment="Center"/>
+                        <TextBox x:Name="MachineNoTextBox" Grid.Row="5" Grid.Column="1" Margin="4,4,0,4" Height="28" Text="0"/>
 
-                <TextBlock Grid.Row="8" Text="Z回原点" Margin="0,6" VerticalAlignment="Center"/>
-                <CheckBox x:Name="ZHomeCheckBox" Grid.Row="8" Grid.Column="1" Margin="0,6" Content="回原点" IsChecked="True"/>
-            </Grid>
-        </Border>
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
-            <Button Content="确认" Width="90" Height="32" Margin="0,0,8,0" Click="Save_Click"/>
-            <Button Content="取消" Width="90" Height="32" Click="Close_Click"/>
-        </StackPanel>
+                        <TextBlock Grid.Row="6" Text="安全位置" Margin="0,8" VerticalAlignment="Center"/>
+                        <TextBox x:Name="SafePositionTextBox" Grid.Row="6" Grid.Column="1" Margin="4,4,0,4" Height="28"/>
+
+                        <TextBlock Grid.Row="7" Text="工序使能" Margin="0,8" VerticalAlignment="Center"/>
+                        <CheckBox x:Name="EnabledCheckBox" Grid.Row="7" Grid.Column="1" Margin="4,8,0,4" Content="启用" IsChecked="True"/>
+
+                        <TextBlock Grid.Row="8" Text="Z轴回零" Margin="0,8" VerticalAlignment="Center"/>
+                        <CheckBox x:Name="ZHomeCheckBox" Grid.Row="8" Grid.Column="1" Margin="4,8,0,4" Content="回零" IsChecked="True"/>
+
+                        <StackPanel Grid.Row="9" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,12,0,0" HorizontalAlignment="Center">
+                            <Button Content="确定" Width="88" Height="34" Margin="0,0,10,0" Click="Save_Click"/>
+                            <Button Content="取消" Width="88" Height="34" Click="Close_Click"/>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </Border>
+
+            <!-- 右侧工艺步骤预览 -->
+            <Border Grid.Column="2" BorderBrush="#F08C3A" BorderThickness="1" Background="#E9E9E9">
+                <DataGrid Margin="0"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          IsReadOnly="True"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="All"
+                          HorizontalGridLinesBrush="#D0D0D0"
+                          VerticalGridLinesBrush="#D0D0D0"
+                          Background="#E9E9E9">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="工艺名称" Binding="{Binding ProcessName}" Width="*" />
+                        <DataGridTextColumn Header="工序编号" Binding="{Binding StepNo}" Width="*" />
+                        <DataGridTextColumn Header="工序名称" Binding="{Binding StepName}" Width="*" />
+                        <DataGridTextColumn Header="执行时间" Binding="{Binding ExecuteTime}" Width="*" />
+                        <DataGridTextColumn Header="设备" Binding="{Binding Device}" Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

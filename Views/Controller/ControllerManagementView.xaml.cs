@@ -10,12 +10,14 @@ namespace AutomaticOnlineHostComputer.Views.Controller;
 public partial class ControllerManagementView : UserControl
 {
     private readonly ManagementQueryService _queryService;
+    private readonly ManagementCommandService _commandService;
 
     public ControllerManagementView()
     {
         InitializeComponent();
         var connectionString = DbSettingsProvider.GetConnectionString();
         _queryService = new ManagementQueryService(connectionString);
+        _commandService = new ManagementCommandService(connectionString);
         Loaded += async (_, _) => await LoadGridDataAsync();
     }
 
@@ -62,6 +64,32 @@ public partial class ControllerManagementView : UserControl
         if (dialog.ShowDialog() == true)
         {
             await LoadGridDataAsync();
+        }
+    }
+
+    /// <summary>
+    /// 删除控制器（带确认）。
+    /// </summary>
+    private async void DeleteController_Click(object sender, RoutedEventArgs e)
+    {
+        if (ControllerGrid.SelectedItem is not ControllerManagementRowVm row)
+        {
+            MessageBox.Show("请先选中要删除的控制器。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show($"确认删除控制器【{row.Name}】吗？", "删除确认", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        try
+        {
+            await _commandService.DeleteControllerAsync(row.SourceId);
+            await LoadGridDataAsync();
+            MessageBox.Show("删除成功。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"删除控制器失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 }

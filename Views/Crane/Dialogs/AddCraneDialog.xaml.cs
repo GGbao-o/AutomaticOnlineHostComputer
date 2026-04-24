@@ -11,18 +11,12 @@ public partial class AddCraneDialog : Window
     private readonly ManagementCommandService _commandService;
     private readonly int? _editId;
 
-    /// <summary>
-    /// 新增模式。
-    /// </summary>
     public AddCraneDialog()
     {
         InitializeComponent();
         _commandService = new ManagementCommandService(DbSettingsProvider.GetConnectionString());
     }
 
-    /// <summary>
-    /// 编辑模式（回填数据）。
-    /// </summary>
     public AddCraneDialog(CraneManagementRowVm row) : this()
     {
         _editId = row.SourceId;
@@ -30,9 +24,6 @@ public partial class AddCraneDialog : Window
         FillForm(row);
     }
 
-    /// <summary>
-    /// 保存（新增/编辑复用）。
-    /// </summary>
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -56,9 +47,6 @@ public partial class AddCraneDialog : Window
         }
     }
 
-    /// <summary>
-    /// 表单转输入模型。
-    /// </summary>
     private AddCraneInput BuildInput()
     {
         return new AddCraneInput
@@ -75,13 +63,19 @@ public partial class AddCraneDialog : Window
             OriginY = ParseLong(OriginYTextBox.Text, "原点Y"),
             OriginZ = ParseLong(OriginZTextBox.Text, "原点Z"),
             Width = ParseLong(WidthTextBox.Text, "天车宽度"),
-            WorkSta = GetStateCode(WorkStaComboBox)
+            AbsXOffset = ParseInt(AbsXOffsetTextBox.Text, "绝对位置偏移"),
+            RatioX = ParseDouble(RatioXTextBox.Text, "X轴减速比"),
+            RatioY = ParseDouble(RatioYTextBox.Text, "Y轴减速比"),
+            RatioZ = ParseDouble(RatioZTextBox.Text, "Z轴减速比"),
+            StartX = ParseLong(StartXTextBox.Text, "X轴起始位置"),
+            EndX = ParseLong(EndXTextBox.Text, "X轴结束位置"),
+            LimitZP = ParseLong(LimitZPTextBox.Text, "Z轴正限位"),
+            LimitZN = ParseLong(LimitZNTextBox.Text, "Z轴负限位"),
+            PulseX = ParseDouble(XPulseTextBox.Text, "X轴螺距"),
+            WorkSta = GetStateCode()
         };
     }
 
-    /// <summary>
-    /// 编辑模式回填。
-    /// </summary>
     private void FillForm(CraneManagementRowVm row)
     {
         SelectComboByText(LineNoComboBox, row.LineNo == 2 ? "2号线" : "1号线");
@@ -96,7 +90,18 @@ public partial class AddCraneDialog : Window
         OriginYTextBox.Text = row.Y.ToString("0");
         OriginZTextBox.Text = row.Z.ToString("0");
         WidthTextBox.Text = row.Width.ToString("0");
-        SelectComboByText(WorkStaComboBox, row.State);
+
+        AbsXOffsetTextBox.Text = row.AbsXOffset.ToString();
+        RatioXTextBox.Text = row.RatioX.ToString("0.###");
+        RatioYTextBox.Text = row.RatioY.ToString("0.###");
+        RatioZTextBox.Text = row.RatioZ.ToString("0.###");
+        StartXTextBox.Text = row.StartX.ToString();
+        EndXTextBox.Text = row.EndX.ToString();
+        LimitZPTextBox.Text = row.LimitZP.ToString();
+        LimitZNTextBox.Text = row.LimitZN.ToString();
+        XPulseTextBox.Text = row.PulseX.ToString("0.###");
+
+        SetStateByText(row.State);
     }
 
     private static void SelectComboByText(ComboBox comboBox, string text)
@@ -117,15 +122,27 @@ public partial class AddCraneDialog : Window
         return text.Contains("2") ? 2 : 1;
     }
 
-    private static int GetStateCode(ComboBox comboBox)
+    private int GetStateCode()
     {
-        var text = (comboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "启用";
-        return text switch
+        if (RepairRadio.IsChecked == true) return 2;
+        if (DisableRadio.IsChecked == true) return 0;
+        return 1;
+    }
+
+    private void SetStateByText(string stateText)
+    {
+        if (stateText == "检修")
         {
-            "启用" => 1,
-            "检修" => 2,
-            _ => 0
-        };
+            RepairRadio.IsChecked = true;
+        }
+        else if (stateText == "停用")
+        {
+            DisableRadio.IsChecked = true;
+        }
+        else
+        {
+            EnableRadio.IsChecked = true;
+        }
     }
 
     private static string RequireText(string? text, string field)
@@ -147,6 +164,13 @@ public partial class AddCraneDialog : Window
     {
         if (!long.TryParse(text, out var value))
             throw new InvalidOperationException($"{field}必须是整数。");
+        return value;
+    }
+
+    private static double ParseDouble(string? text, string field)
+    {
+        if (!double.TryParse(text, out var value))
+            throw new InvalidOperationException($"{field}必须是数字。");
         return value;
     }
 

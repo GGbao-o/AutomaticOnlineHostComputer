@@ -10,12 +10,14 @@ namespace AutomaticOnlineHostComputer.Views.Process;
 public partial class ProcessManagementView : UserControl
 {
     private readonly ManagementQueryService _queryService;
+    private readonly ManagementCommandService _commandService;
 
     public ProcessManagementView()
     {
         InitializeComponent();
         var connectionString = DbSettingsProvider.GetConnectionString();
         _queryService = new ManagementQueryService(connectionString);
+        _commandService = new ManagementCommandService(connectionString);
         Loaded += async (_, _) => await LoadGridDataAsync();
     }
 
@@ -62,6 +64,32 @@ public partial class ProcessManagementView : UserControl
         if (dialog.ShowDialog() == true)
         {
             await LoadGridDataAsync();
+        }
+    }
+
+    /// <summary>
+    /// 删除工艺（按选中行的源主键删除）。
+    /// </summary>
+    private async void DeleteProcess_Click(object sender, RoutedEventArgs e)
+    {
+        if (ProcessGrid.SelectedItem is not ProcessManagementRowVm row)
+        {
+            MessageBox.Show("请先选中要删除的工艺。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show($"确认删除工艺【{row.Name}】当前选中步骤吗？", "删除确认", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        try
+        {
+            await _commandService.DeleteProcessStepAsync(row.SourceId);
+            await LoadGridDataAsync();
+            MessageBox.Show("删除成功。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"删除工艺失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 }

@@ -67,7 +67,7 @@
             <StackPanel Margin="8">
                 <Button Content="添加工艺" Height="34" Margin="0,0,0,8" Click="AddProcess_click" />
                 <Button Content="编辑工艺" Height="34" Margin="0,0,0,8" Click="EditProcess_Click" />
-                <Button Content="删除工艺" Height="34" Margin="0,0,0,8" />
+                <Button Content="删除工艺" Height="34" Margin="0,0,0,8" Click="DeleteProcess_Click" />
             </StackPanel>
         </Border>
     </Grid>
