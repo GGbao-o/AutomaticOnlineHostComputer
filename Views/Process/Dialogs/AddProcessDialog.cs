@@ -1,7 +1,8 @@
 ﻿using AutomaticOnlineHostComputer.Infrastructure.Config;
-using AutomaticOnlineHostComputer.Infrastructure.Data;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Process;
 using System.Windows;
+using AutomaticOnlineHostComputer.Domain.Models;
+using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Views.Process.Dialogs;
 
@@ -10,13 +11,18 @@ namespace AutomaticOnlineHostComputer.Views.Process.Dialogs;
 /// </summary>
 public partial class AddProcessDialog : Window
 {
-    private readonly ManagementCommandService _commandService;
+    private readonly ManagementQueryService _queryService;
+    private readonly ManagementInsertService _insertService;
+    private readonly ManagementUpdateService _updateService;
+    private readonly ManagementDeleteService _deleteService;
+
     private readonly int? _editId;
 
     public AddProcessDialog()
     {
         InitializeComponent();
-        _commandService = new ManagementCommandService(DbSettingsProvider.GetConnectionString());
+        _insertService = new ManagementInsertService(DbSettingsProvider.GetConnectionString());
+        _updateService = new ManagementUpdateService(DbSettingsProvider.GetConnectionString());
     }
 
     /// <summary>
@@ -51,11 +57,11 @@ public partial class AddProcessDialog : Window
 
             if (_editId.HasValue)
             {
-                await _commandService.UpdateProcessStepAsync(_editId.Value, input);
+                await _updateService.UpdateProcessStepAsync(_editId.Value, input);
             }
             else
             {
-                await _commandService.AddProcessStepAsync(input);
+                await _insertService.AddProcessStepAsync(input);
             }
 
             DialogResult = true;

@@ -11,13 +11,6 @@
     <!-- 不设置 EnableDefaultCompileItems 和 EnableDefaultPageItems -->
   </PropertyGroup>
   <ItemGroup>
-    <Folder Include="Infrastructure\Data\" />
-    <Folder Include="Presentation\ViewModels\Controller\" />
-    <Folder Include="Presentation\ViewModels\Crane\" />
-    <Folder Include="Presentation\ViewModels\Machine\" />
-    <Folder Include="Presentation\ViewModels\Process\" />
-  </ItemGroup>
-  <ItemGroup>
     <PackageReference Include="MySql.Data" Version="9.7.0" />
   </ItemGroup>
 
@@ -26,6 +19,12 @@
     <None Update="dbsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Views\Process\Dialogs\AddProcessDialog.cs">
+      <DependentUpon>AddProcessDialog.xaml</DependentUpon>
+    </Compile>
   </ItemGroup>
 
   <!-- 默认包含规则会自动包含项目目录下所有 .cs 和 .xaml 文件，递归子文件夹 -->

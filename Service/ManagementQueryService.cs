@@ -5,7 +5,7 @@ using AutomaticOnlineHostComputer.Presentation.ViewModels.Process;
 using MySql.Data.MySqlClient;
 using System.Data.Common;
 
-namespace AutomaticOnlineHostComputer.Infrastructure.Data;
+namespace AutomaticOnlineHostComputer.Service;
 
 /// <summary>
 /// 四个管理页面的数据查询服务。

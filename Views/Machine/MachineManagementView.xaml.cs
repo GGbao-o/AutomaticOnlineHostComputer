@@ -1,16 +1,16 @@
 using AutomaticOnlineHostComputer.Infrastructure.Config;
-using AutomaticOnlineHostComputer.Infrastructure.Data;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Views.Machine.Dialogs;
 using System.Windows;
 using System.Windows.Controls;
+using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Views.Machine;
 
 public partial class MachineManagementView : UserControl
 {
     private readonly ManagementQueryService _queryService;
-    private readonly ManagementCommandService _commandService;
+    private readonly ManagementDeleteService _deleteService;
 
     public MachineManagementView()
     {
@@ -18,7 +18,7 @@ public partial class MachineManagementView : UserControl
 
         var connectionString = DbSettingsProvider.GetConnectionString();
         _queryService = new ManagementQueryService(connectionString);
-        _commandService = new ManagementCommandService(connectionString);
+        _deleteService = new ManagementDeleteService(connectionString);
 
         Loaded += async (_, _) => await LoadGridDataAsync();
     }
@@ -85,7 +85,7 @@ public partial class MachineManagementView : UserControl
 
         try
         {
-            await _commandService.DeleteMachineAsync(row.SourceId);
+            await _deleteService.DeleteMachineAsync(row.SourceId);
             await LoadGridDataAsync();
             MessageBox.Show("删除成功。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
         }

@@ -1,20 +1,25 @@
 using AutomaticOnlineHostComputer.Infrastructure.Config;
-using AutomaticOnlineHostComputer.Infrastructure.Data;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using System.Windows;
 using System.Windows.Controls;
+using AutomaticOnlineHostComputer.Domain.Models;
+using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Views.Machine.Dialogs;
 
 public partial class AddMachineDialog : Window
 {
-    private readonly ManagementCommandService _commandService;
+    private readonly ManagementInsertService _insertService;
+    private readonly ManagementUpdateService _updateService;
+
     private readonly int? _editId;
 
     public AddMachineDialog()
     {
         InitializeComponent();
-        _commandService = new ManagementCommandService(DbSettingsProvider.GetConnectionString());
+        var connectionString = DbSettingsProvider.GetConnectionString();
+        _insertService = new ManagementInsertService(connectionString);
+        _updateService = new ManagementUpdateService(connectionString);
     }
 
     /// <summary>
@@ -37,11 +42,11 @@ public partial class AddMachineDialog : Window
             var input = BuildInput();
             if (_editId.HasValue)
             {
-                await _commandService.UpdateMachineAsync(_editId.Value, input);
+                await _updateService.UpdateMachineAsync(_editId.Value, input);
             }
             else
             {
-                await _commandService.AddMachineAsync(input);
+                await _insertService.AddMachineAsync(input);
             }
 
             DialogResult = true;

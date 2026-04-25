@@ -1,8 +1,9 @@
-﻿using AutomaticOnlineHostComputer.Infrastructure.Config;
-using AutomaticOnlineHostComputer.Infrastructure.Data;
+using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Controller;
 using System.Windows;
 using System.Windows.Controls;
+using AutomaticOnlineHostComputer.Domain.Models;
+using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Views.Controller.Dialogs;
 
@@ -11,13 +12,18 @@ namespace AutomaticOnlineHostComputer.Views.Controller.Dialogs;
 /// </summary>
 public partial class AddControllerDialog : Window
 {
-    private readonly ManagementCommandService _commandService;
+    private readonly ManagementInsertService _insertService;
+    private readonly ManagementUpdateService _updateService;
+
     private readonly int? _editId;
 
     public AddControllerDialog()
     {
         InitializeComponent();
-        _commandService = new ManagementCommandService(DbSettingsProvider.GetConnectionString());
+        var connectionString = DbSettingsProvider.GetConnectionString();
+        //用连接字符串创建“新增服务”实例，后续用于插入数据。
+        _insertService = new ManagementInsertService(connectionString);
+        _updateService = new ManagementUpdateService(connectionString);
     }
 
     /// <summary>
@@ -46,14 +52,14 @@ public partial class AddControllerDialog : Window
                 DeviceNo = ParseInt(DeviceNoTextBox.Text, "设备号"),
                 State = GetStateCode(StateComboBox)
             };
-
+            
             if (_editId.HasValue)
             {
-                await _commandService.UpdateControllerAsync(_editId.Value, input);
+                await _updateService.UpdateControllerAsync(_editId.Value, input);
             }
             else
             {
-                await _commandService.AddControllerAsync(input);
+                await _insertService.AddControllerAsync(input);
             }
 
             DialogResult = true;

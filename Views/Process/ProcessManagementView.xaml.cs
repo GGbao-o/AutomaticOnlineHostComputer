@@ -1,23 +1,23 @@
 using AutomaticOnlineHostComputer.Infrastructure.Config;
-using AutomaticOnlineHostComputer.Infrastructure.Data;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Process;
 using AutomaticOnlineHostComputer.Views.Process.Dialogs;
 using System.Windows;
 using System.Windows.Controls;
+using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Views.Process;
 
 public partial class ProcessManagementView : UserControl
 {
     private readonly ManagementQueryService _queryService;
-    private readonly ManagementCommandService _commandService;
+    private readonly ManagementDeleteService _deleteService;
 
     public ProcessManagementView()
     {
         InitializeComponent();
         var connectionString = DbSettingsProvider.GetConnectionString();
         _queryService = new ManagementQueryService(connectionString);
-        _commandService = new ManagementCommandService(connectionString);
+        _deleteService = new ManagementDeleteService(connectionString);
         Loaded += async (_, _) => await LoadGridDataAsync();
     }
 
@@ -83,7 +83,7 @@ public partial class ProcessManagementView : UserControl
 
         try
         {
-            await _commandService.DeleteProcessStepAsync(row.SourceId);
+            await _deleteService.DeleteProcessStepAsync(row.SourceId);
             await LoadGridDataAsync();
             MessageBox.Show("删除成功。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
         }

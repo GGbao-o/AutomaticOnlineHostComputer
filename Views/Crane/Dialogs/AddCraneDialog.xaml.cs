@@ -1,20 +1,24 @@
 using AutomaticOnlineHostComputer.Infrastructure.Config;
-using AutomaticOnlineHostComputer.Infrastructure.Data;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Crane;
 using System.Windows;
 using System.Windows.Controls;
-
+using AutomaticOnlineHostComputer.Domain.Models;
+using AutomaticOnlineHostComputer.Service;
 namespace AutomaticOnlineHostComputer.Views.Crane.Dialogs;
 
 public partial class AddCraneDialog : Window
 {
-    private readonly ManagementCommandService _commandService;
+    private readonly ManagementInsertService _insertService;
+    private readonly ManagementUpdateService _updateService;
+
     private readonly int? _editId;
 
     public AddCraneDialog()
     {
         InitializeComponent();
-        _commandService = new ManagementCommandService(DbSettingsProvider.GetConnectionString());
+        var connectionString = DbSettingsProvider.GetConnectionString();
+        _insertService = new ManagementInsertService(connectionString);
+        _updateService = new ManagementUpdateService(connectionString);
     }
 
     public AddCraneDialog(CraneManagementRowVm row) : this()
@@ -23,7 +27,11 @@ public partial class AddCraneDialog : Window
         Title = "编辑天车";
         FillForm(row);
     }
-
+/// <summary>
+/// 保存按钮
+/// </summary>
+/// <param name="sender"></param>
+/// <param name="e"></param>
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -31,11 +39,11 @@ public partial class AddCraneDialog : Window
             var input = BuildInput();
             if (_editId.HasValue)
             {
-                await _commandService.UpdateCraneAsync(_editId.Value, input);
+                await _updateService.UpdateCraneAsync(_editId.Value, input);
             }
             else
             {
-                await _commandService.AddCraneAsync(input);
+                await _insertService.AddCraneAsync(input);
             }
 
             DialogResult = true;
