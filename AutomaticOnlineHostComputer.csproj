@@ -12,6 +12,13 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="MySql.Data" Version="9.7.0" />
+    <!--
+      Microsoft.Extensions.DependencyInjection：
+      微软官方 DI（依赖注入）容器库。
+      作用：统一管理对象的创建和生命周期，避免在每个类里手动 new 依赖对象。
+      版本 8.x 与 .NET 8 对应。
+    -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
   </ItemGroup>
 
   <ItemGroup>

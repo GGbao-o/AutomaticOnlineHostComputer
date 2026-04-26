@@ -8,6 +8,7 @@
     ".NETCoreApp,Version=v8.0": {
       "AutomaticOnlineHostComputer/1.0.0": {
         "dependencies": {
+          "Microsoft.Extensions.DependencyInjection": "8.0.1",
           "MySql.Data": "9.7.0"
         },
         "runtime": {
@@ -56,6 +57,25 @@
           "lib/net6.0/K4os.Hash.xxHash.dll": {
             "assemblyVersion": "1.0.8.0",
             "fileVersion": "1.0.8.0"
+          }
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection/8.0.1": {
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2"
+        },
+        "runtime": {
+          "lib/net8.0/Microsoft.Extensions.DependencyInjection.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.1024.46610"
+          }
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions/8.0.2": {
+        "runtime": {
+          "lib/net8.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.1024.46610"
           }
         }
       },
@@ -174,6 +194,20 @@
       "sha512": "sha512-Wp2F7BamQ2Q/7Hk834nV9vRQapgcr8kgv9Jvfm8J3D0IhDqZMMl+a2yxUq5ltJitvXvQfB8W6K4F4fCbw/P6YQ==",
       "path": "k4os.hash.xxhash/1.0.8",
       "hashPath": "k4os.hash.xxhash.1.0.8.nupkg.sha512"
+    },
+    "Microsoft.Extensions.DependencyInjection/8.0.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-BmANAnR5Xd4Oqw7yQ75xOAYODybZQRzdeNucg7kS5wWKd2PNnMdYtJ2Vciy0QLylRmv42DGl5+AFL9izA6F1Rw==",
+      "path": "microsoft.extensions.dependencyinjection/8.0.1",
+      "hashPath": "microsoft.extensions.dependencyinjection.8.0.1.nupkg.sha512"
+    },
+    "Microsoft.Extensions.DependencyInjection.Abstractions/8.0.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-3iE7UF7MQkCv1cxzCahz+Y/guQbTqieyxyaWKhrRO91itI9cOKO76OHeQDahqG4MmW5umr3CcCvGmK92lWNlbg==",
+      "path": "microsoft.extensions.dependencyinjection.abstractions/8.0.2",
+      "hashPath": "microsoft.extensions.dependencyinjection.abstractions.8.0.2.nupkg.sha512"
     },
     "MySql.Data/9.7.0": {
       "type": "package",

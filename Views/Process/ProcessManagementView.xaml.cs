@@ -1,9 +1,9 @@
-using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Process;
+using AutomaticOnlineHostComputer.Service;
 using AutomaticOnlineHostComputer.Views.Process.Dialogs;
+using Microsoft.Extensions.DependencyInjection;
 using System.Windows;
 using System.Windows.Controls;
-using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Views.Process;
 
@@ -15,9 +15,9 @@ public partial class ProcessManagementView : UserControl
     public ProcessManagementView()
     {
         InitializeComponent();
-        var connectionString = DbSettingsProvider.GetConnectionString();
-        _queryService = new ManagementQueryService(connectionString);
-        _deleteService = new ManagementDeleteService(connectionString);
+        // 从全局 DI 容器获取服务，不再手动 new + 读取配置文件
+        _queryService  = App.Services.GetRequiredService<ManagementQueryService>();
+        _deleteService = App.Services.GetRequiredService<ManagementDeleteService>();
         Loaded += async (_, _) => await LoadGridDataAsync();
     }
 

@@ -1,11 +1,16 @@
-using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Controller;
+using AutomaticOnlineHostComputer.Service;
 using AutomaticOnlineHostComputer.Views.Controller.Dialogs;
+using Microsoft.Extensions.DependencyInjection;
 using System.Windows;
 using System.Windows.Controls;
-using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Views.Controller;
+
+/*
+ * 改造说明：与 MachineManagementView 一致——
+ * 服务从 App.Services DI 容器获取，不再手动 new + 读取配置文件。
+ */
 
 public partial class ControllerManagementView : UserControl
 {
@@ -15,15 +20,14 @@ public partial class ControllerManagementView : UserControl
     public ControllerManagementView()
     {
         InitializeComponent();
-        var connectionString = DbSettingsProvider.GetConnectionString();
-        _queryService = new ManagementQueryService(connectionString);
-        _deleteService = new ManagementDeleteService(connectionString);
+
+        _queryService  = App.Services.GetRequiredService<ManagementQueryService>();
+        _deleteService = App.Services.GetRequiredService<ManagementDeleteService>();
+
         Loaded += async (_, _) => await LoadGridDataAsync();
     }
 
-    /// <summary>
-    /// 异步加载控制器列表。
-    /// </summary>
+    /// <summary>异步加载控制器列表。</summary>
     private async Task LoadGridDataAsync()
     {
         try
@@ -37,21 +41,15 @@ public partial class ControllerManagementView : UserControl
         }
     }
 
-    /// <summary>
-    /// 新增控制器。
-    /// </summary>
+    /// <summary>新增控制器。</summary>
     private async void AddController_click(object sender, RoutedEventArgs e)
     {
         var dialog = new AddControllerDialog { Owner = Window.GetWindow(this) };
         if (dialog.ShowDialog() == true)
-        {
             await LoadGridDataAsync();
-        }
     }
 
-    /// <summary>
-    /// 编辑控制器。
-    /// </summary>
+    /// <summary>编辑控制器。</summary>
     private async void EditController_Click(object sender, RoutedEventArgs e)
     {
         if (ControllerGrid.SelectedItem is not ControllerManagementRowVm row)
@@ -62,14 +60,10 @@ public partial class ControllerManagementView : UserControl
 
         var dialog = new AddControllerDialog(row) { Owner = Window.GetWindow(this) };
         if (dialog.ShowDialog() == true)
-        {
             await LoadGridDataAsync();
-        }
     }
 
-    /// <summary>
-    /// 删除控制器（带确认）。
-    /// </summary>
+    /// <summary>删除控制器（带确认）。</summary>
     private async void DeleteController_Click(object sender, RoutedEventArgs e)
     {
         if (ControllerGrid.SelectedItem is not ControllerManagementRowVm row)

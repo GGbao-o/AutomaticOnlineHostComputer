@@ -1,14 +1,38 @@
-using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
+using AutomaticOnlineHostComputer.Service;
 using AutomaticOnlineHostComputer.Views.Machine.Dialogs;
+using Microsoft.Extensions.DependencyInjection;
 using System.Windows;
 using System.Windows.Controls;
-using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Views.Machine;
 
+/*
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+     * ║                     MachineManagementView（改造说明）                    ║
+ * ╠══════════════════════════════════════════════════════════════════════════╣
+ * ║  改造前：                                                                ║
+ * ║    var connectionString = DbSettingsProvider.GetConnectionString();      ║
+ * ║    _queryService  = new ManagementQueryService(connectionString);        ║
+ * ║    _deleteService = new ManagementDeleteService(connectionString);       ║
+ * ║                                                                          ║
+ * ║  问题：每个 View 都重复读取配置文件、手动 new 服务实例，                  ║
+ * ║         违反"单一职责"原则，且无法替换为测试桩（Mock）。                  ║
+ * ║                                                                          ║
+ * ║  改造后：                                                                ║
+ * ║    _queryService  = App.Services.GetRequiredService<ManagementQueryService>();  ║
+ * ║    _deleteService = App.Services.GetRequiredService<ManagementDeleteService>(); ║
+ * ║                                                                          ║
+ * ║  优点：                                                                  ║
+ * ║    • 服务在 App.OnStartup 统一注册，全程序只有一份实例（Singleton）       ║
+ * ║    • View 只关心"用服务"，不关心"怎么创建服务"                           ║
+ * ║    • 连接字符串修改只需改 ServiceCollectionExtensions，其余代码不动      ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
+ */
+
 public partial class MachineManagementView : UserControl
 {
+    // ── 字段从 DI 容器解析，不再手动 new ────────────────────────────────────
     private readonly ManagementQueryService _queryService;
     private readonly ManagementDeleteService _deleteService;
 
@@ -16,9 +40,10 @@ public partial class MachineManagementView : UserControl
     {
         InitializeComponent();
 
-        var connectionString = DbSettingsProvider.GetConnectionString();
-        _queryService = new ManagementQueryService(connectionString);
-        _deleteService = new ManagementDeleteService(connectionString);
+        // GetRequiredService<T>：从全局 DI 容器解析已注册的 Singleton 服务。
+        // 若服务未注册则抛出 InvalidOperationException，便于启动时发现配置问题。
+        _queryService  = App.Services.GetRequiredService<ManagementQueryService>();
+        _deleteService = App.Services.GetRequiredService<ManagementDeleteService>();
 
         Loaded += async (_, _) => await LoadGridDataAsync();
     }
@@ -39,21 +64,15 @@ public partial class MachineManagementView : UserControl
         }
     }
 
-    /// <summary>
-    /// 新增机器。
-    /// </summary>
+    /// <summary>新增机器。</summary>
     private async void AddMachine_click(object sender, RoutedEventArgs e)
     {
         var dialog = new AddMachineDialog { Owner = Window.GetWindow(this) };
         if (dialog.ShowDialog() == true)
-        {
             await LoadGridDataAsync();
-        }
     }
 
-    /// <summary>
-    /// 编辑机器。
-    /// </summary>
+    /// <summary>编辑机器。</summary>
     private async void EditMachine_Click(object sender, RoutedEventArgs e)
     {
         if (MachineGrid.SelectedItem is not MachineManagementRowVm row)
@@ -64,14 +83,10 @@ public partial class MachineManagementView : UserControl
 
         var dialog = new AddMachineDialog(row) { Owner = Window.GetWindow(this) };
         if (dialog.ShowDialog() == true)
-        {
             await LoadGridDataAsync();
-        }
     }
 
-    /// <summary>
-    /// 删除机器（带确认）。
-    /// </summary>
+    /// <summary>删除机器（带确认）。</summary>
     private async void DeleteMachine_Click(object sender, RoutedEventArgs e)
     {
         if (MachineGrid.SelectedItem is not MachineManagementRowVm row)

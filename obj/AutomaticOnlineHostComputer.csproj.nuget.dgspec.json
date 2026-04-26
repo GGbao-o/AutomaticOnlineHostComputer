@@ -46,6 +46,10 @@
         "net8.0-windows7.0": {
           "targetAlias": "net8.0-windows",
           "dependencies": {
+            "Microsoft.Extensions.DependencyInjection": {
+              "target": "Package",
+              "version": "[8.0.1, )"
+            },
             "MySql.Data": {
               "target": "Package",
               "version": "[9.7.0, )"
