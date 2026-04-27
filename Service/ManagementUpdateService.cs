@@ -28,7 +28,7 @@ encoder_ip=@encoder_ip, encoder_port=@encoder_port, encoder_no=@encoder_no,
 origin_x=@origin_x, origin_y=@origin_y, origin_z=@origin_z, width=@width,
 abs_x_offset=@abs_x_offset, ratio_x=@ratio_x, ratio_y=@ratio_y, ratio_z=@ratio_z,
 start_x=@start_x, end_x=@end_x, limit_zp=@limit_zp, limit_zn=@limit_zn, pulse_x=@pulse_x,
-icon_path=@icon_path, work_sta=@work_sta
+work_sta=@work_sta
 WHERE id=@id;";
 
         await using var conn = new MySqlConnection(_connectionString);
@@ -56,7 +56,6 @@ WHERE id=@id;";
         cmd.Parameters.AddWithValue("@limit_zp", input.LimitZP);
         cmd.Parameters.AddWithValue("@limit_zn", input.LimitZN);
         cmd.Parameters.AddWithValue("@pulse_x", input.PulseX);
-        cmd.Parameters.AddWithValue("@icon_path", input.IconPath ?? string.Empty);
         cmd.Parameters.AddWithValue("@work_sta", input.WorkSta);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -72,7 +71,7 @@ line_no=@line_no, station_code=@station_code, name=@name, type_name=@type_name, 
 machine_no=@machine_no, ip=@ip, port=@port, x=@x, y=@y, z=@z,
 safe_z_down=@safe_z_down, safe_z_up=@safe_z_up, absolute_pos=@absolute_pos,
 x_dis=@x_dis, y_dis=@y_dis, z_dis=@z_dis, dis_shake=@dis_shake, process_range=@process_range,
-icon_path=@icon_path, state=@state
+state=@state
 WHERE id=@id;";
 
         await using var conn = new MySqlConnection(_connectionString);
@@ -98,7 +97,6 @@ WHERE id=@id;";
         cmd.Parameters.AddWithValue("@z_dis", input.ZDis ?? "0");
         cmd.Parameters.AddWithValue("@dis_shake", input.DisShake);
         cmd.Parameters.AddWithValue("@process_range", input.ProcessRange ?? string.Empty);
-        cmd.Parameters.AddWithValue("@icon_path", input.IconPath ?? string.Empty);
         cmd.Parameters.AddWithValue("@state", input.State);
         await cmd.ExecuteNonQueryAsync();
     }

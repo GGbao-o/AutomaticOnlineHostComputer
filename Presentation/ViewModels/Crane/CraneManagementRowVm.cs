@@ -50,10 +50,6 @@ public sealed class CraneManagementRowVm : ObservableObject
     /// <summary>天车名称。</summary>
     public string Name { get => _name; set => SetField(ref _name, value); }
 
-    private string _thumb = string.Empty;
-    /// <summary>缩略图路径或名称。</summary>
-    public string Thumb { get => _thumb; set => SetField(ref _thumb, value); }
-
     private double _x;
     /// <summary>X 坐标。</summary>
     public double X { get => _x; set => SetField(ref _x, value); }

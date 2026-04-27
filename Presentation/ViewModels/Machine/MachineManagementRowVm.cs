@@ -59,10 +59,6 @@ public sealed class MachineManagementRowVm : ObservableObject
     /// <summary>机器位置描述。</summary>
     public string Position { get => _position; set => SetField(ref _position, value); }
 
-    private string _thumb = string.Empty;
-    /// <summary>缩略图路径或名称。</summary>
-    public string Thumb { get => _thumb; set => SetField(ref _thumb, value); }
-
     private double _x;
     /// <summary>X 坐标。</summary>
     public double X { get => _x; set => SetField(ref _x, value); }

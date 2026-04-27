@@ -1,18 +1,27 @@
 using System.Windows.Controls;
 using System.Windows;
 using AutomaticOnlineHostComputer.Views.Home.Dialogs;
+using AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AutomaticOnlineHostComputer.Views.Home;
 
 public partial class HomeView : UserControl
 {
+    private readonly HomeViewModel _viewModel;
+
     public HomeView()
     {
         InitializeComponent();
+
+        _viewModel = App.Services.GetRequiredService<HomeViewModel>();
+        DataContext = _viewModel;
+
+        Loaded += async (_, __) => await _viewModel.LoadAsync();
     }
 
     /// <summary>
-    /// �������Ӱ�ť ����������ҳ��
+    /// 添加按钮
     /// </summary>
     /// <param name="sender"></param>
     /// <param name="e"></param>
@@ -26,7 +35,7 @@ public partial class HomeView : UserControl
     }
 
     /// <summary>
-    /// ��·ѡȡ��ť ��ҳ��
+    /// 切换页面
     /// </summary>
     /// <param name="sender"></param>
     /// <param name="e"></param>

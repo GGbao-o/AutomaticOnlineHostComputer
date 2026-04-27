@@ -25,9 +25,9 @@ public sealed class ManagementInsertService
     {
         const string sql = @"
 INSERT INTO crane
-(line_no, crane_no, name, ip, port, encoder_ip, encoder_port, encoder_no, origin_x, origin_y, origin_z, width, abs_x_offset, ratio_x, ratio_y, ratio_z, start_x, end_x, limit_zp, limit_zn, pulse_x, icon_path, work_sta)
+(line_no, crane_no, name, ip, port, encoder_ip, encoder_port, encoder_no, origin_x, origin_y, origin_z, width, abs_x_offset, ratio_x, ratio_y, ratio_z, start_x, end_x, limit_zp, limit_zn, pulse_x, work_sta)
 VALUES
-(@line_no, @crane_no, @name, @ip, @port, @encoder_ip, @encoder_port, @encoder_no, @origin_x, @origin_y, @origin_z, @width, @abs_x_offset, @ratio_x, @ratio_y, @ratio_z, @start_x, @end_x, @limit_zp, @limit_zn, @pulse_x, @icon_path, @work_sta);";
+(@line_no, @crane_no, @name, @ip, @port, @encoder_ip, @encoder_port, @encoder_no, @origin_x, @origin_y, @origin_z, @width, @abs_x_offset, @ratio_x, @ratio_y, @ratio_z, @start_x, @end_x, @limit_zp, @limit_zn, @pulse_x, @work_sta);";
 
         await using var conn = new MySqlConnection(_connectionString);
         await conn.OpenAsync();
@@ -53,7 +53,6 @@ VALUES
         cmd.Parameters.AddWithValue("@limit_zp", input.LimitZP);
         cmd.Parameters.AddWithValue("@limit_zn", input.LimitZN);
         cmd.Parameters.AddWithValue("@pulse_x", input.PulseX);
-        cmd.Parameters.AddWithValue("@icon_path", input.IconPath ?? string.Empty);
         cmd.Parameters.AddWithValue("@work_sta", input.WorkSta);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -65,9 +64,9 @@ VALUES
     {
         const string sql = @"
 INSERT INTO machine
-(line_no, station_code, name, type_name, area_name, machine_no, ip, port, x, y, z, safe_z_down, safe_z_up, absolute_pos, x_dis, y_dis, z_dis, dis_shake, process_range, icon_path, state)
+(line_no, station_code, name, type_name, area_name, machine_no, ip, port, x, y, z, safe_z_down, safe_z_up, absolute_pos, x_dis, y_dis, z_dis, dis_shake, process_range, state)
 VALUES
-(@line_no, @station_code, @name, @type_name, @area_name, @machine_no, @ip, @port, @x, @y, @z, @safe_z_down, @safe_z_up, @absolute_pos, @x_dis, @y_dis, @z_dis, @dis_shake, @process_range, @icon_path, @state);";
+(@line_no, @station_code, @name, @type_name, @area_name, @machine_no, @ip, @port, @x, @y, @z, @safe_z_down, @safe_z_up, @absolute_pos, @x_dis, @y_dis, @z_dis, @dis_shake, @process_range, @state);";
 
         await using var conn = new MySqlConnection(_connectionString);
         await conn.OpenAsync();
@@ -91,7 +90,6 @@ VALUES
         cmd.Parameters.AddWithValue("@z_dis", input.ZDis ?? "0");
         cmd.Parameters.AddWithValue("@dis_shake", input.DisShake);
         cmd.Parameters.AddWithValue("@process_range", input.ProcessRange ?? string.Empty);
-        cmd.Parameters.AddWithValue("@icon_path", input.IconPath ?? string.Empty);
         cmd.Parameters.AddWithValue("@state", input.State);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -103,9 +101,9 @@ VALUES
     {
         const string sql = @"
 INSERT INTO controller
-(name, type_name, ip, port, device_no, icon_path, state)
+(name, type_name, ip, port, device_no, state)
 VALUES
-(@name, @type_name, @ip, @port, @device_no, @icon_path, @state);";
+(@name, @type_name, @ip, @port, @device_no, @state);";
 
         await using var conn = new MySqlConnection(_connectionString);
         await conn.OpenAsync();
@@ -115,7 +113,6 @@ VALUES
         cmd.Parameters.AddWithValue("@ip", input.Ip ?? string.Empty);
         cmd.Parameters.AddWithValue("@port", input.Port);
         cmd.Parameters.AddWithValue("@device_no", input.DeviceNo);
-        cmd.Parameters.AddWithValue("@icon_path", input.IconPath ?? string.Empty);
         cmd.Parameters.AddWithValue("@state", input.State);
         await cmd.ExecuteNonQueryAsync();
     }

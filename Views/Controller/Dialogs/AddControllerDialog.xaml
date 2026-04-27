@@ -60,15 +60,15 @@
                             <ComboBoxItem Content="停用"/>
                         </ComboBox>
 
-                        <TextBlock Grid.Row="6" Text="图标" Margin="0,8" VerticalAlignment="Center"/>
-                        <Grid Grid.Row="6" Grid.Column="1" Margin="4,6,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="96"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Border Width="96" Height="70" Background="#D8D8D8" BorderBrush="#C0C0C0" BorderThickness="1"/>
-                            <Button Grid.Column="1" Content="选择" Width="56" Height="28" HorizontalAlignment="Right" VerticalAlignment="Bottom"/>
-                        </Grid>
+                        <!-- <TextBlock Grid.Row="6" Text="图标" Margin="0,8" VerticalAlignment="Center"/> -->
+                        <!-- <Grid Grid.Row="6" Grid.Column="1" Margin="4,6,0,4"> -->
+                        <!--     <Grid.ColumnDefinitions> -->
+                        <!--         <ColumnDefinition Width="96"/> -->
+                        <!--         <ColumnDefinition Width="*"/> -->
+                        <!--     </Grid.ColumnDefinitions> -->
+                        <!--     <Border Width="96" Height="70" Background="#D8D8D8" BorderBrush="#C0C0C0" BorderThickness="1"/> -->
+                        <!--     <Button Grid.Column="1" Content="选择" Width="56" Height="28" HorizontalAlignment="Right" VerticalAlignment="Bottom"/> -->
+                        <!-- </Grid> -->
 
                         <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,12,0,0" HorizontalAlignment="Center">
                             <Button Content="确定" Width="88" Height="34" Margin="0,0,10,0" Click="Save_Click"/>

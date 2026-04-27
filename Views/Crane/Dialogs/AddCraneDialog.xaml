@@ -109,9 +109,9 @@
                     <TextBlock Grid.Row="8" Text="X轴结束位置" Margin="0,8" VerticalAlignment="Center"/>
                     <TextBox x:Name="EndXTextBox" Grid.Row="8" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
 
-                    <TextBlock Grid.Row="9" Text="图标" Margin="0,8" VerticalAlignment="Center"/>
-                    <Border Grid.Row="9" Grid.Column="1" Width="120" Height="90" Background="#DCDCDC" BorderBrush="#BFBFBF" BorderThickness="1" HorizontalAlignment="Left"/>
-                    <Button Grid.Row="9" Grid.Column="1" Content="选择" Width="60" Height="30" HorizontalAlignment="Right" Margin="0,30,0,0"/>
+                    <!-- <TextBlock Grid.Row="9" Text="图标" Margin="0,8" VerticalAlignment="Center"/> -->
+                    <!-- <Border Grid.Row="9" Grid.Column="1" Width="120" Height="90" Background="#DCDCDC" BorderBrush="#BFBFBF" BorderThickness="1" HorizontalAlignment="Left"/> -->
+                    <!-- <Button Grid.Row="9" Grid.Column="1" Content="选择" Width="60" Height="30" HorizontalAlignment="Right" Margin="0,30,0,0"/> -->
 
                     <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
                         <RadioButton x:Name="EnableRadio" Content="启用" IsChecked="True" Margin="0,0,20,0"/>

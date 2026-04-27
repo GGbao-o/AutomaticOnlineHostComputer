@@ -45,7 +45,7 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="编号" Binding="{Binding Id}" Width="60" />
                                 <DataGridTextColumn Header="天车名称" Binding="{Binding Name}" Width="140" />
-                                <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="110" />
+                                <!-- <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="110" /> -->
                                 <DataGridTextColumn Header="X坐标" Binding="{Binding X}" Width="90" />
                                 <DataGridTextColumn Header="Y坐标" Binding="{Binding Y}" Width="90" />
                                 <DataGridTextColumn Header="Z坐标" Binding="{Binding Z}" Width="90" />

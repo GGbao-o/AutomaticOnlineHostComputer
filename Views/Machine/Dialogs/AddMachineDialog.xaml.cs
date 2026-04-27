@@ -71,8 +71,6 @@ public partial class AddMachineDialog : Window
             TypeName = GetComboText(TypeNameComboBox),
             AreaName = string.Empty,
             MachineNo = 0,
-            Ip = string.Empty,
-            Port = 0,
             X = ParseInt(XTextBox.Text, "X坐标"),
             Y = ParseInt(YTextBox.Text, "Y坐标"),
             Z = ParseInt(ZTextBox.Text, "Z坐标"),
@@ -84,6 +82,8 @@ public partial class AddMachineDialog : Window
             ZDis = ZDisTextBox.Text.Trim(),
             DisShake = ParseInt(DisShakeTextBox.Text, "抖动距离"),
             ProcessRange = WorkRangeTextBox.Text.Trim(),
+            Ip = RequireText(IpTextBox.Text, "IP地址"),
+            Port = ParseInt(PortTextBox.Text, "端口"),
             State = 1
         };
     }
@@ -107,6 +107,8 @@ public partial class AddMachineDialog : Window
         ZDisTextBox.Text = row.ZOffset.ToString("0");
         DisShakeTextBox.Text = row.Shake.ToString("0");
         WorkRangeTextBox.Text = row.ProcessRange;
+        IpTextBox.Text = row.Ip ?? string.Empty;
+        PortTextBox.Text = row.Port.ToString();
     }
 
     private static string GetComboText(ComboBox comboBox)

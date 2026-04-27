@@ -45,7 +45,7 @@
                                 <DataGridTextColumn Header="机号" Binding="{Binding Id}" Width="70" />
                                 <DataGridTextColumn Header="机器名称" Binding="{Binding Name}" Width="150" />
                                 <DataGridTextColumn Header="位置" Binding="{Binding Position}" Width="120" />
-                                <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="120" />
+                                <!-- <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="120" /> -->
                                 <DataGridTextColumn Header="X坐标" Binding="{Binding X}" Width="90" />
                                 <DataGridTextColumn Header="Y坐标" Binding="{Binding Y}" Width="90" />
                                 <DataGridTextColumn Header="Z坐标" Binding="{Binding Z}" Width="90" />

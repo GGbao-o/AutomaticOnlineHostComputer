@@ -24,10 +24,6 @@ public sealed class ControllerManagementRowVm : ObservableObject
     /// <summary>控制器名称。</summary>
     public string Name { get => _name; set => SetField(ref _name, value); }
 
-    private string _thumb = string.Empty;
-    /// <summary>缩略图路径或名称。</summary>
-    public string Thumb { get => _thumb; set => SetField(ref _thumb, value); }
-
     private string _type = string.Empty;
     /// <summary>设备类型。</summary>
     public string Type { get => _type; set => SetField(ref _type, value); }

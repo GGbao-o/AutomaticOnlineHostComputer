@@ -45,7 +45,7 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="机号" Binding="{Binding Id}" Width="70" />
                                 <DataGridTextColumn Header="控制器名称" Binding="{Binding Name}" Width="160" />
-                                <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="120" />
+                                <!-- <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="120" /> -->
                                 <DataGridTextColumn Header="设备类型" Binding="{Binding Type}" Width="120" />
                                 <DataGridTextColumn Header="IP地址" Binding="{Binding Ip}" Width="150" />
                                 <DataGridTextColumn Header="端口" Binding="{Binding Port}" Width="80" />
