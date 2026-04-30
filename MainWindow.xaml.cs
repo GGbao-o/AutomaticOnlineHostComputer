@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        
 
         // 从 DI 容器获取导航服务。
         // 注意：CachedNavigationService 是 Singleton，
@@ -22,6 +23,7 @@ public partial class MainWindow : Window
         _navigationService = App.Services.GetRequiredService<CachedNavigationService>();
 
         // 默认打开主界面（会走缓存逻辑）。
+        Console.WriteLine("MainWindow: 显示默认页面...");
         ContentHost.Content = _navigationService.GetOrCreatePage("main");
     }
 

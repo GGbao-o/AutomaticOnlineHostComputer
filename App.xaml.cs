@@ -39,6 +39,7 @@ public partial class App : Application
     /// </summary>
     protected override void OnStartup(StartupEventArgs e)
     {
+        Console.WriteLine("App.OnStartup: 构建 DI 容器...");
         base.OnStartup(e);
 
         // ── 构建 DI 容器 ──────────────────────────────────────────────────

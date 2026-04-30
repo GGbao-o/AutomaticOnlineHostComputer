@@ -13,11 +13,11 @@ public partial class HomeView : UserControl
     public HomeView()
     {
         InitializeComponent();
-
-        _viewModel = App.Services.GetRequiredService<HomeViewModel>();
-        DataContext = _viewModel;
-
-        Loaded += async (_, __) => await _viewModel.LoadAsync();
+        
+        _viewModel = App.Services.GetRequiredService<HomeViewModel>();//从di容器获取
+        DataContext = _viewModel;//绑定viewmodel
+        
+        Loaded += async (_, __) => await _viewModel.LoadAsync();//窗口加载时候触发
     }
 
     /// <summary>

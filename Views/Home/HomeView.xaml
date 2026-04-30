@@ -52,7 +52,14 @@
                         <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="选择天车" Margin="4" VerticalAlignment="Center" />
-                    <ComboBox Grid.Column="1" Margin="4" MinWidth="120"><ComboBoxItem Content="1号天车" /><ComboBoxItem Content="2号天车" /></ComboBox>
+                    <ComboBox Grid.Column="1" Margin="4" MinWidth="120">
+                        <ComboBoxItem Content="1号天车" />
+                        <ComboBoxItem Content="2号天车" />
+                        <ComboBoxItem Content="3号天车" />
+                        <ComboBoxItem Content="4号天车" />
+                        <ComboBoxItem Content="5号天车" />
+                    </ComboBox>
+                    
                     <CheckBox Grid.Column="2" Content="自动控制" Margin="4" VerticalAlignment="Center" />
                     <TextBlock Grid.Row="1" Text="单次运动距离" Margin="4" VerticalAlignment="Center" />
                     <TextBox Grid.Row="1" Grid.Column="1" Margin="4" Text="1000" />
@@ -76,11 +83,91 @@
                     <TextBlock Text="天车 / 机械手 黄台总览" FontSize="16" FontWeight="Bold" Margin="2,2,2,8" />
 
                     <UniformGrid Columns="5" Margin="0,0,0,6">
-                        <controls:OverviewDeviceCard Title="1-天车" Line1="已连接，已回零" Line2="无任务" Line3="未知" Line4="退避完成" Line5="接线器打开" Btn1="急停X" Btn2="驱动X" Btn3="正极X" Btn4="负极X" Btn5="过速X" Btn6="正极Y" Btn7="负极Y" Btn8="强制X" />
-                        <controls:OverviewDeviceCard Title="2-天车" Line1="已连接，已回零" Line2="无任务" Line3="未知" Line4="退避完成" Line5="接线器打开" Btn1="急停X" Btn2="驱动X" Btn3="正极X" Btn4="负极X" Btn5="过速X" Btn6="正极Y" Btn7="负极Y" Btn8="强制X" />
-                        <controls:OverviewDeviceCard Title="3-天车" Line1="已连接，已回零" Line2="无任务" Line3="未知" Line4="退避完成" Line5="接线器打开" Btn1="急停X" Btn2="驱动X" Btn3="正极X" Btn4="负极X" Btn5="过速X" Btn6="正极Y" Btn7="负极Y" Btn8="强制X" />
-                        <controls:OverviewDeviceCard Title="4-天车" Line1="已连接，已回零" Line2="无任务" Line3="未知" Line4="退避完成" Line5="接线器打开" Btn1="急停X" Btn2="驱动X" Btn3="正极X" Btn4="负极X" Btn5="过速X" Btn6="正极Y" Btn7="负极Y" Btn8="强制X" />
-                        <controls:OverviewDeviceCard Title="5-天车" Line1="已连接，已回零" Line2="无任务" Line3="未知" Line4="退避完成" Line5="接线器打开" Btn1="急停X" Btn2="驱动X" Btn3="正极X" Btn4="负极X" Btn5="过速X" Btn6="正极Y" Btn7="负极Y" Btn8="强制X" />
+                        <!-- 1号线天车前   绑定的HomeViewModel的数据  -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Crane1F.CraneName}"
+                            ConnectedBrush="{Binding Crane1F.ConnectedBrush}"
+                            Line1="{Binding Crane1F.Line1}" Line1Brush="{Binding Crane1F.Line1Brush}"
+                            Line2="{Binding Crane1F.Line2}" Line2Brush="{Binding Crane1F.Line2Brush}"
+                            Line3="{Binding Crane1F.Line3}" Line3Brush="{Binding Crane1F.Line3Brush}"
+                            Line4="{Binding Crane1F.Line4}" Line4Brush="{Binding Crane1F.Line4Brush}"
+                            Line5="{Binding Crane1F.Line5}" Line5Brush="{Binding Crane1F.Line5Brush}"
+                            Btn1="急停"    Btn1Command="{Binding Crane1F.EStopCommand}"
+                            Btn2="伺服断电" Btn2Command="{Binding Crane1F.ServoPowerOffCommand}"
+                            Btn3="伺服通电" Btn3Command="{Binding Crane1F.ServoPowerOnCommand}"
+                            Btn4="清除报警" Btn4Command="{Binding Crane1F.ClearAlarmCommand}"
+                            Btn5="充磁"    Btn5Command="{Binding Crane1F.MagnetOnCommand}"
+                            Btn6="退磁"    Btn6Command="{Binding Crane1F.MagnetOffCommand}"
+                            Btn7="开液盘"  Btn7Command="{Binding Crane1F.DrainOpenCommand}"
+                            Btn8="关液盘"  Btn8Command="{Binding Crane1F.DrainCloseCommand}" />
+                        <!-- 1号线天车后 -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Crane1R.CraneName}"
+                            ConnectedBrush="{Binding Crane1R.ConnectedBrush}"
+                            Line1="{Binding Crane1R.Line1}" Line1Brush="{Binding Crane1R.Line1Brush}"
+                            Line2="{Binding Crane1R.Line2}" Line2Brush="{Binding Crane1R.Line2Brush}"
+                            Line3="{Binding Crane1R.Line3}" Line3Brush="{Binding Crane1R.Line3Brush}"
+                            Line4="{Binding Crane1R.Line4}" Line4Brush="{Binding Crane1R.Line4Brush}"
+                            Line5="{Binding Crane1R.Line5}" Line5Brush="{Binding Crane1R.Line5Brush}"
+                            Btn1="急停"    Btn1Command="{Binding Crane1R.EStopCommand}"
+                            Btn2="伺服断电" Btn2Command="{Binding Crane1R.ServoPowerOffCommand}"
+                            Btn3="伺服通电" Btn3Command="{Binding Crane1R.ServoPowerOnCommand}"
+                            Btn4="清除报警" Btn4Command="{Binding Crane1R.ClearAlarmCommand}"
+                            Btn5="充磁"    Btn5Command="{Binding Crane1R.MagnetOnCommand}"
+                            Btn6="退磁"    Btn6Command="{Binding Crane1R.MagnetOffCommand}"
+                            Btn7="开液盘"  Btn7Command="{Binding Crane1R.DrainOpenCommand}"
+                            Btn8="关液盘"  Btn8Command="{Binding Crane1R.DrainCloseCommand}" />
+                        <!-- 2号线天车前 -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Crane2F.CraneName}"
+                            ConnectedBrush="{Binding Crane2F.ConnectedBrush}"
+                            Line1="{Binding Crane2F.Line1}" Line1Brush="{Binding Crane2F.Line1Brush}"
+                            Line2="{Binding Crane2F.Line2}" Line2Brush="{Binding Crane2F.Line2Brush}"
+                            Line3="{Binding Crane2F.Line3}" Line3Brush="{Binding Crane2F.Line3Brush}"
+                            Line4="{Binding Crane2F.Line4}" Line4Brush="{Binding Crane2F.Line4Brush}"
+                            Line5="{Binding Crane2F.Line5}" Line5Brush="{Binding Crane2F.Line5Brush}"
+                            Btn1="急停"    Btn1Command="{Binding Crane2F.EStopCommand}"
+                            Btn2="伺服断电" Btn2Command="{Binding Crane2F.ServoPowerOffCommand}"
+                            Btn3="伺服通电" Btn3Command="{Binding Crane2F.ServoPowerOnCommand}"
+                            Btn4="清除报警" Btn4Command="{Binding Crane2F.ClearAlarmCommand}"
+                            Btn5="充磁"    Btn5Command="{Binding Crane2F.MagnetOnCommand}"
+                            Btn6="退磁"    Btn6Command="{Binding Crane2F.MagnetOffCommand}"
+                            Btn7="开液盘"  Btn7Command="{Binding Crane2F.DrainOpenCommand}"
+                            Btn8="关液盘"  Btn8Command="{Binding Crane2F.DrainCloseCommand}" />
+                        <!-- 2号线天车后 -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Crane2R.CraneName}"
+                            ConnectedBrush="{Binding Crane2R.ConnectedBrush}"
+                            Line1="{Binding Crane2R.Line1}" Line1Brush="{Binding Crane2R.Line1Brush}"
+                            Line2="{Binding Crane2R.Line2}" Line2Brush="{Binding Crane2R.Line2Brush}"
+                            Line3="{Binding Crane2R.Line3}" Line3Brush="{Binding Crane2R.Line3Brush}"
+                            Line4="{Binding Crane2R.Line4}" Line4Brush="{Binding Crane2R.Line4Brush}"
+                            Line5="{Binding Crane2R.Line5}" Line5Brush="{Binding Crane2R.Line5Brush}"
+                            Btn1="急停"    Btn1Command="{Binding Crane2R.EStopCommand}"
+                            Btn2="伺服断电" Btn2Command="{Binding Crane2R.ServoPowerOffCommand}"
+                            Btn3="伺服通电" Btn3Command="{Binding Crane2R.ServoPowerOnCommand}"
+                            Btn4="清除报警" Btn4Command="{Binding Crane2R.ClearAlarmCommand}"
+                            Btn5="充磁"    Btn5Command="{Binding Crane2R.MagnetOnCommand}"
+                            Btn6="退磁"    Btn6Command="{Binding Crane2R.MagnetOffCommand}"
+                            Btn7="开液盘"  Btn7Command="{Binding Crane2R.DrainOpenCommand}"
+                            Btn8="关液盘"  Btn8Command="{Binding Crane2R.DrainCloseCommand}" />
+                        <!-- 研磨机天车 -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding CraneGL.CraneName}"
+                            ConnectedBrush="{Binding CraneGL.ConnectedBrush}"
+                            Line1="{Binding CraneGL.Line1}" Line1Brush="{Binding CraneGL.Line1Brush}"
+                            Line2="{Binding CraneGL.Line2}" Line2Brush="{Binding CraneGL.Line2Brush}"
+                            Line3="{Binding CraneGL.Line3}" Line3Brush="{Binding CraneGL.Line3Brush}"
+                            Line4="{Binding CraneGL.Line4}" Line4Brush="{Binding CraneGL.Line4Brush}"
+                            Line5="{Binding CraneGL.Line5}" Line5Brush="{Binding CraneGL.Line5Brush}"
+                            Btn1="急停"    Btn1Command="{Binding CraneGL.EStopCommand}"
+                            Btn2="伺服断电" Btn2Command="{Binding CraneGL.ServoPowerOffCommand}"
+                            Btn3="伺服通电" Btn3Command="{Binding CraneGL.ServoPowerOnCommand}"
+                            Btn4="清除报警" Btn4Command="{Binding CraneGL.ClearAlarmCommand}"
+                            Btn5="充磁"    Btn5Command="{Binding CraneGL.MagnetOnCommand}"
+                            Btn6="退磁"    Btn6Command="{Binding CraneGL.MagnetOffCommand}"
+                            Btn7="开液盘"  Btn7Command="{Binding CraneGL.DrainOpenCommand}"
+                            Btn8="关液盘"  Btn8Command="{Binding CraneGL.DrainCloseCommand}" />
                     </UniformGrid>
 
                     <UniformGrid Columns="3" Margin="0,2,0,4">
@@ -120,7 +207,7 @@
                     <controls:StatusCard Grid.Row="1" Grid.Column="14" CardTitle="13下料架1" Status1="{Binding Status1_13,FallbackValue=未知}" Status2="{Binding Status2_13,FallbackValue=无}" IpText="{Binding IpMap[ST013],FallbackValue=未配置IP}" />
                     <controls:StatusCard Grid.Row="1" Grid.Column="15" CardTitle="05机械手2" Status1="{Binding Status1_05,FallbackValue=未知}" Status2="{Binding Status2_05,FallbackValue=无}" IpText="{Binding IpMap[ST005],FallbackValue=未配置IP}" />
                     <controls:StatusCard Grid.Row="1" Grid.Column="16" CardTitle="06机械手3" Status1="{Binding Status1_06,FallbackValue=未知}" Status2="{Binding Status2_06,FallbackValue=无}" IpText="{Binding IpMap[ST006],FallbackValue=未配置IP}" />
-                    <controls:StatusCard Grid.Row="1" Grid.Column="17" CardTitle="15下料架2(研磨机上料架)" Status1="{Binding Status1_15,FallbackValue=未知}" Status2="{Binding Status2_15,FallbackValue=无}" IpText="{Binding IpMap[ST015],FallbackValue=未配置IP}" />
+                    <controls:StatusCard Grid.Row="1" Grid.Column="17" CardTitle="15下料架2(研磨机上料架)" Status1="{Binding Status1_15,FallbackValue=未知}" Status2="{Binding Status2_15,FallbackValue=无}" IpText="{Binding IpMap[ST709],FallbackValue=未配置IP}" />
                     <controls:StatusCard Grid.Row="1" Grid.Column="18" CardTitle="17研磨机上料5" Status1="{Binding Status1_17_5,FallbackValue=未知}" Status2="{Binding Status2_17_5,FallbackValue=无}" IpText="{Binding IpMap[ST175],FallbackValue=未配置IP}" />
                     <controls:StatusCard Grid.Row="1" Grid.Column="19" CardTitle="17研磨机上料6" Status1="{Binding Status1_17_6,FallbackValue=未知}" Status2="{Binding Status2_17_6,FallbackValue=无}" IpText="{Binding IpMap[ST176],FallbackValue=未配置IP}" />
                     <controls:StatusCard Grid.Row="1" Grid.Column="20" CardTitle="17研磨机上料7" Status1="{Binding Status1_17_7,FallbackValue=未知}" Status2="{Binding Status2_17_7,FallbackValue=无}" IpText="{Binding IpMap[ST177],FallbackValue=未配置IP}" />
@@ -128,7 +215,7 @@
                     <controls:StatusCard Grid.Row="1" Grid.Column="22" CardTitle="32研磨机2" Status1="{Binding Status1_32_2,FallbackValue=未知}" Status2="{Binding Status2_32_2,FallbackValue=无}" IpText="{Binding IpMap[ST702],FallbackValue=未配置IP}" />
                     <controls:StatusCard Grid.Row="1" Grid.Column="23" CardTitle="32研磨机3" Status1="{Binding Status1_32_3,FallbackValue=未知}" Status2="{Binding Status2_32_3,FallbackValue=无}" IpText="{Binding IpMap[ST703],FallbackValue=未配置IP}" />
                     <controls:StatusCard Grid.Row="1" Grid.Column="24" CardTitle="32研磨机4" Status1="{Binding Status1_32_4,FallbackValue=未知}" Status2="{Binding Status2_32_4,FallbackValue=无}" IpText="{Binding IpMap[ST704],FallbackValue=未配置IP}" />
-                    <controls:StatusCard Grid.Row="1" Grid.Column="25" CardTitle="17研磨机下料架" Status1="{Binding Status1_17_D,FallbackValue=未知}" Status2="{Binding Status2_17_D,FallbackValue=无}" IpText="{Binding IpMap[ST17D],FallbackValue=未配置IP}" />
+                    <controls:StatusCard Grid.Row="1" Grid.Column="25" CardTitle="17研磨机下料架" Status1="{Binding Status1_17_D,FallbackValue=未知}" Status2="{Binding Status2_17_D,FallbackValue=无}" IpText="{Binding IpMap[ST710],FallbackValue=未配置IP}" />
 
                     <controls:StatusCard Grid.Row="2" Grid.Column="3" CardTitle="12货叉2(上料架2)" Status1="{Binding Status1_12,FallbackValue=未知}" Status2="{Binding Status2_12,FallbackValue=无}" IpText="{Binding IpMap[ST012],FallbackValue=未配置IP}" />
                     <controls:StatusCard Grid.Row="2" Grid.Column="4" CardTitle="25二号双头镗" Status1="{Binding Status1_25,FallbackValue=未知}" Status2="{Binding Status2_25,FallbackValue=无}" IpText="{Binding IpMap[ST402],FallbackValue=未配置IP}" />
