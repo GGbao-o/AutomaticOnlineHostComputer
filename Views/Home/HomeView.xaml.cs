@@ -14,6 +14,7 @@ public partial class HomeView : UserControl
     {
         InitializeComponent();
         
+        //从DI容器获取HomeViewModel实例，并绑定到DataContext
         _viewModel = App.Services.GetRequiredService<HomeViewModel>();//从di容器获取
         DataContext = _viewModel;//绑定viewmodel
         
