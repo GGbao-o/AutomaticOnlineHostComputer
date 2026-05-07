@@ -31,12 +31,20 @@
                     <Button Content="启动二号线" Width="90" Height="30" Margin="2" />
                     <Button Content="启动研磨" Width="84" Height="30" Margin="2" />
                 </StackPanel>
-                <DataGrid Grid.Row="1" Margin="6" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" HeadersVisibility="Column">
+                <DataGrid Grid.Row="1" Margin="6" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column"
+                          ItemsSource="{Binding TaskRows}">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="编号" Binding="{Binding Id}" Width="*" />
-                        <DataGridTextColumn Header="当前工序" Binding="{Binding Step}" Width="*" />
-                        <DataGridTextColumn Header="工件状态" Binding="{Binding State}" Width="*" />
-                        <DataGridTextColumn Header="交互" Binding="{Binding Action}" Width="80" />
+                        <DataGridTextColumn Header="版号" Binding="{Binding PlateNo}" Width="120" />
+                        <DataGridTextColumn Header="序号" Binding="{Binding Sequence}" Width="70" />
+                        <DataGridTextColumn Header="当前工序" Binding="{Binding Step}" Width="100" />
+                        <DataGridTextColumn Header="工件状态" Binding="{Binding State}" Width="100" />
+                        <DataGridTemplateColumn Header="交互" Width="90">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Button Content="{Binding ActionText}" Command="{Binding ToggleRunCommand}" Height="26" Margin="2" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
                     </DataGrid.Columns>
                 </DataGrid>
             </Grid>
@@ -58,7 +66,7 @@
 
                     <TextBlock Grid.Column="2" Margin="4" VerticalAlignment="Center"
                                Text="{Binding ManualControl.SelectedCraneDisplay}" TextWrapping="Wrap" />
-                    <TextBlock Grid.Row="1" Text="单次运动距离(脉冲)" Margin="4" VerticalAlignment="Center" />
+                    <TextBlock Grid.Row="1" Text="单次运动距离(mm)" Margin="4" VerticalAlignment="Center" />
                     <TextBox Grid.Row="1" Grid.Column="1" Margin="4"
                              Text="{Binding ManualControl.StepDistance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     <TextBlock Grid.Row="1" Grid.Column="2" Margin="4" VerticalAlignment="Center"
@@ -68,19 +76,23 @@
                     <UniformGrid Grid.Row="3" Grid.ColumnSpan="3" Columns="4" Margin="2">
                         <Button Content="X+" Margin="2" Height="32" Command="{Binding ManualControl.XPlusCommand}" />
                         <Button Content="X-" Margin="2" Height="32" Command="{Binding ManualControl.XMinusCommand}" />
-                        <Button Content="停止运动" Margin="2" Height="32" Command="{Binding ManualControl.StopCommand}" />
-                        <Button Content="X回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeXCommand}" />
+                        <Button Content="减速停止" Margin="2" Height="32" Command="{Binding ManualControl.StopCommand}" />
+                        <Button Content="急停" Margin="2" Height="32" Command="{Binding ManualControl.EStopCommand}" />
                         <Button Content="Y+" Margin="2" Height="32" Command="{Binding ManualControl.YPlusCommand}" />
                         <Button Content="Y-" Margin="2" Height="32" Command="{Binding ManualControl.YMinusCommand}" />
+                        <Button Content="X回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeXCommand}" />
                         <Button Content="Y回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeYCommand}" />
-                        <Button Content="清除故障" Margin="2" Height="32" Command="{Binding ManualControl.ClearFaultCommand}" />
                         <Button Content="Z+" Margin="2" Height="32" Command="{Binding ManualControl.ZPlusCommand}" />
                         <Button Content="Z-" Margin="2" Height="32" Command="{Binding ManualControl.ZMinusCommand}" />
                         <Button Content="Z回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeZCommand}" />
+                        <Button Content="清除报警" Margin="2" Height="32" Command="{Binding ManualControl.ClearFaultCommand}" />
+                        <Button Content="伺服通电" Margin="2" Height="32" Command="{Binding ManualControl.ServoPowerOnCommand}" />
+                        <Button Content="伺服断电" Margin="2" Height="32" Command="{Binding ManualControl.ServoPowerOffCommand}" />
                         <Button Content="磁铁吸合" Margin="2" Height="32" Command="{Binding ManualControl.MagnetOnCommand}" />
-                        <Button Content="接触器打开" Margin="2" Height="32" Command="{Binding ManualControl.DrainOpenCommand}" />
-                        <Button Content="接触器关闭" Margin="2" Height="32" Command="{Binding ManualControl.DrainCloseCommand}" />
                         <Button Content="磁铁释放" Margin="2" Height="32" Command="{Binding ManualControl.MagnetOffCommand}" />
+                        <Button Content="接液盘打开" Margin="2" Height="32" Command="{Binding ManualControl.DrainOpenCommand}" />
+                        <Button Content="接液盘关闭" Margin="2" Height="32" Command="{Binding ManualControl.DrainCloseCommand}" />
+                        <Border Margin="2" />
                         <Border Margin="2" />
                     </UniformGrid>
                     <TextBlock Grid.Row="4" Grid.ColumnSpan="3" Text="日志关键字：[CraneManualVM] / [CraneService] / [ModbusTcpClient]" Margin="6,10,6,0" FontWeight="Bold" />
@@ -182,9 +194,56 @@
                     </UniformGrid>
 
                     <UniformGrid Columns="3" Margin="0,2,0,4">
-                        <controls:OverviewDeviceCard Title="1-机械手" Line1="已连接，已回零" Line2="无任务" Line3="未知" Line4="退避完成" Line5="接线器打开" Btn1="急停Y" Btn2="驱动Y" Btn3="正极Y" Btn4="负极Y" Btn5="过速Y" Btn6="正极Z" Btn7="负极Z" Btn8="强制Y" />
-                        <controls:OverviewDeviceCard Title="2-机械手" Line1="已连接，已回零" Line2="无任务" Line3="未知" Line4="退避完成" Line5="接线器打开" Btn1="急停Y" Btn2="驱动Y" Btn3="正极Y" Btn4="负极Y" Btn5="过速Y" Btn6="正极Z" Btn7="负极Z" Btn8="强制Y" />
-                        <controls:OverviewDeviceCard Title="3-机械手" Line1="已连接，已回零" Line2="无任务" Line3="未知" Line4="退避完成" Line5="接线器打开" Btn1="急停Y" Btn2="驱动Y" Btn3="正极Y" Btn4="负极Y" Btn5="过速Y" Btn6="正极Z" Btn7="负极Z" Btn8="强制Y" />
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Manipulator1.Name}"
+                            ConnectedBrush="{Binding Manipulator1.ConnectedBrush}"
+                            Line1="{Binding Manipulator1.Line1}" Line1Brush="{Binding Manipulator1.Line1Brush}"
+                            Line2="{Binding Manipulator1.Line2}" Line2Brush="{Binding Manipulator1.Line2Brush}"
+                            Line3="{Binding Manipulator1.Line3}" Line3Brush="{Binding Manipulator1.Line3Brush}"
+                            Line4="{Binding Manipulator1.Line4}" Line4Brush="{Binding Manipulator1.Line4Brush}"
+                            Line5="{Binding Manipulator1.Line5}" Line5Brush="{Binding Manipulator1.Line5Brush}"
+                            Btn1="急停" Btn1Command="{Binding Manipulator1.EStopCommand}"
+                            Btn2="伺服通电" Btn2Command="{Binding Manipulator1.ServoPowerOnCommand}"
+                            Btn3="伺服断电" Btn3Command="{Binding Manipulator1.ServoPowerOffCommand}"
+                            Btn4="清除报警" Btn4Command="{Binding Manipulator1.ClearAlarmCommand}"
+                            Btn5="Y+" Btn5Command="{Binding Manipulator1.YPlusCommand}"
+                            Btn6="Y-" Btn6Command="{Binding Manipulator1.YMinusCommand}"
+                            Btn7="Z+" Btn7Command="{Binding Manipulator1.ZPlusCommand}"
+                            Btn8="Z-" Btn8Command="{Binding Manipulator1.ZMinusCommand}" />
+
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Manipulator2.Name}"
+                            ConnectedBrush="{Binding Manipulator2.ConnectedBrush}"
+                            Line1="{Binding Manipulator2.Line1}" Line1Brush="{Binding Manipulator2.Line1Brush}"
+                            Line2="{Binding Manipulator2.Line2}" Line2Brush="{Binding Manipulator2.Line2Brush}"
+                            Line3="{Binding Manipulator2.Line3}" Line3Brush="{Binding Manipulator2.Line3Brush}"
+                            Line4="{Binding Manipulator2.Line4}" Line4Brush="{Binding Manipulator2.Line4Brush}"
+                            Line5="{Binding Manipulator2.Line5}" Line5Brush="{Binding Manipulator2.Line5Brush}"
+                            Btn1="急停" Btn1Command="{Binding Manipulator2.EStopCommand}"
+                            Btn2="伺服通电" Btn2Command="{Binding Manipulator2.ServoPowerOnCommand}"
+                            Btn3="伺服断电" Btn3Command="{Binding Manipulator2.ServoPowerOffCommand}"
+                            Btn4="清除报警" Btn4Command="{Binding Manipulator2.ClearAlarmCommand}"
+                            Btn5="Y+" Btn5Command="{Binding Manipulator2.YPlusCommand}"
+                            Btn6="Y-" Btn6Command="{Binding Manipulator2.YMinusCommand}"
+                            Btn7="Z+" Btn7Command="{Binding Manipulator2.ZPlusCommand}"
+                            Btn8="Z-" Btn8Command="{Binding Manipulator2.ZMinusCommand}" />
+
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Manipulator3.Name}"
+                            ConnectedBrush="{Binding Manipulator3.ConnectedBrush}"
+                            Line1="{Binding Manipulator3.Line1}" Line1Brush="{Binding Manipulator3.Line1Brush}"
+                            Line2="{Binding Manipulator3.Line2}" Line2Brush="{Binding Manipulator3.Line2Brush}"
+                            Line3="{Binding Manipulator3.Line3}" Line3Brush="{Binding Manipulator3.Line3Brush}"
+                            Line4="{Binding Manipulator3.Line4}" Line4Brush="{Binding Manipulator3.Line4Brush}"
+                            Line5="{Binding Manipulator3.Line5}" Line5Brush="{Binding Manipulator3.Line5Brush}"
+                            Btn1="急停" Btn1Command="{Binding Manipulator3.EStopCommand}"
+                            Btn2="伺服通电" Btn2Command="{Binding Manipulator3.ServoPowerOnCommand}"
+                            Btn3="伺服断电" Btn3Command="{Binding Manipulator3.ServoPowerOffCommand}"
+                            Btn4="清除报警" Btn4Command="{Binding Manipulator3.ClearAlarmCommand}"
+                            Btn5="Y+" Btn5Command="{Binding Manipulator3.YPlusCommand}"
+                            Btn6="Y-" Btn6Command="{Binding Manipulator3.YMinusCommand}"
+                            Btn7="Z+" Btn7Command="{Binding Manipulator3.ZPlusCommand}"
+                            Btn8="Z-" Btn8Command="{Binding Manipulator3.ZMinusCommand}" />
                     </UniformGrid>
                 </StackPanel>
             </ScrollViewer>

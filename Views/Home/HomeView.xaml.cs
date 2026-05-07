@@ -32,7 +32,12 @@ public partial class HomeView : UserControl
         {
             Owner = Window.GetWindow(this)
         };
-        dialog.ShowDialog();
+
+        var result = dialog.ShowDialog();
+        if (result == true && dialog.CreatedTask != null)
+        {
+            _viewModel.AddTask(dialog.CreatedTask);
+        }
     }
 
     /// <summary>
