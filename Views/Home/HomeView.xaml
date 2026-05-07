@@ -52,27 +52,38 @@
                         <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="选择天车" Margin="4" VerticalAlignment="Center" />
-                    <ComboBox Grid.Column="1" Margin="4" MinWidth="120">
-                        <ComboBoxItem Content="1号天车" />
-                        <ComboBoxItem Content="2号天车" />
-                        <ComboBoxItem Content="3号天车" />
-                        <ComboBoxItem Content="4号天车" />
-                        <ComboBoxItem Content="5号天车" />
-                    </ComboBox>
-                    
-                    <CheckBox Grid.Column="2" Content="自动控制" Margin="4" VerticalAlignment="Center" />
-                    <TextBlock Grid.Row="1" Text="单次运动距离" Margin="4" VerticalAlignment="Center" />
-                    <TextBox Grid.Row="1" Grid.Column="1" Margin="4" Text="1000" />
-                    <CheckBox Grid.Row="1" Grid.Column="2" Content="手动控制" Margin="4" VerticalAlignment="Center" />
-                    <TextBlock Grid.Row="2" Text="工件长度" Margin="4" VerticalAlignment="Center" />
-                    <TextBox Grid.Row="2" Grid.Column="1" Margin="4" />
+                    <ComboBox Grid.Column="1" Margin="4" MinWidth="140"
+                              ItemsSource="{Binding ManualControl.CraneNumbers}"
+                              SelectedItem="{Binding ManualControl.SelectedCraneNo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                    <TextBlock Grid.Column="2" Margin="4" VerticalAlignment="Center"
+                               Text="{Binding ManualControl.SelectedCraneDisplay}" TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="1" Text="单次运动距离(脉冲)" Margin="4" VerticalAlignment="Center" />
+                    <TextBox Grid.Row="1" Grid.Column="1" Margin="4"
+                             Text="{Binding ManualControl.StepDistance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Grid.Row="1" Grid.Column="2" Margin="4" VerticalAlignment="Center"
+                               Text="手动控制模式" />
+                    <TextBlock Grid.Row="2" Text="手动动作" Margin="4" VerticalAlignment="Center" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Margin="4" Text="所有动作均输出控制台日志" Foreground="#B45309" />
                     <UniformGrid Grid.Row="3" Grid.ColumnSpan="3" Columns="4" Margin="2">
-                        <Button Content="X+" Margin="2" Height="32" /><Button Content="X-" Margin="2" Height="32" /><Button Content="停止运动" Margin="2" Height="32" /><Button Content="回原点" Margin="2" Height="32" />
-                        <Button Content="Y+" Margin="2" Height="32" /><Button Content="Y-" Margin="2" Height="32" /><Button Content="编码器归零" Margin="2" Height="32" /><Button Content="回零停止" Margin="2" Height="32" />
-                        <Button Content="Z+" Margin="2" Height="32" /><Button Content="Z-" Margin="2" Height="32" /><Button Content="磁铁吸合" Margin="2" Height="32" /><Button Content="磁铁释放" Margin="2" Height="32" />
-                        <Button Content="急停恢复" Margin="2" Height="32" /><Button Content="清除故障" Margin="2" Height="32" /><Button Content="接触器打开" Margin="2" Height="32" /><Button Content="接触器关闭" Margin="2" Height="32" />
+                        <Button Content="X+" Margin="2" Height="32" Command="{Binding ManualControl.XPlusCommand}" />
+                        <Button Content="X-" Margin="2" Height="32" Command="{Binding ManualControl.XMinusCommand}" />
+                        <Button Content="停止运动" Margin="2" Height="32" Command="{Binding ManualControl.StopCommand}" />
+                        <Button Content="X回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeXCommand}" />
+                        <Button Content="Y+" Margin="2" Height="32" Command="{Binding ManualControl.YPlusCommand}" />
+                        <Button Content="Y-" Margin="2" Height="32" Command="{Binding ManualControl.YMinusCommand}" />
+                        <Button Content="Y回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeYCommand}" />
+                        <Button Content="清除故障" Margin="2" Height="32" Command="{Binding ManualControl.ClearFaultCommand}" />
+                        <Button Content="Z+" Margin="2" Height="32" Command="{Binding ManualControl.ZPlusCommand}" />
+                        <Button Content="Z-" Margin="2" Height="32" Command="{Binding ManualControl.ZMinusCommand}" />
+                        <Button Content="Z回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeZCommand}" />
+                        <Button Content="磁铁吸合" Margin="2" Height="32" Command="{Binding ManualControl.MagnetOnCommand}" />
+                        <Button Content="接触器打开" Margin="2" Height="32" Command="{Binding ManualControl.DrainOpenCommand}" />
+                        <Button Content="接触器关闭" Margin="2" Height="32" Command="{Binding ManualControl.DrainCloseCommand}" />
+                        <Button Content="磁铁释放" Margin="2" Height="32" Command="{Binding ManualControl.MagnetOffCommand}" />
+                        <Border Margin="2" />
                     </UniformGrid>
-                    <TextBlock Grid.Row="4" Grid.ColumnSpan="3" Text="激光测距: -1" Margin="6,10,6,0" FontWeight="Bold" />
+                    <TextBlock Grid.Row="4" Grid.ColumnSpan="3" Text="日志关键字：[CraneManualVM] / [CraneService] / [ModbusTcpClient]" Margin="6,10,6,0" FontWeight="Bold" />
                 </Grid>
             </ScrollViewer>
         </Border>
