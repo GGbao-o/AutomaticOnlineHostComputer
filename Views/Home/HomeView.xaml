@@ -37,6 +37,7 @@
                         <DataGridTextColumn Header="版号" Binding="{Binding PlateNo}" Width="120" />
                         <DataGridTextColumn Header="序号" Binding="{Binding Sequence}" Width="70" />
                         <DataGridTextColumn Header="当前工序" Binding="{Binding Step}" Width="100" />
+                        <DataGridTextColumn Header="工序" Binding="{Binding ProcessType}" Width="120" />
                         <DataGridTextColumn Header="工件状态" Binding="{Binding State}" Width="100" />
                         <DataGridTemplateColumn Header="交互" Width="90">
                             <DataGridTemplateColumn.CellTemplate>

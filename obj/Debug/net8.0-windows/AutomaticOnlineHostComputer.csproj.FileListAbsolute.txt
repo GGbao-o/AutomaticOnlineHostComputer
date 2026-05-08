@@ -66,3 +66,4 @@ D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlineHostComputer_MarkupCompile.lref
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Controls\OverviewDeviceCard.baml
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Controls\OverviewDeviceCard.g.cs
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlineHostComputer.sourcelink.json
