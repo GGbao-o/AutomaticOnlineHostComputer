@@ -60,13 +60,14 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="选择天车" Margin="4" VerticalAlignment="Center" />
-                    <ComboBox Grid.Column="1" Margin="4" MinWidth="140"
-                              ItemsSource="{Binding ManualControl.CraneNumbers}"
-                              SelectedItem="{Binding ManualControl.SelectedCraneNo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Text="选择设备" Margin="4" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="1" Margin="4" MinWidth="160"
+                              ItemsSource="{Binding ManualControl.DeviceItems}"
+                              DisplayMemberPath="DisplayName"
+                              SelectedItem="{Binding ManualControl.SelectedDevice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                     <TextBlock Grid.Column="2" Margin="4" VerticalAlignment="Center"
-                               Text="{Binding ManualControl.SelectedCraneDisplay}" TextWrapping="Wrap" />
+                               Text="{Binding ManualControl.SelectedDeviceDisplay}" TextWrapping="Wrap" />
                     <TextBlock Grid.Row="1" Text="单次运动距离(mm)" Margin="4" VerticalAlignment="Center" />
                     <TextBox Grid.Row="1" Grid.Column="1" Margin="4"
                              Text="{Binding ManualControl.StepDistance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
@@ -75,13 +76,13 @@
                     <TextBlock Grid.Row="2" Text="手动动作" Margin="4" VerticalAlignment="Center" />
                     <TextBlock Grid.Row="2" Grid.Column="1" Margin="4" Text="所有动作均输出控制台日志" Foreground="#B45309" />
                     <UniformGrid Grid.Row="3" Grid.ColumnSpan="3" Columns="4" Margin="2">
-                        <Button Content="X+" Margin="2" Height="32" Command="{Binding ManualControl.XPlusCommand}" />
-                        <Button Content="X-" Margin="2" Height="32" Command="{Binding ManualControl.XMinusCommand}" />
+                        <Button Content="X+" Margin="2" Height="32" Command="{Binding ManualControl.XPlusCommand}" IsEnabled="{Binding ManualControl.IsCraneSelected}" />
+                        <Button Content="X-" Margin="2" Height="32" Command="{Binding ManualControl.XMinusCommand}" IsEnabled="{Binding ManualControl.IsCraneSelected}" />
                         <Button Content="减速停止" Margin="2" Height="32" Command="{Binding ManualControl.StopCommand}" />
                         <Button Content="急停" Margin="2" Height="32" Command="{Binding ManualControl.EStopCommand}" />
                         <Button Content="Y+" Margin="2" Height="32" Command="{Binding ManualControl.YPlusCommand}" />
                         <Button Content="Y-" Margin="2" Height="32" Command="{Binding ManualControl.YMinusCommand}" />
-                        <Button Content="X回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeXCommand}" />
+                        <Button Content="X回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeXCommand}" IsEnabled="{Binding ManualControl.IsCraneSelected}" />
                         <Button Content="Y回原点" Margin="2" Height="32" Command="{Binding ManualControl.HomeYCommand}" />
                         <Button Content="Z+" Margin="2" Height="32" Command="{Binding ManualControl.ZPlusCommand}" />
                         <Button Content="Z-" Margin="2" Height="32" Command="{Binding ManualControl.ZMinusCommand}" />
@@ -89,10 +90,10 @@
                         <Button Content="清除报警" Margin="2" Height="32" Command="{Binding ManualControl.ClearFaultCommand}" />
                         <Button Content="伺服通电" Margin="2" Height="32" Command="{Binding ManualControl.ServoPowerOnCommand}" />
                         <Button Content="伺服断电" Margin="2" Height="32" Command="{Binding ManualControl.ServoPowerOffCommand}" />
-                        <Button Content="磁铁吸合" Margin="2" Height="32" Command="{Binding ManualControl.MagnetOnCommand}" />
-                        <Button Content="磁铁释放" Margin="2" Height="32" Command="{Binding ManualControl.MagnetOffCommand}" />
-                        <Button Content="接液盘打开" Margin="2" Height="32" Command="{Binding ManualControl.DrainOpenCommand}" />
-                        <Button Content="接液盘关闭" Margin="2" Height="32" Command="{Binding ManualControl.DrainCloseCommand}" />
+                        <Button Content="磁铁吸合" Margin="2" Height="32" Command="{Binding ManualControl.MagnetOnCommand}" IsEnabled="{Binding ManualControl.IsCraneSelected}" />
+                        <Button Content="磁铁释放" Margin="2" Height="32" Command="{Binding ManualControl.MagnetOffCommand}" IsEnabled="{Binding ManualControl.IsCraneSelected}" />
+                        <Button Content="接液盘打开" Margin="2" Height="32" Command="{Binding ManualControl.DrainOpenCommand}" IsEnabled="{Binding ManualControl.IsCraneSelected}" />
+                        <Button Content="接液盘关闭" Margin="2" Height="32" Command="{Binding ManualControl.DrainCloseCommand}" IsEnabled="{Binding ManualControl.IsCraneSelected}" />
                         <Border Margin="2" />
                         <Border Margin="2" />
                     </UniformGrid>
