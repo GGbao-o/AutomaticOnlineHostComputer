@@ -771,284 +771,444 @@
                         Grid.Row="1"
                         Grid.Column="0"
                         CardTitle="01总上料架"
-                        IpText="{Binding IpMap[ST001], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_01, FallbackValue=未知}"
-                        Status2="{Binding Status2_01, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST001].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST001].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST001].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST001].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST001].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST001].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="1"
                         CardTitle="02机械手1"
-                        IpText="{Binding IpMap[ST002], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_02, FallbackValue=未知}"
-                        Status2="{Binding Status2_02, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST002].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST002].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST002].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST002].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST002].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST002].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="3"
                         CardTitle="11货叉1(上料架1)"
-                        IpText="{Binding IpMap[ST011], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_11, FallbackValue=未知}"
-                        Status2="{Binding Status2_11, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST011].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST011].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST011].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST011].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST011].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST011].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="4"
                         CardTitle="18一号双头镗"
-                        IpText="{Binding IpMap[ST401], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_18, FallbackValue=未知}"
-                        Status2="{Binding Status2_18, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST401].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST401].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST401].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST401].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST401].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST401].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="5"
                         CardTitle="19一号打号机"
-                        IpText="{Binding IpMap[ST501], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_19, FallbackValue=未知}"
-                        Status2="{Binding Status2_19, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST501].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST501].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST501].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST501].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST501].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST501].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="6"
                         CardTitle="03中转站1"
-                        IpText="{Binding IpMap[ST031], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_03_1, FallbackValue=未知}"
-                        Status2="{Binding Status2_03_1, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST031].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST031].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST031].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST031].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST031].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST031].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="7"
                         CardTitle="03中转站2"
-                        IpText="{Binding IpMap[ST032], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_03_2, FallbackValue=未知}"
-                        Status2="{Binding Status2_03_2, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST032].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST032].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST032].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST032].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST032].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST032].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="8"
                         CardTitle="03中转站3"
-                        IpText="{Binding IpMap[ST033], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_03_3, FallbackValue=未知}"
-                        Status2="{Binding Status2_03_3, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST033].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST033].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST033].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST033].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST033].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST033].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="9"
                         CardTitle="20一号斜床"
-                        IpText="{Binding IpMap[ST601], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_20, FallbackValue=未知}"
-                        Status2="{Binding Status2_20, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST601].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST601].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST601].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST601].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST601].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST601].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="10"
                         CardTitle="21二号斜床"
-                        IpText="{Binding IpMap[ST602], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_21, FallbackValue=未知}"
-                        Status2="{Binding Status2_21, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST602].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST602].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST602].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST602].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST602].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST602].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="11"
                         CardTitle="22三号斜床"
-                        IpText="{Binding IpMap[ST603], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_22, FallbackValue=未知}"
-                        Status2="{Binding Status2_22, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST603].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST603].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST603].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST603].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST603].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST603].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="12"
                         CardTitle="23四号斜床"
-                        IpText="{Binding IpMap[ST604], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_23, FallbackValue=未知}"
-                        Status2="{Binding Status2_23, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST604].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST604].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST604].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST604].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST604].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST604].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="13"
                         CardTitle="24五号斜床"
-                        IpText="{Binding IpMap[ST605], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_24, FallbackValue=未知}"
-                        Status2="{Binding Status2_24, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST605].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST605].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST605].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST605].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST605].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST605].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="14"
                         CardTitle="13下料架1"
-                        IpText="{Binding IpMap[ST013], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_13, FallbackValue=未知}"
-                        Status2="{Binding Status2_13, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST013].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST013].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST013].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST013].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST013].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST013].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="15"
                         CardTitle="05机械手2"
-                        IpText="{Binding IpMap[ST005], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_05, FallbackValue=未知}"
-                        Status2="{Binding Status2_05, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST005].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST005].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST005].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST005].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST005].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST005].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="16"
                         CardTitle="06机械手3"
-                        IpText="{Binding IpMap[ST006], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_06, FallbackValue=未知}"
-                        Status2="{Binding Status2_06, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST006].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST006].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST006].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST006].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST006].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST006].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="17"
                         CardTitle="15下料架2(研磨机上料架)"
-                        IpText="{Binding IpMap[ST709], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_15, FallbackValue=未知}"
-                        Status2="{Binding Status2_15, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST709].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST709].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST709].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST709].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST709].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST709].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="18"
                         CardTitle="17研磨机上料5"
-                        IpText="{Binding IpMap[ST175], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_17_5, FallbackValue=未知}"
-                        Status2="{Binding Status2_17_5, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST175].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST175].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST175].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST175].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST175].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST175].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="19"
                         CardTitle="17研磨机上料6"
-                        IpText="{Binding IpMap[ST176], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_17_6, FallbackValue=未知}"
-                        Status2="{Binding Status2_17_6, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST176].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST176].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST176].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST176].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST176].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST176].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="20"
                         CardTitle="17研磨机上料7"
-                        IpText="{Binding IpMap[ST177], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_17_7, FallbackValue=未知}"
-                        Status2="{Binding Status2_17_7, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST177].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST177].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST177].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST177].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST177].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST177].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="21"
                         CardTitle="32研磨机1"
-                        IpText="{Binding IpMap[ST701], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_32_1, FallbackValue=未知}"
-                        Status2="{Binding Status2_32_1, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST701].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST701].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST701].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST701].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST701].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST701].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="22"
                         CardTitle="32研磨机2"
-                        IpText="{Binding IpMap[ST702], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_32_2, FallbackValue=未知}"
-                        Status2="{Binding Status2_32_2, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST702].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST702].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST702].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST702].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST702].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST702].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="23"
                         CardTitle="32研磨机3"
-                        IpText="{Binding IpMap[ST703], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_32_3, FallbackValue=未知}"
-                        Status2="{Binding Status2_32_3, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST703].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST703].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST703].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST703].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST703].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST703].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="24"
                         CardTitle="32研磨机4"
-                        IpText="{Binding IpMap[ST704], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_32_4, FallbackValue=未知}"
-                        Status2="{Binding Status2_32_4, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST704].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST704].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST704].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST704].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST704].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST704].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="25"
                         CardTitle="17研磨机下料架"
-                        IpText="{Binding IpMap[ST710], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_17_D, FallbackValue=未知}"
-                        Status2="{Binding Status2_17_D, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST710].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST710].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST710].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST710].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST710].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST710].Status2Brush, FallbackValue=Black}"
+                        />
 
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="3"
                         CardTitle="12货叉2(上料架2)"
-                        IpText="{Binding IpMap[ST012], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_12, FallbackValue=未知}"
-                        Status2="{Binding Status2_12, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST012].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST012].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST012].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST012].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST012].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST012].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="4"
                         CardTitle="25二号双头镗"
-                        IpText="{Binding IpMap[ST402], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_25, FallbackValue=未知}"
-                        Status2="{Binding Status2_25, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST402].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST402].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST402].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST402].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST402].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST402].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="5"
                         CardTitle="26二号打号机"
-                        IpText="{Binding IpMap[ST502], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_26, FallbackValue=未知}"
-                        Status2="{Binding Status2_26, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST502].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST502].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST502].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST502].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST502].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST502].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="6"
                         CardTitle="04中转站4"
-                        IpText="{Binding IpMap[ST041], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_04_4, FallbackValue=未知}"
-                        Status2="{Binding Status2_04_4, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST041].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST041].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST041].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST041].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST041].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST041].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="7"
                         CardTitle="04中转站5"
-                        IpText="{Binding IpMap[ST042], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_04_5, FallbackValue=未知}"
-                        Status2="{Binding Status2_04_5, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST042].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST042].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST042].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST042].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST042].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST042].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="8"
                         CardTitle="04中转站6"
-                        IpText="{Binding IpMap[ST043], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_04_6, FallbackValue=未知}"
-                        Status2="{Binding Status2_04_6, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST043].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST043].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST043].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST043].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST043].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST043].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="9"
                         CardTitle="27六号斜床"
-                        IpText="{Binding IpMap[ST606], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_27, FallbackValue=未知}"
-                        Status2="{Binding Status2_27, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST606].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST606].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST606].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST606].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST606].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST606].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="10"
                         CardTitle="28七号斜床"
-                        IpText="{Binding IpMap[ST607], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_28, FallbackValue=未知}"
-                        Status2="{Binding Status2_28, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST607].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST607].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST607].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST607].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST607].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST607].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="11"
                         CardTitle="29八号斜床"
-                        IpText="{Binding IpMap[ST608], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_29, FallbackValue=未知}"
-                        Status2="{Binding Status2_29, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST608].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST608].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST608].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST608].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST608].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST608].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="12"
                         CardTitle="30九号斜床"
-                        IpText="{Binding IpMap[ST609], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_30, FallbackValue=未知}"
-                        Status2="{Binding Status2_30, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST609].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST609].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST609].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST609].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST609].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST609].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="13"
                         CardTitle="31十号斜床"
-                        IpText="{Binding IpMap[ST610], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_31, FallbackValue=未知}"
-                        Status2="{Binding Status2_31, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST610].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST610].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST610].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST610].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST610].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST610].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="14"
                         CardTitle="14下料架3"
-                        IpText="{Binding IpMap[ST014], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_14, FallbackValue=未知}"
-                        Status2="{Binding Status2_14, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST014].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST014].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST014].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST014].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST014].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST014].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="17"
                         CardTitle="16下料架4"
-                        IpText="{Binding IpMap[ST016], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_16, FallbackValue=未知}"
-                        Status2="{Binding Status2_16, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST016].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST016].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST016].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST016].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST016].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST016].Status2Brush, FallbackValue=Black}"
+                        />
 
                     <controls:StatusCard
                         Grid.Row="3"
                         Grid.Column="14"
                         CardTitle="07动平衡上料架"
-                        IpText="{Binding IpMap[ST007], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_07, FallbackValue=未知}"
-                        Status2="{Binding Status2_07, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST007].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST007].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST007].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST007].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST007].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST007].Status2Brush, FallbackValue=Black}"
+                        />
                     <controls:StatusCard
                         Grid.Row="3"
                         Grid.Column="17"
                         CardTitle="08动平衡下料架"
-                        IpText="{Binding IpMap[ST008], FallbackValue=未配置IP}"
-                        Status1="{Binding Status1_08, FallbackValue=未知}"
-                        Status2="{Binding Status2_08, FallbackValue=无}" />
+                        IpText="{Binding StationCards[ST008].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST008].Status1, FallbackValue=未知}"
+                        Status2="{Binding StationCards[ST008].Status2, FallbackValue=无}"
+                        ConnectedBrush="{Binding StationCards[ST008].ConnectedBrush, FallbackValue=Gray}"
+                        Status1Brush="{Binding StationCards[ST008].Status1Brush, FallbackValue=Black}"
+                        Status2Brush="{Binding StationCards[ST008].Status2Brush, FallbackValue=Black}"
+                        />
                 </Grid>
             </ScrollViewer>
         </Border>
