@@ -59,8 +59,27 @@ public sealed class CraneManagementRowVm : ObservableObject
     public double Y { get => _y; set => SetField(ref _y, value); }
 
     private double _z;
-    /// <summary>Z 坐标。</summary>
+    /// <summary>Z 坐标（原点标定值）。</summary>
     public double Z { get => _z; set => SetField(ref _z, value); }
+
+    // ── 当前位置（从PLC实时读取，D5018/D5022/D5025）─────────────
+
+    private long? _currentX;
+    /// <summary>当前 X 坐标（PLC 实时值 D5018~D5019）。编辑后可直接写入 D3102 触发绝对移动 → TODO 需确认坐标系对齐。</summary>
+    public long? CurrentX { get => _currentX; set { if (SetField(ref _currentX, value)) { OnPropertyChanged(nameof(DeltaX)); OnPropertyChanged(nameof(DeltaY)); OnPropertyChanged(nameof(DeltaZ)); } } }
+
+    private int? _currentY;
+    public int? CurrentY { get => _currentY; set { if (SetField(ref _currentY, value)) { OnPropertyChanged(nameof(DeltaX)); OnPropertyChanged(nameof(DeltaY)); OnPropertyChanged(nameof(DeltaZ)); } } }
+
+    private int? _currentZ;
+    public int? CurrentZ { get => _currentZ; set { if (SetField(ref _currentZ, value)) { OnPropertyChanged(nameof(DeltaX)); OnPropertyChanged(nameof(DeltaY)); OnPropertyChanged(nameof(DeltaZ)); } } }
+
+    /// <summary>X 偏移 = 标定X - 当前X（天车距原点多远）</summary>
+    public string DeltaX => CurrentX.HasValue ? (X - CurrentX.Value).ToString("+#;-#;0") : "—";
+    /// <summary>Y 偏移</summary>
+    public string DeltaY => CurrentY.HasValue ? (Y - CurrentY.Value).ToString("+#;-#;0") : "—";
+    /// <summary>Z 偏移</summary>
+    public string DeltaZ => CurrentZ.HasValue ? (Z - CurrentZ.Value).ToString("+#;-#;0") : "—";
 
     private string _ip = string.Empty;
     /// <summary>IP 地址。</summary>

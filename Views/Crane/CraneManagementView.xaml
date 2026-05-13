@@ -46,10 +46,16 @@
                                 <DataGridTextColumn Header="编号" Binding="{Binding Id}" Width="60" />
                                 <DataGridTextColumn Header="天车名称" Binding="{Binding Name}" Width="140" />
                                 <!-- <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="110" /> -->
-                                <DataGridTextColumn Header="X坐标" Binding="{Binding X}" Width="90" />
-                                <DataGridTextColumn Header="Y坐标" Binding="{Binding Y}" Width="90" />
-                                <DataGridTextColumn Header="Z坐标" Binding="{Binding Z}" Width="90" />
-                                <DataGridTextColumn Header="IP地址" Binding="{Binding Ip}" Width="140" />
+                                <DataGridTextColumn Header="标定X" Binding="{Binding X}" Width="70" />
+                                <DataGridTextColumn Header="标定Y" Binding="{Binding Y}" Width="70" />
+                                <DataGridTextColumn Header="标定Z" Binding="{Binding Z}" Width="70" />
+                                <DataGridTextColumn Header="当前X" Binding="{Binding CurrentX}" Width="80" />
+                                <DataGridTextColumn Header="当前Y" Binding="{Binding CurrentY}" Width="80" />
+                                <DataGridTextColumn Header="当前Z" Binding="{Binding CurrentZ}" Width="80" />
+                                <DataGridTextColumn Header="ΔX" Binding="{Binding DeltaX}" Width="60" />
+                                <DataGridTextColumn Header="ΔY" Binding="{Binding DeltaY}" Width="60" />
+                                <DataGridTextColumn Header="ΔZ" Binding="{Binding DeltaZ}" Width="60" />
+                                <DataGridTextColumn Header="IP地址" Binding="{Binding Ip}" Width="130" />
                                 <DataGridTextColumn Header="天车端口" Binding="{Binding Port}" Width="100" />
                                 <DataGridTextColumn Header="编码器IP" Binding="{Binding EncoderIp}" Width="140" />
                                 <DataGridTextColumn Header="编码器端口" Binding="{Binding EncoderPort}" Width="100" />

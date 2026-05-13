@@ -1,130 +1,436 @@
-<Window x:Class="AutomaticOnlineHostComputer.Views.Crane.Dialogs.AddCraneDialog"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="添加天车"
-        Width="980" Height="640"
-        WindowStartupLocation="CenterOwner"
-        Background="#F0F0F0">
+<Window
+    x:Class="AutomaticOnlineHostComputer.Views.Crane.Dialogs.AddCraneDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="添加天车"
+    Width="980"
+    Height="640"
+    Background="#F0F0F0"
+    WindowStartupLocation="CenterOwner">
     <Grid Margin="8">
         <Grid.RowDefinitions>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Background="#F5F5F5" BorderBrush="#BFBFBF" BorderThickness="1" Padding="10">
+        <Border
+            Padding="10"
+            Background="#F5F5F5"
+            BorderBrush="#BFBFBF"
+            BorderThickness="1">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <!-- 左侧 -->
+                <!--  左侧  -->
                 <Grid Grid.Column="0" Margin="0,0,18,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="90"/>
-                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="90" />
+                        <ColumnDefinition Width="220" />
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock Text="添加位置" Margin="0,8" VerticalAlignment="Center"/>
-                    <ComboBox x:Name="LineNoComboBox" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left">
-                        <ComboBoxItem Content="1号线" IsSelected="True"/>
-                        <ComboBoxItem Content="2号线"/>
+                    <TextBlock
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="添加位置" />
+                    <ComboBox
+                        x:Name="LineNoComboBox"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left">
+                        <ComboBoxItem Content="1号线" IsSelected="True" />
+                        <ComboBoxItem Content="2号线" />
                     </ComboBox>
 
-                    <TextBlock Grid.Row="1" Text="天车编号" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="CraneNoTextBox" Grid.Row="1" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="1"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="天车编号" />
+                    <TextBox
+                        x:Name="CraneNoTextBox"
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="2" Text="天车名称" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="CraneNameTextBox" Grid.Row="2" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="2"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="天车名称" />
+                    <TextBox
+                        x:Name="CraneNameTextBox"
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="3" Text="IP地址" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="IpTextBox" Grid.Row="3" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="3"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="IP地址" />
+                    <TextBox
+                        x:Name="IpTextBox"
+                        Grid.Row="3"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="4" Text="天车端口" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="PortTextBox" Grid.Row="4" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="4"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="天车端口" />
+                    <TextBox
+                        x:Name="PortTextBox"
+                        Grid.Row="4"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="5" Text="编码器IP" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="EncoderIpTextBox" Grid.Row="5" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="5"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="编码器IP" />
+                    <TextBox
+                        x:Name="EncoderIpTextBox"
+                        Grid.Row="5"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="6" Text="编码器端口" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="EncoderPortTextBox" Grid.Row="6" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="6"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="编码器端口" />
+                    <TextBox
+                        x:Name="EncoderPortTextBox"
+                        Grid.Row="6"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="7" Text="编码器机号" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="EncoderNoTextBox" Grid.Row="7" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="7"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="编码器机号" />
+                    <TextBox
+                        x:Name="EncoderNoTextBox"
+                        Grid.Row="7"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="8" Text="绝对位置偏移" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="AbsXOffsetTextBox" Grid.Row="8" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="8"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="绝对位置偏移" />
+                    <TextBox
+                        x:Name="AbsXOffsetTextBox"
+                        Grid.Row="8"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="9" Text="Z轴正限位" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="LimitZPTextBox" Grid.Row="9" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="9"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="Z轴正限位" />
+                    <TextBox
+                        x:Name="LimitZPTextBox"
+                        Grid.Row="9"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="10" Text="Z轴负限位" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="LimitZNTextBox" Grid.Row="10" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="10"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="Z轴负限位" />
+                    <TextBox
+                        x:Name="LimitZNTextBox"
+                        Grid.Row="10"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="11" Text="X轴螺距" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="XPulseTextBox" Grid.Row="11" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="11"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="X轴螺距" />
+                    <TextBox
+                        x:Name="XPulseTextBox"
+                        Grid.Row="11"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
                 </Grid>
 
-                <!-- 右侧 -->
+                <!--  右侧  -->
                 <Grid Grid.Column="1">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="110"/>
-                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="220" />
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock Text="天车原点X坐标" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="OriginXTextBox" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="天车原点X坐标" />
+                    <TextBox
+                        x:Name="OriginXTextBox"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="1" Text="天车原点Y坐标" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="OriginYTextBox" Grid.Row="1" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="1"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="天车原点Y坐标" />
+                    <TextBox
+                        x:Name="OriginYTextBox"
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="2" Text="天车原点Z坐标" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="OriginZTextBox" Grid.Row="2" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="2"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="天车原点Z坐标" />
+                    <TextBox
+                        x:Name="OriginZTextBox"
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="3" Text="天车宽度" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="WidthTextBox" Grid.Row="3" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="3"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="天车宽度" />
+                    <TextBox
+                        x:Name="WidthTextBox"
+                        Grid.Row="3"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="4" Text="X轴减速比" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="RatioXTextBox" Grid.Row="4" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="4"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="X轴减速比" />
+                    <TextBox
+                        x:Name="RatioXTextBox"
+                        Grid.Row="4"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="5" Text="Y轴减速比" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="RatioYTextBox" Grid.Row="5" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="5"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="Y轴减速比" />
+                    <TextBox
+                        x:Name="RatioYTextBox"
+                        Grid.Row="5"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="6" Text="Z轴减速比" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="RatioZTextBox" Grid.Row="6" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="6"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="Z轴减速比" />
+                    <TextBox
+                        x:Name="RatioZTextBox"
+                        Grid.Row="6"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="7" Text="X轴起始位置" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="StartXTextBox" Grid.Row="7" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="7"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="X轴起始位置" />
+                    <TextBox
+                        x:Name="StartXTextBox"
+                        Grid.Row="7"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
-                    <TextBlock Grid.Row="8" Text="X轴结束位置" Margin="0,8" VerticalAlignment="Center"/>
-                    <TextBox x:Name="EndXTextBox" Grid.Row="8" Grid.Column="1" Margin="0,6" Width="190" HorizontalAlignment="Left"/>
+                    <TextBlock
+                        Grid.Row="8"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Text="X轴结束位置" />
+                    <TextBox
+                        x:Name="EndXTextBox"
+                        Grid.Row="8"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left" />
 
                     <!-- <TextBlock Grid.Row="9" Text="图标" Margin="0,8" VerticalAlignment="Center"/> -->
                     <!-- <Border Grid.Row="9" Grid.Column="1" Width="120" Height="90" Background="#DCDCDC" BorderBrush="#BFBFBF" BorderThickness="1" HorizontalAlignment="Left"/> -->
                     <!-- <Button Grid.Row="9" Grid.Column="1" Content="选择" Width="60" Height="30" HorizontalAlignment="Right" Margin="0,30,0,0"/> -->
 
-                    <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
-                        <RadioButton x:Name="EnableRadio" Content="启用" IsChecked="True" Margin="0,0,20,0"/>
-                        <RadioButton x:Name="RepairRadio" Content="检修" Margin="0,0,20,0"/>
-                        <RadioButton x:Name="DisableRadio" Content="停用"/>
+                    <!--  当前位置（PLC实时值）—— TODO：编辑后可直接写入PLC寄存器触发绝对移动  -->
+                    <TextBlock
+                        Grid.Row="9"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Foreground="#B45309"
+                        Text="当前坐标X" />
+                    <TextBox
+                        x:Name="CurrentXTextBox"
+                        Grid.Row="9"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left"
+                        ToolTip="PLC实时D5018~D5019，编辑后可通过绝对位移直接走" />
+
+                    <TextBlock
+                        Grid.Row="10"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Foreground="#B45309"
+                        Text="当前坐标Y" />
+                    <TextBox
+                        x:Name="CurrentYTextBox"
+                        Grid.Row="10"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left"
+                        ToolTip="PLC实时D5022，编辑后可通过绝对位移直接走" />
+
+                    <TextBlock
+                        Grid.Row="11"
+                        Margin="0,8"
+                        VerticalAlignment="Center"
+                        Foreground="#B45309"
+                        Text="当前坐标Z" />
+                    <TextBox
+                        x:Name="CurrentZTextBox"
+                        Grid.Row="11"
+                        Grid.Column="1"
+                        Width="190"
+                        Margin="0,6"
+                        HorizontalAlignment="Left"
+                        ToolTip="PLC实时D5025，编辑后可通过绝对位移直接走" />
+
+                    <StackPanel
+                        Grid.Row="12"
+                        Grid.Column="1"
+                        Margin="0,10,0,0"
+                        Orientation="Horizontal">
+                        <RadioButton
+                            x:Name="EnableRadio"
+                            Margin="0,0,20,0"
+                            Content="启用"
+                            IsChecked="True" />
+                        <RadioButton
+                            x:Name="RepairRadio"
+                            Margin="0,0,20,0"
+                            Content="检修" />
+                        <RadioButton x:Name="DisableRadio" Content="停用" />
                     </StackPanel>
                 </Grid>
+
+
+
             </Grid>
         </Border>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
-            <Button Content="确定" Width="80" Height="32" Margin="0,0,8,0" Click="Save_Click"/>
-            <Button Content="取消" Width="80" Height="32" Click="Close_Click"/>
+        <StackPanel
+            Grid.Row="1"
+            Margin="0,10,0,0"
+            Orientation="Horizontal">
+            <Button
+                Width="80"
+                Height="32"
+                Margin="0,0,8,0"
+                Click="Save_Click"
+                Content="确定" />
+            <Button
+                Width="80"
+                Height="32"
+                Click="Close_Click"
+                Content="取消" />
         </StackPanel>
     </Grid>
 </Window>

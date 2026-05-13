@@ -4,6 +4,9 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="clr-namespace:AutomaticOnlineHostComputer.Views.Home.Controls"
     Background="#F0F2F5">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
     <Grid Margin="4">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -35,7 +38,7 @@
                     DockPanel.Dock="Right" />
             </DockPanel>
         </Border>
-
+        <!--  第一部分  -->
         <Border
             Grid.Row="1"
             Grid.RowSpan="2"
@@ -469,7 +472,7 @@
                         FontSize="16"
                         FontWeight="Bold"
                         Text="天车 / 机械手 黄台总览" />
-
+                    <!--  自定义控件  -->
                     <UniformGrid Margin="0,0,0,6" Columns="5">
                         <!--  1号线天车前   绑定的HomeViewModel的数据  -->
                         <controls:OverviewDeviceCard
@@ -713,6 +716,99 @@
                             Line4Brush="{Binding Manipulator3.Line4Brush}"
                             Line5="{Binding Manipulator3.Line5}"
                             Line5Brush="{Binding Manipulator3.Line5Brush}" />
+                    </UniformGrid>
+
+                    <!--  4台研磨机  -->
+                    <TextBlock
+                        Margin="2,8,2,4"
+                        FontSize="14"
+                        FontWeight="Bold"
+                        Text="研磨机总览" />
+                    <UniformGrid Margin="0,0,0,6" Columns="4">
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Grinder1.Title}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Grinder1.EStopCommand}"
+                            Btn2="清除报警"
+                            Btn2Command="{Binding Grinder1.ClearAlarmCommand}"
+                            Btn3="读状态"
+                            Btn3Command="{Binding Grinder1.ReadStatusCommand}"
+                            Btn4=""
+                            Btn5=""
+                            Btn6=""
+                            Btn7=""
+                            Btn8=""
+                            ConnectedBrush="{Binding Grinder1.ConnectedBrush}"
+                            Line1="{Binding Grinder1.Line1}"
+                            Line1Brush="{Binding Grinder1.Line1Brush}"
+                            Line2="{Binding Grinder1.Line2}"
+                            Line3="{Binding Grinder1.Line3}"
+                            Line4="{Binding Grinder1.Line4}"
+                            Line4Brush="{Binding Grinder1.Line4Brush}"
+                            Line5="{Binding Grinder1.Line5}" />
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Grinder2.Title}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Grinder2.EStopCommand}"
+                            Btn2="清除报警"
+                            Btn2Command="{Binding Grinder2.ClearAlarmCommand}"
+                            Btn3="读状态"
+                            Btn3Command="{Binding Grinder2.ReadStatusCommand}"
+                            Btn4=""
+                            Btn5=""
+                            Btn6=""
+                            Btn7=""
+                            Btn8=""
+                            ConnectedBrush="{Binding Grinder2.ConnectedBrush}"
+                            Line1="{Binding Grinder2.Line1}"
+                            Line1Brush="{Binding Grinder2.Line1Brush}"
+                            Line2="{Binding Grinder2.Line2}"
+                            Line3="{Binding Grinder2.Line3}"
+                            Line4="{Binding Grinder2.Line4}"
+                            Line4Brush="{Binding Grinder2.Line4Brush}"
+                            Line5="{Binding Grinder2.Line5}" />
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Grinder3.Title}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Grinder3.EStopCommand}"
+                            Btn2="清除报警"
+                            Btn2Command="{Binding Grinder3.ClearAlarmCommand}"
+                            Btn3="读状态"
+                            Btn3Command="{Binding Grinder3.ReadStatusCommand}"
+                            Btn4=""
+                            Btn5=""
+                            Btn6=""
+                            Btn7=""
+                            Btn8=""
+                            ConnectedBrush="{Binding Grinder3.ConnectedBrush}"
+                            Line1="{Binding Grinder3.Line1}"
+                            Line1Brush="{Binding Grinder3.Line1Brush}"
+                            Line2="{Binding Grinder3.Line2}"
+                            Line3="{Binding Grinder3.Line3}"
+                            Line4="{Binding Grinder3.Line4}"
+                            Line4Brush="{Binding Grinder3.Line4Brush}"
+                            Line5="{Binding Grinder3.Line5}" />
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Grinder4.Title}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Grinder4.EStopCommand}"
+                            Btn2="清除报警"
+                            Btn2Command="{Binding Grinder4.ClearAlarmCommand}"
+                            Btn3="读状态"
+                            Btn3Command="{Binding Grinder4.ReadStatusCommand}"
+                            Btn4=""
+                            Btn5=""
+                            Btn6=""
+                            Btn7=""
+                            Btn8=""
+                            ConnectedBrush="{Binding Grinder4.ConnectedBrush}"
+                            Line1="{Binding Grinder4.Line1}"
+                            Line1Brush="{Binding Grinder4.Line1Brush}"
+                            Line2="{Binding Grinder4.Line2}"
+                            Line3="{Binding Grinder4.Line3}"
+                            Line4="{Binding Grinder4.Line4}"
+                            Line4Brush="{Binding Grinder4.Line4Brush}"
+                            Line5="{Binding Grinder4.Line5}" />
                     </UniformGrid>
                 </StackPanel>
             </ScrollViewer>
@@ -1179,6 +1275,34 @@
                         Status2Brush="{Binding StationCards[ST008].Status2Brush, FallbackValue=Black}" />
                 </Grid>
             </ScrollViewer>
+        </Border>
+
+        <!--  启动加载遮罩：LoadAsync完成前覆盖整个页面  -->
+        <Border
+            Grid.RowSpan="3"
+            Grid.ColumnSpan="3"
+            Panel.ZIndex="99"
+            Background="#CCF0F2F5"
+            Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}, FallbackValue=Visible}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    FontSize="48"
+                    Text="⏳" />
+                <TextBlock
+                    Margin="0,12,0,0"
+                    HorizontalAlignment="Center"
+                    FontSize="18"
+                    FontWeight="Bold"
+                    Foreground="#333"
+                    Text="正在加载设备数据..." />
+                <TextBlock
+                    Margin="0,4,0,0"
+                    HorizontalAlignment="Center"
+                    FontSize="14"
+                    Foreground="#888"
+                    Text="连接天车 · 机械手 · 全厂设备" />
+            </StackPanel>
         </Border>
 
     </Grid>

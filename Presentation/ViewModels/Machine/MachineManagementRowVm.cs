@@ -68,8 +68,27 @@ public sealed class MachineManagementRowVm : ObservableObject
     public double Y { get => _y; set => SetField(ref _y, value); }
 
     private double _z;
-    /// <summary>Z 坐标。</summary>
+    /// <summary>Z 坐标（工位标定值）。</summary>
     public double Z { get => _z; set => SetField(ref _z, value); }
+
+    private int? _currentX;
+    /// <summary>当前 X 坐标（PLC 实时值）。</summary>
+    public int? CurrentX { get => _currentX; set { if (SetField(ref _currentX, value)) { OnPropertyChanged(nameof(DeltaX)); } } }
+
+    private int? _currentY;
+    /// <summary>当前 Y 坐标（PLC 实时值）。</summary>
+    public int? CurrentY { get => _currentY; set { if (SetField(ref _currentY, value)) { OnPropertyChanged(nameof(DeltaY)); } } }
+
+    private int? _currentZ;
+    /// <summary>当前 Z 坐标（PLC 实时值）。编辑后可写入对应 D3102~D3106 触发绝对位移 → TODO 需确认坐标系对齐后开放。</summary>
+    public int? CurrentZ { get => _currentZ; set { if (SetField(ref _currentZ, value)) { OnPropertyChanged(nameof(DeltaZ)); } } }
+
+    /// <summary>X 偏移 = 标定X - 当前X</summary>
+    public string DeltaX => CurrentX.HasValue ? (X - CurrentX.Value).ToString("+#;-#;0") : "—";
+    /// <summary>Y 偏移</summary>
+    public string DeltaY => CurrentY.HasValue ? (Y - CurrentY.Value).ToString("+#;-#;0") : "—";
+    /// <summary>Z 偏移</summary>
+    public string DeltaZ => CurrentZ.HasValue ? (Z - CurrentZ.Value).ToString("+#;-#;0") : "—";
 
     private double _xOffset;
     /// <summary>X 轴偏移。</summary>

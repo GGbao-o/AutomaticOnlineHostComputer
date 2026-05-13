@@ -51,6 +51,9 @@ SELECT
     IFNULL(limit_zp, 0)           AS limit_zp,
     IFNULL(limit_zn, 0)           AS limit_zn,
     IFNULL(pulse_x, 0)            AS pulse_x,
+    IFNULL(current_x, NULL)       AS current_x,
+    IFNULL(current_y, NULL)       AS current_y,
+    IFNULL(current_z, NULL)       AS current_z,
     CASE IFNULL(work_sta, 0)
         WHEN 1 THEN '启用'
         WHEN 2 THEN '检修'
@@ -94,6 +97,9 @@ LIMIT @pageSize;";
                 LimitZP = GetLong(reader, "limit_zp"),
                 LimitZN = GetLong(reader, "limit_zn"),
                 PulseX = GetDouble(reader, "pulse_x"),
+                CurrentX = GetNullableLong(reader, "current_x"),
+                CurrentY = GetNullableInt(reader, "current_y"),
+                CurrentZ = GetNullableInt(reader, "current_z"),
                 State = GetString(reader, "state")
             });
         }
@@ -129,7 +135,10 @@ SELECT
     IFNULL(y_dis, '0')        AS y_dis,
     IFNULL(z_dis, '0')        AS z_dis,
     IFNULL(dis_shake, 0)      AS dis_shake,
-    IFNULL(process_range, '') AS process_range
+    IFNULL(process_range, '') AS process_range,
+    IFNULL(current_x, NULL)   AS current_x,
+    IFNULL(current_y, NULL)   AS current_y,
+    IFNULL(current_z, NULL)   AS current_z
 FROM machine
 ORDER BY id
 LIMIT @pageSize;";
@@ -167,7 +176,10 @@ LIMIT @pageSize;";
                 YOffset = ParseDouble(GetString(reader, "y_dis")),
                 ZOffset = ParseDouble(GetString(reader, "z_dis")),
                 Shake = GetDouble(reader, "dis_shake"),
-                ProcessRange = GetString(reader, "process_range")
+                ProcessRange = GetString(reader, "process_range"),
+                CurrentX = GetNullableInt(reader, "current_x"),
+                CurrentY = GetNullableInt(reader, "current_y"),
+                CurrentZ = GetNullableInt(reader, "current_z")
             });
         }
 
@@ -337,6 +349,18 @@ LIMIT @pageSize;";
     {
         var value = reader[column];
         return value == DBNull.Value ? string.Empty : Convert.ToString(value) ?? string.Empty;
+    }
+
+    private static long? GetNullableLong(DbDataReader reader, string column)
+    {
+        var value = reader[column];
+        return value == DBNull.Value ? null : Convert.ToInt64(value);
+    }
+
+    private static int? GetNullableInt(DbDataReader reader, string column)
+    {
+        var value = reader[column];
+        return value == DBNull.Value ? null : Convert.ToInt32(value);
     }
 
     private static double ParseDouble(string value)

@@ -80,6 +80,10 @@ public partial class AddCraneDialog : Window
             LimitZP = ParseLong(LimitZPTextBox.Text, "Z轴正限位"),
             LimitZN = ParseLong(LimitZNTextBox.Text, "Z轴负限位"),
             PulseX = ParseDouble(XPulseTextBox.Text, "X轴螺距"),
+            // 当前位置：nullable，空则不写入DB
+            CurrentX = ParseNullableLong(CurrentXTextBox.Text),
+            CurrentY = ParseNullableInt(CurrentYTextBox.Text),
+            CurrentZ = ParseNullableInt(CurrentZTextBox.Text),
             WorkSta = GetStateCode()
         };
     }
@@ -108,6 +112,9 @@ public partial class AddCraneDialog : Window
         LimitZPTextBox.Text = row.LimitZP.ToString();
         LimitZNTextBox.Text = row.LimitZN.ToString();
         XPulseTextBox.Text = row.PulseX.ToString("0.###");
+        CurrentXTextBox.Text = row.CurrentX?.ToString() ?? "";
+        CurrentYTextBox.Text = row.CurrentY?.ToString() ?? "";
+        CurrentZTextBox.Text = row.CurrentZ?.ToString() ?? "";
 
         SetStateByText(row.State);
     }
@@ -180,6 +187,18 @@ public partial class AddCraneDialog : Window
         if (!double.TryParse(text, out var value))
             throw new InvalidOperationException($"{field}必须是数字。");
         return value;
+    }
+
+    private static long? ParseNullableLong(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        return long.TryParse(text, out var v) ? v : null;
+    }
+
+    private static int? ParseNullableInt(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        return int.TryParse(text, out var v) ? v : null;
     }
 
     private void Close_Click(object sender, RoutedEventArgs e)

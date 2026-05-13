@@ -82,6 +82,9 @@ public partial class AddMachineDialog : Window
             ZDis = ZDisTextBox.Text.Trim(),
             DisShake = ParseInt(DisShakeTextBox.Text, "抖动距离"),
             ProcessRange = WorkRangeTextBox.Text.Trim(),
+            CurrentX = ParseNullableInt(CurrentXTextBox.Text),
+            CurrentY = ParseNullableInt(CurrentYTextBox.Text),
+            CurrentZ = ParseNullableInt(CurrentZTextBox.Text),
             Ip = RequireText(IpTextBox.Text, "IP地址"),
             Port = ParseInt(PortTextBox.Text, "端口"),
             State = 1
@@ -107,6 +110,9 @@ public partial class AddMachineDialog : Window
         ZDisTextBox.Text = row.ZOffset.ToString("0");
         DisShakeTextBox.Text = row.Shake.ToString("0");
         WorkRangeTextBox.Text = row.ProcessRange;
+        CurrentXTextBox.Text = row.CurrentX?.ToString() ?? "";
+        CurrentYTextBox.Text = row.CurrentY?.ToString() ?? "";
+        CurrentZTextBox.Text = row.CurrentZ?.ToString() ?? "";
         IpTextBox.Text = row.Ip ?? string.Empty;
         PortTextBox.Text = row.Port.ToString();
     }
@@ -147,6 +153,12 @@ public partial class AddMachineDialog : Window
         if (!int.TryParse(text, out var value))
             throw new InvalidOperationException($"{field}必须是整数。");
         return value;
+    }
+
+    private static int? ParseNullableInt(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        return int.TryParse(text, out var v) ? v : null;
     }
 
     private void Close_Click(object sender, RoutedEventArgs e)
