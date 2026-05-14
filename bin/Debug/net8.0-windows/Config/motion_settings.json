@@ -1,0 +1,38 @@
+
+{
+  "absMove": {
+    "defaultSpeed": 500,
+    "defaultAccel": 200,
+    "defaultDecel": 200,
+    "tolerance": 5,
+    "timeoutMs": 30000,
+    "pollIntervalMs": 500
+  },
+  "relMove": {
+    "defaultSpeed": 300,
+    "defaultAccel": 150,
+    "defaultDecel": 150
+  },
+  "zAxis": {
+    "fastSpeed": 500,
+    "slowSpeed": 100,
+    "slowAccel": 80,
+    "slowDecel": 80,
+    "stepDownDistance": 5,
+    "safeZOffset": 50
+  },
+  "safety": {
+    "maxRetries": 3,
+    "magnetOffMaxRetries": 50,
+    "magnetOffRetryIntervalMs": 500
+  },
+  "shake": {
+    "defaultCount": 5,
+    "defaultAmplitude": 5,
+    "pauseMs": 200
+  },
+  "engine": {
+    "queuePollIntervalMs": 1000,
+    "stationWaitTimeoutMs": 30000
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "Bash(python3)",
+      "Bash(sed -i 's/Status1=\"{Binding Status1_\\\\\\([^,]*\\\\\\),FallbackValue=\\\\\\([^}]*\\\\\\)}\"/Status1=\"{Binding StationCards[\\\\1].Status1,FallbackValue=\\\\2}\"/g' Views/Home/HomeView.xaml)",
+      "Bash(sed -i 's/Status2=\"{Binding Status2_\\\\\\([^,]*\\\\\\),FallbackValue=\\\\\\([^}]*\\\\\\)}\"/Status2=\"{Binding StationCards[\\\\1].Status2,FallbackValue=\\\\2}\"/g' Views/Home/HomeView.xaml)",
+      "Bash(sed -i 's/IpText=\"{Binding IpMap\\\\[\\\\\\([^]]*\\\\\\)\\\\],FallbackValue=\\\\\\([^}]*\\\\\\)}\"/IpText=\"{Binding StationCards[\\\\1].IpText,FallbackValue=\\\\2}\"/g' Views/Home/HomeView.xaml)",
+      "Bash(sed -i 's/Status1=\"{Binding Status1_\\\\\\([^,]*\\\\\\), FallbackValue=\\\\\\([^}]*\\\\\\)}\"/Status1=\"{Binding StationCards[\\\\1].Status1, FallbackValue=\\\\2}\"/g' Views/Home/HomeView.xaml)",
+      "Bash(sed -i 's/Status2=\"{Binding Status2_\\\\\\([^,]*\\\\\\), FallbackValue=\\\\\\([^}]*\\\\\\)}\"/Status2=\"{Binding StationCards[\\\\1].Status2, FallbackValue=\\\\2}\"/g' Views/Home/HomeView.xaml)",
+      "Bash(sed -i 's/IpText=\"{Binding IpMap\\\\[\\\\\\([^]]*\\\\\\)\\\\], FallbackValue=\\\\\\([^}]*\\\\\\)}\"/IpText=\"{Binding StationCards[\\\\1].IpText, FallbackValue=\\\\2}\"/g' Views/Home/HomeView.xaml)",
+      "Bash(git checkout *)",
+      "Bash(awk ' *)",
+      "Read(//tmp/**)",
+      "Bash(xxd)"
+    ]
+  }
+}

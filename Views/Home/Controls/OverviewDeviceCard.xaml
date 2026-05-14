@@ -1,0 +1,124 @@
+<UserControl x:Class="AutomaticOnlineHostComputer.Views.Home.Controls.OverviewDeviceCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root">
+    <!-- 外边框：绑定 ConnectedBrush，已连接=绿 故障=红 未连接=灰 -->
+    <Border BorderBrush="{Binding ConnectedBrush, ElementName=Root, FallbackValue=Gray}"
+            BorderThickness="2" Background="White" Margin="2" Padding="0">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 标题栏：天车名称 + 连接指示灯 -->
+            <DockPanel Margin="0,2,0,2">
+                <!-- 连接状态指示点（绑定 ConnectedBrush 属性） -->
+                <Ellipse Width="10" Height="10" Margin="6,0,4,0"
+                         Fill="{Binding ConnectedBrush, ElementName=Root, FallbackValue=Gray}"
+                         DockPanel.Dock="Left" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Title, ElementName=Root}"
+                           HorizontalAlignment="Center" FontSize="14" FontWeight="Bold" />
+            </DockPanel>
+
+            <!-- 中间：图标区 + 状态文字 -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Margin="4" Background="#E5E5E5" BorderBrush="#D0D0D0" BorderThickness="1">
+                    <Viewbox Stretch="Uniform">
+                        <TextBlock Text="🏗" FontSize="40"/>
+                    </Viewbox>
+                </Border>
+                <StackPanel Grid.Column="1" Margin="0,2,4,2">
+                    <!-- Line1 连接状态 -->
+                    <TextBlock Text="{Binding Line1, ElementName=Root}" HorizontalAlignment="Center" FontSize="12"
+                               Foreground="{Binding Line1Brush, ElementName=Root, FallbackValue=Black}" />
+                    <!-- Line2 任务状态 -->
+                    <TextBlock Text="{Binding Line2, ElementName=Root}" HorizontalAlignment="Center" FontSize="12"
+                               Foreground="{Binding Line2Brush, ElementName=Root, FallbackValue=Black}" />
+                    <!-- Line3 模式 -->
+                    <TextBlock Text="{Binding Line3, ElementName=Root}" HorizontalAlignment="Center" FontSize="12"
+                               Foreground="{Binding Line3Brush, ElementName=Root, FallbackValue=Black}" />
+                    <!-- Line4 运行状态 -->
+                    <TextBlock Text="{Binding Line4, ElementName=Root}" HorizontalAlignment="Center" FontSize="12"
+                               Foreground="{Binding Line4Brush, ElementName=Root, FallbackValue=Black}" />
+                    <!-- Line5 有版/接线器 -->
+                    <TextBlock Text="{Binding Line5, ElementName=Root}" HorizontalAlignment="Center" FontSize="12"
+                               Foreground="{Binding Line5Brush, ElementName=Root, FallbackValue=Black}" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 底部：8个操作按钮（2行4列），绑定 ICommand -->
+            <UniformGrid Grid.Row="2" Columns="4" Margin="2">
+                <!-- Btn1 -->
+                <Button Command="{Binding Btn1Command, ElementName=Root}"
+                        Background="{Binding Btn1Brush, ElementName=Root, FallbackValue=#2C86C8}"
+                        Foreground="White" FontSize="11" Margin="1" Padding="2"
+                        BorderThickness="0" Cursor="Hand"
+                        ToolTip="{Binding Btn1Tip, ElementName=Root}">
+                    <TextBlock Text="{Binding Btn1, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                </Button>
+                <!-- Btn2 -->
+                <Button Command="{Binding Btn2Command, ElementName=Root}"
+                        Background="{Binding Btn2Brush, ElementName=Root, FallbackValue=#2C86C8}"
+                        Foreground="White" FontSize="11" Margin="1" Padding="2"
+                        BorderThickness="0" Cursor="Hand"
+                        ToolTip="{Binding Btn2Tip, ElementName=Root}">
+                    <TextBlock Text="{Binding Btn2, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                </Button>
+                <!-- Btn3 -->
+                <Button Command="{Binding Btn3Command, ElementName=Root}"
+                        Background="{Binding Btn3Brush, ElementName=Root, FallbackValue=#2C86C8}"
+                        Foreground="White" FontSize="11" Margin="1" Padding="2"
+                        BorderThickness="0" Cursor="Hand"
+                        ToolTip="{Binding Btn3Tip, ElementName=Root}">
+                    <TextBlock Text="{Binding Btn3, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                </Button>
+                <!-- Btn4 -->
+                <Button Command="{Binding Btn4Command, ElementName=Root}"
+                        Background="{Binding Btn4Brush, ElementName=Root, FallbackValue=#2C86C8}"
+                        Foreground="White" FontSize="11" Margin="1" Padding="2"
+                        BorderThickness="0" Cursor="Hand"
+                        ToolTip="{Binding Btn4Tip, ElementName=Root}">
+                    <TextBlock Text="{Binding Btn4, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                </Button>
+                <!-- Btn5 -->
+                <Button Command="{Binding Btn5Command, ElementName=Root}"
+                        Background="{Binding Btn5Brush, ElementName=Root, FallbackValue=#2C86C8}"
+                        Foreground="White" FontSize="11" Margin="1" Padding="2"
+                        BorderThickness="0" Cursor="Hand"
+                        ToolTip="{Binding Btn5Tip, ElementName=Root}">
+                    <TextBlock Text="{Binding Btn5, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                </Button>
+                <!-- Btn6 -->
+                <Button Command="{Binding Btn6Command, ElementName=Root}"
+                        Background="{Binding Btn6Brush, ElementName=Root, FallbackValue=#2C86C8}"
+                        Foreground="White" FontSize="11" Margin="1" Padding="2"
+                        BorderThickness="0" Cursor="Hand"
+                        ToolTip="{Binding Btn6Tip, ElementName=Root}">
+                    <TextBlock Text="{Binding Btn6, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                </Button>
+                <!-- Btn7 -->
+                <Button Command="{Binding Btn7Command, ElementName=Root}"
+                        Background="{Binding Btn7Brush, ElementName=Root, FallbackValue=#2C86C8}"
+                        Foreground="White" FontSize="11" Margin="1" Padding="2"
+                        BorderThickness="0" Cursor="Hand"
+                        ToolTip="{Binding Btn7Tip, ElementName=Root}">
+                    <TextBlock Text="{Binding Btn7, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                </Button>
+                <!-- Btn8 -->
+                <Button Command="{Binding Btn8Command, ElementName=Root}"
+                        Background="{Binding Btn8Brush, ElementName=Root, FallbackValue=#2C86C8}"
+                        Foreground="White" FontSize="11" Margin="1" Padding="2"
+                        BorderThickness="0" Cursor="Hand"
+                        ToolTip="{Binding Btn8Tip, ElementName=Root}">
+                    <TextBlock Text="{Binding Btn8, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                </Button>
+            </UniformGrid>
+        </Grid>
+    </Border>
+</UserControl>

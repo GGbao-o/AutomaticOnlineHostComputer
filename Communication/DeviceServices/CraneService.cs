@@ -1,0 +1,865 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using AutomaticOnlineHostComputer.Communication.Clients;
+using Addr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CraneAddress;
+
+namespace AutomaticOnlineHostComputer.Communication.DeviceServices
+{
+    /// <summary>
+    /// 天车通信服务（汇川 PLC，Modbus TCP）。
+    /// <para>
+    /// 每台天车实例化一个 CraneService，传入对应 IP 地址。<br/>
+    /// 公共 API 均通过 IDeviceClient 的 ReadAsync / WriteAsync 访问，
+    /// 不直接调用 ModbusTcpClient 内部私有方法。
+    /// </para>
+    /// <para>5台天车 IP：
+    ///   1号线天车前 192.168.2.81；1号线天车后 192.168.2.82；
+    ///   2号线天车前 192.168.2.83；2号线天车后 192.168.2.84；
+    ///   研磨机天车  192.168.2.80
+    /// </para>
+    /// </summary>
+    public class CraneService
+    {
+        // ── 字段 ─────────────────────────────────────────────────────
+        private readonly ModbusTcpClient _client;
+        private readonly string _name; // 天车名称，调试输出用
+        private bool _manualModeSet;   // 是否已确认 PLC 处于手动模式，避免重复写 D4500
+
+        // ── 构造 ─────────────────────────────────────────────────────
+        /// <param name="name">天车名称（如"1号线天车前"），仅用于日志输出</param>
+        /// <param name="ip">PLC IP 地址</param>
+        /// <param name="port">Modbus TCP 端口，默认 502</param>
+        public CraneService(string name, string ip, int port = 502)
+        {
+            _name   = name;
+            _client = new ModbusTcpClient(ip, port, unitId: 1, timeoutMs: 3000);
+            Console.WriteLine($"[CraneService] [{_name}] 创建实例，IP={ip}:{port}");
+        }
+
+        // ── 连接管理 ──────────────────────────────────────────────────
+
+        /// <summary>建立 Modbus TCP 连接。重置手动模式缓存（重连后 PLC 状态未知）。</summary>
+        public async Task ConnectAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] 正在连接...");
+            try
+            {
+                await _client.ConnectAsync(ct);
+                _manualModeSet = false; // 重连后 PLC 模式未知，重置缓存
+                Console.WriteLine($"[CraneService] [{_name}] 连接成功。IsConnected={_client.IsConnected}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] 连接失败：{ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>断开连接。</summary>
+        public async Task DisconnectAsync()
+        {
+            await _client.DisconnectAsync();
+            Console.WriteLine($"[CraneService] [{_name}] 已断开连接。");
+        }
+
+        /// <summary>当前是否已连接。</summary>
+        public bool IsConnected => _client.IsConnected;
+
+        // ═══════════════════════════════════════════════════════════════
+        // 状态读取
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// 一次性读取天车关键状态快照（D5000~D5029，共 30 个连续寄存器）。
+        /// 读取失败时返回 null，并输出错误日志。
+        /// </summary>
+        public async Task<CraneStatus?> ReadStatusAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                // 使用公共 ReadAsync：读 D5000 起 30 个寄存器，返回 int[]
+                var result = await _client.ReadAsync(Addr.D_RequestData, 30, ct);
+                var r = result.IntValues; // int[] 长度 30
+
+                var status = new CraneStatus
+                {
+                    RequestData         = (short)r[0],   // D5000
+                    ArrivedMagnet       = (short)r[1],   // D5001
+                    PickDone            = (short)r[2],   // D5002
+                    ArrivedTarget       = (short)r[3],   // D5003
+                    LoadDone            = (short)r[4],   // D5004
+                    CurrentTaskNo       = (short)r[5],   // D5005
+                    Busy                = (short)r[6],   // D5006
+                    StateMachineStep    = (short)r[7],   // D5007
+                    Mode                = (short)r[8],   // D5008
+                    Fault               = (short)r[9],   // D5009
+                    RunConditionMissing = (short)r[10],  // D5010
+                    ServoAlarm          = (short)r[11],  // D5011
+                    PlcServoAlarm       = (short)r[12],  // D5012
+                    PlcAlarm            = (short)r[13],  // D5013
+                    // D5014~D5015 DINT：X轴绝对编码器（高字在前，大端序）
+                    XEncoderAbs  = (r[14] << 16) | (r[15] & 0xFFFF),  // D5014~5015
+                    XEncoderZero = (r[16] << 16) | (r[17] & 0xFFFF),  // D5016~5017
+                    XPos         = (r[18] << 16) | (r[19] & 0xFFFF),  // D5018~5019
+                    YEncoderAbs  = (ushort)r[20],  // D5020
+                    YEncoderZero = (ushort)r[21],  // D5021
+                    YPos         = (ushort)r[22],  // D5022（无符号，0~65535）
+                    ZEncoderAbs  = (ushort)r[23],  // D5023
+                    ZEncoderZero = (ushort)r[24],  // D5024
+                    ZPos         = (ushort)r[25],  // D5025（无符号，0~65535）
+                    PlcSeqNo         = (short)r[26],  // D5026
+                    TaskSourceDevice = (short)r[27],  // D5027
+                    TaskTargetDevice = (short)r[28],  // D5028
+                    HasRoller        = (short)r[29],  // D5029
+                };
+
+                Console.WriteLine($"[CraneService] [{_name}] 状态读取成功 | " +
+                    $"Mode={status.Mode} Busy={status.Busy} Fault={status.Fault} " +
+                    $"ServoAlarm={status.ServoAlarm} PlcAlarm={status.PlcAlarm} " +
+                    $"XPos={status.XPos} YPos={status.YPos} ZPos={status.ZPos}");
+                return status;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] 读取状态异常：{ex.Message}");
+                return null;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // 手动指令写入（D4500~D4518）
+        // 所有手动操作前需先写 D4500=2 使能手动操作，急停 D4518 除外。
+        // 注意：协议中 D4001 是自动/手动模式切换，D4500 是手动操作使能，
+        //       二者配合使用。本实现先写 D4500=2；
+        //       若 PLC 当前为自动模式(D4001=1)，可能还需先写 D4001=2。
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// 确保 PLC 处于手动模式：
+        ///   1. D4001=2（自动/手动模式切换 → 手动）
+        ///   2. D4500=2（手动操作使能）
+        /// 首次调用必写两个寄存器，后续调用若已知处于手动模式则跳过。
+        /// </summary>
+        private async Task EnsureManualModeAsync(CancellationToken ct)
+        {
+            if (_manualModeSet)
+                return; // 已确认处于手动模式，跳过
+
+            // 协议要求：先切模式（D4001=2），再使能手动操作（D4500=2）
+            await WriteRegAsync(Addr.D_ModeCmd, 2, "切换手动模式 D4001", ct);
+            await WriteRegAsync(Addr.D_ManualMode, 2, "手动操作使能 D4500", ct);
+            _manualModeSet = true;
+        }
+
+        // ─── 急停 / 下压急停 ─────────────────────────────────────────
+
+        /// <summary>
+        /// 急停伺服运动（D4518=2）。
+        /// ⚠️ 不需要先切手动模式，紧急情况直接写入。
+        /// 写完 2 立刻回 0，避免 PLC 一直处于急停触发态。
+        /// </summary>
+        public async Task EmergencyStopAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 急停 D4518");
+            await WriteRegAsync(Addr.D_ManualEStop, 2, "急停(触发)", ct);
+            await WriteRegAsync(Addr.D_ManualEStop, 0, "急停(复位)", ct);
+        }
+
+        /// <summary>
+        /// 读取下压急停状态（D4523）。≠0 表示 PLC 检测到 Z 轴下压，已触发急停。
+        /// Z 轴下降过程应轮询此值，一旦触发立即停止。
+        /// </summary>
+        public async Task<bool> IsPressureEStopAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                int val = await _client.ReadIntAsync(Addr.D_PressureEStop, ct);
+                bool triggered = val != 0;
+                if (triggered)
+                    Console.WriteLine($"[CraneService] [{_name}] ⚠ 下压急停触发 D4523={val}");
+                return triggered;
+            }
+            catch
+            {
+                return false; // 读不到就认为没触发，不阻塞流程
+            }
+        }
+
+        /// <summary>
+        /// 清除下压急停状态（写 D4523=0）。
+        /// 手动恢复流程：① 写 D4523=0 → ② 清除报警 D4514=2→0 → ③ 恢复正常。
+        /// </summary>
+        public async Task ClearPressureEStopAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 清除下压急停 D4523=0");
+            await WriteRegAsync(Addr.D_PressureEStop, 0, "清除下压急停 D4523", ct);
+        }
+
+        /// <summary>
+        /// 减速停止伺服运动（D4517=2 → 0 脉冲）。
+        /// </summary>
+        public async Task SlowStopAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 减速停止 D4517");
+            await WriteRegAsync(Addr.D_ManualSlowStop, 2, "减速停止(触发)", ct);
+            await WriteRegAsync(Addr.D_ManualSlowStop, 0, "减速停止(复位)", ct);
+        }
+
+        // ─── 点动 / 回原点 ─────────────────────────────────────────────
+
+        /// <summary>设置手动相对运动参数（D4001=2, D4501=距离, D4502=方向）。</summary>
+        private async Task SetManualMoveParamsAsync(int distance, int direction, CancellationToken ct)
+        {
+            if (distance <= 0) throw new ArgumentOutOfRangeException(nameof(distance), "distance 必须大于 0");
+            if (direction is not (1 or 2)) throw new ArgumentOutOfRangeException(nameof(direction), "direction 仅支持 1(正向) / 2(负向)");
+
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 设置点动参数 distance={distance}, direction={direction}");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualDistance, distance, "设置手动距离", ct);
+            await WriteRegAsync(Addr.D_ManualDirection, direction, "设置手动方向", ct);
+        }
+
+        public async Task MoveXAsync(int distance, bool positive, CancellationToken ct = default)
+        {
+            var dir = positive ? 1 : 2;
+            Console.WriteLine($"[CraneService] [{_name}] ▶ X{(positive ? "+" : "-")} 点动 distance={distance}");
+            await SetManualMoveParamsAsync(distance, dir, ct);
+            await WriteRegAsync(Addr.D_ManualMoveX, 2, "X轴相对运动", ct);
+        }
+
+        public async Task MoveYAsync(int distance, bool positive, CancellationToken ct = default)
+        {
+            var dir = positive ? 1 : 2;
+            Console.WriteLine($"[CraneService] [{_name}] ▶ Y{(positive ? "+" : "-")} 点动 distance={distance}");
+            await SetManualMoveParamsAsync(distance, dir, ct);
+            await WriteRegAsync(Addr.D_ManualMoveY, 2, "Y轴相对运动", ct);
+        }
+
+        public async Task MoveZAsync(int distance, bool positive, CancellationToken ct = default)
+        {
+            var dir = positive ? 1 : 2;
+            Console.WriteLine($"[CraneService] [{_name}] ▶ Z{(positive ? "+" : "-")} 点动 distance={distance}");
+            await SetManualMoveParamsAsync(distance, dir, ct);
+            await WriteRegAsync(Addr.D_ManualMoveZ, 2, "Z轴相对运动", ct);
+        }
+
+        public async Task HomeXAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ X轴回原点");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualHomeX, 2, "X轴回原点", ct);
+        }
+
+        public async Task HomeYAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ Y轴回原点");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualHomeY, 2, "Y轴回原点", ct);
+        }
+
+        public async Task HomeZAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ Z轴回原点");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualHomeZ, 2, "Z轴回原点", ct);
+        }
+
+        // ─── 伺服通/断电 ──────────────────────────────────────────────
+
+        /// <summary>
+        /// 手动伺服通电：写 D4500=2（首次）→ D4516=2 触发 → D4516=0 复位。
+        /// 2 代表通电指令，写完立刻回 0 避免 PLC 一直处于通电触发态。
+        /// </summary>
+        public async Task ServoPowerOnAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 伺服通电");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualServoPowerOn, 2, "伺服通电(触发)", ct);
+            await WriteRegAsync(Addr.D_ManualServoPowerOn, 0, "伺服通电(复位)", ct);
+        }
+
+        /// <summary>
+        /// 手动伺服断电：写 D4500=2（首次）→ D4515=2 触发 → D4515=0 复位。
+        /// </summary>
+        public async Task ServoPowerOffAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 伺服断电");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualServoPowerOff, 2, "伺服断电(触发)", ct);
+            await WriteRegAsync(Addr.D_ManualServoPowerOff, 0, "伺服断电(复位)", ct);
+        }
+
+        // ─── 清除报警 ────────────────────────────────────────────────
+
+        /// <summary>
+        /// 清除伺服/PLC 报警：写 D4500=2（首次）→ D4514=2 触发清除 → D4514=0 复位。
+        /// 2 是"解除报警"指令，写完立刻回 0，否则 PLC 一直处于解除报警态。
+        /// </summary>
+        public async Task ClearAlarmAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 清除报警");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualClearAlarm, 2, "清除报警(触发)", ct);
+            await WriteRegAsync(Addr.D_ManualClearAlarm, 0, "清除报警(复位)", ct);
+        }
+
+        // ─── 充磁 / 退磁 ─────────────────────────────────────────────
+
+        /// <summary>
+        /// 手动充磁：写 D4500=2（首次）→ D4510=2 触发 → D4510=0 复位。
+        /// </summary>
+        public async Task MagnetOnAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 充磁");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualMagnetOn, 2, "充磁(触发)", ct);
+            await WriteRegAsync(Addr.D_ManualMagnetOn, 0, "充磁(复位)", ct);
+        }
+
+        /// <summary>
+        /// 退磁释放工件（带容错重试）。
+        /// <para>流程：写 D4511=2→0 → 等 500ms → 读 D5029 确认是否已松开。</para>
+        /// <para>失败累计 10 次 → 先充磁再退磁（参考项目验证的"充磁→退磁"容错策略）。</para>
+        /// <para>总重试上限 50 次（~25s），超限抛异常避免传感器故障时无限循环。</para>
+        /// </summary>
+        public async Task MagnetOffAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 退磁释放工件");
+            await EnsureManualModeAsync(ct);
+
+            const int maxTotalRetries = 50; // ~25秒上限，防止传感器故障无限循环
+            int failCount = 0;
+            int totalRetries = 0;
+
+            while (!ct.IsCancellationRequested && totalRetries < maxTotalRetries)
+            {
+                totalRetries++;
+                // 1. 发退磁脉冲
+                await WriteRegAsync(Addr.D_ManualMagnetOff, 2, "退磁(触发)", ct);
+                await WriteRegAsync(Addr.D_ManualMagnetOff, 0, "退磁(复位)", ct);
+
+                // 2. 等 PLC 执行退磁动作
+                await Task.Delay(500, ct);
+
+                // 3. 检查是否有版（D5029 HasRoller）
+                var status = await ReadStatusAsync(ct);
+                if (status != null && status.HasRoller == 0)
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] ✔ 退磁成功，工件已释放（重试{failCount}次）");
+                    return;
+                }
+
+                // 4. 退磁失败，累计
+                failCount++;
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁失败（第{failCount}次），工件未释放 D5029={status?.HasRoller}");
+
+                if (failCount >= 10)
+                {
+                    // 参考项目验证的容错策略：先充磁再退磁
+                    Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁连续失败{failCount}次 → 先充磁再退磁（容错策略）");
+                    failCount = 0;
+                    await WriteRegAsync(Addr.D_ManualMagnetOn, 2, "充磁(容错)", ct);
+                    await WriteRegAsync(Addr.D_ManualMagnetOn, 0, "充磁(容错复位)", ct);
+                    await Task.Delay(300, ct);
+                }
+            }
+
+            if (totalRetries >= maxTotalRetries)
+                throw new TimeoutException($"退磁失败：超过最大重试次数 {maxTotalRetries}（~25s），请检查电磁铁/D5029传感器");
+        }
+
+        /// <summary>
+        /// 抖动松料：取料后 X 轴往复微动，松动可能卡住的工件。
+        /// <para>往复 count 次（默认 5），每次移动 amplitude（默认 5mm），奇数次正向、偶数次负向。</para>
+        /// <para>参考项目已验证效果，需天车已充磁吸住工件后调用。</para>
+        /// </summary>
+        /// <param name="count">往复次数（默认 5）</param>
+        /// <param name="amplitude">抖动振幅 mm（默认 5，小幅度防止甩飞工件）</param>
+        public async Task ShakeReleaseAsync(int count = 5, int amplitude = 5, CancellationToken ct = default)
+        {
+            if (amplitude <= 0) throw new ArgumentOutOfRangeException(nameof(amplitude), "振幅必须大于0");
+            if (count <= 0) return;
+
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 抖动松料：{count}次 振幅={amplitude}mm");
+            await EnsureManualModeAsync(ct);
+
+            for (int i = 1; i <= count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                int direction = (i % 2 == 1) ? 1 : 2;  // 奇次正向，偶次负向
+                int distance = amplitude;               // 每次固定振幅
+
+                Console.WriteLine($"[CraneService] [{_name}]   抖动 {i}/{count}：方向={(direction == 1 ? "+" : "-")}{distance}mm");
+
+                // 设置相对运动参数 → 触发 X 轴相对运动（D4505=2）
+                await SetManualMoveParamsAsync(distance, direction, ct);
+                await WriteRegAsync(Addr.D_ManualMoveX, 2, $"抖动X轴 {i}/{count}", ct);
+
+                // 等运动完成（200ms 足够短距离移动）
+                await Task.Delay(200, ct);
+            }
+
+            Console.WriteLine($"[CraneService] [{_name}] ✔ 抖动松料完成");
+        }
+
+        // ─── 接液盘（接线器）───────────────────────────────────────
+
+        /// <summary>
+        /// 手动开接液盘：写 D4500=2（首次）→ D4512=2 触发 → D4512=0 复位。
+        /// </summary>
+        public async Task DrainOpenAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 开接液盘");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualDrainOpen, 2, "开接液盘(触发)", ct);
+            await WriteRegAsync(Addr.D_ManualDrainOpen, 0, "开接液盘(复位)", ct);
+        }
+
+        /// <summary>
+        /// 手动关接液盘：写 D4500=2（首次）→ D4513=2 触发 → D4513=0 复位。
+        /// </summary>
+        public async Task DrainCloseAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 关接液盘");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualDrainClose, 2, "关接液盘(触发)", ct);
+            await WriteRegAsync(Addr.D_ManualDrainClose, 0, "关接液盘(复位)", ct);
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  天车任务启动前安全检查
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>天车安全检查结果。</summary>
+        public sealed class SafetyCheckResult
+        {
+            /// <summary>是否全部通过</summary>
+            public bool AllPassed { get; init; }
+            /// <summary>失败原因（通过时为空）</summary>
+            public string FailReason { get; init; } = string.Empty;
+
+            public static SafetyCheckResult Passed() => new() { AllPassed = true };
+            public static SafetyCheckResult Failed(string reason) => new() { AllPassed = false, FailReason = reason };
+        }
+
+        /// <summary>
+        /// 天车任务启动前安全检查：
+        ///   1. 天车是否正在运动（D5006 Busy ≠ 0）      → 等待（不可同时发两条运动指令）
+        ///   2. 天车是否故障（D5009 Fault ≠ 0）          → 拒绝
+        ///   3. 伺服是否报警（D5011 ServoAlarm ≠ 0）    → 拒绝
+        ///   4. 天车是否已有版（D5029 HasRoller ≠ 0）   → 暂停（需人工确认）
+        /// 全部通过返回 Passed，否则返回 Failed(reason)。
+        /// </summary>
+        public async Task<SafetyCheckResult> CheckSafetyAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 执行安全检查...");
+            var status = await ReadStatusAsync(ct);
+            if (status == null)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] ✘ 安全检查失败：无法读取状态");
+                return SafetyCheckResult.Failed("无法读取天车状态");
+            }
+
+            Console.WriteLine($"[CraneService] [{_name}]   忙闲={status.Busy} 故障={status.Fault} 伺服报警={status.ServoAlarm} 有版={status.HasRoller}");
+
+            if (status.Busy != 0)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 安全检查：天车正在运动中 D5006={status.Busy}，等待空闲");
+                return SafetyCheckResult.Failed($"天车正在运动中（D5006={status.Busy}），请等待当前操作完成");
+            }
+            if (status.Fault != 0)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] ✘ 安全检查：天车故障 D5009={status.Fault}");
+                return SafetyCheckResult.Failed($"天车故障（D5009={status.Fault}）");
+            }
+            if (status.ServoAlarm != 0)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] ✘ 安全检查：伺服报警 D5011={status.ServoAlarm}");
+                return SafetyCheckResult.Failed($"伺服报警（D5011={status.ServoAlarm}）");
+            }
+            if (status.HasRoller != 0)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 安全检查：天车已有版 D5029={status.HasRoller}，需人工确认");
+                return SafetyCheckResult.Failed($"天车已有版（D5029={status.HasRoller}），需人工确认");
+            }
+
+            Console.WriteLine($"[CraneService] [{_name}] ✔ 安全检查通过");
+            return SafetyCheckResult.Passed();
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  自动任务握手信号（D5100~D5103）—— 2→0 脉冲模式
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// 数据下发完成（D5100）：写2触发 → 写0复位。
+        /// 上位机下发所有加工参数后调用，通知天车可以开始搬运。
+        /// </summary>
+        public async Task SetDataSentDoneAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 数据下发完成 D5100");
+            await WriteRegAsync(Addr.D_DataSentDone, 2, "数据下发完成(触发) D5100", ct);
+            await WriteRegAsync(Addr.D_DataSentDone, 0, "数据下发完成(复位) D5100", ct);
+        }
+
+        /// <summary>
+        /// 尾座已松开到位（D5101）：写2触发 → 写0复位。
+        /// 上位机确认源设备尾座已松开后调用，通知天车可以取料。
+        /// </summary>
+        public async Task SetTailstockOpenedAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 尾座松开到位 D5101");
+            await WriteRegAsync(Addr.D_TailstockOpened, 2, "尾座松开到位(触发) D5101", ct);
+            await WriteRegAsync(Addr.D_TailstockOpened, 0, "尾座松开到位(复位) D5101", ct);
+        }
+
+        /// <summary>
+        /// 目标设备尾座夹紧到位（D5102）：写2触发 → 写0复位。
+        /// 上位机确认目标设备已夹紧工件后调用。
+        /// </summary>
+        public async Task SetTargetTailstockClampedAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 目标尾座夹紧到位 D5102");
+            await WriteRegAsync(Addr.D_TargetTailstockClamped, 2, "目标尾座夹紧(触发) D5102", ct);
+            await WriteRegAsync(Addr.D_TargetTailstockClamped, 0, "目标尾座夹紧(复位) D5102", ct);
+        }
+
+        /// <summary>
+        /// 天车控制命令（D5103）：开始=1, 忙碌=2, 停止=3, 空闲=4。
+        /// 自动流程中写 1 触发天车执行已下发的任务。
+        /// </summary>
+        /// <param name="command">1=开始, 2=忙碌, 3=停止, 4=空闲</param>
+        public async Task SetStartStopCommandAsync(int command, CancellationToken ct = default)
+        {
+            string label = command switch { 1 => "开始", 2 => "忙碌", 3 => "停止", 4 => "空闲", _ => $"未知({command})" };
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 控制命令 D5103={command} ({label})");
+            // D5103 是持续状态而非脉冲，只写一次不复位
+            await WriteRegAsync(Addr.D_StartStop, command, $"控制命令({label}) D5103", ct);
+        }
+
+        // ─── 相对运动 速度/加减速设置 ───────────────────────────────
+
+        /// <summary>
+        /// 设置 XYZ 三轴的相对位移 速度/加速度/减速度。
+        /// 手动点动（X±/Y±/Z±）通过 D4501（距离）+ D4502（方向）+ D4503~D4505（触发）
+        /// 走的是相对运动模式，PLC 按此处设置的相对速度运行。
+        /// </summary>
+        /// <param name="speed">相对位移速度（三轴统一值，写 D2504/D2513/D2522）</param>
+        /// <param name="accel">相对位移加速度（三轴统一值，写 D2505/D2514/D2523）</param>
+        /// <param name="decel">相对位移减速度（三轴统一值，写 D2506/D2515/D2524）</param>
+        public async Task SetRelSpeedAsync(int speed, int accel, int decel, CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 设置相对速度 speed={speed} accel={accel} decel={decel}");
+            // 速度寄存器是配置参数，不需要手动模式
+
+            // X 轴相对位移速度/加减速：D2504~D2506
+            await WriteRegAsync(Addr.D_XRelSpeed, speed, "X相对速度 D2504", ct);
+            await WriteRegAsync(Addr.D_XRelAccel, accel, "X相对加速度 D2505", ct);
+            await WriteRegAsync(Addr.D_XRelDecel, decel, "X相对减速度 D2506", ct);
+
+            // Y 轴相对位移速度/加减速：D2513~D2515
+            await WriteRegAsync(Addr.D_YRelSpeed, speed, "Y相对速度 D2513", ct);
+            await WriteRegAsync(Addr.D_YRelAccel, accel, "Y相对加速度 D2514", ct);
+            await WriteRegAsync(Addr.D_YRelDecel, decel, "Y相对减速度 D2515", ct);
+
+            // Z 轴相对位移速度/加减速：D2522~D2524
+            await WriteRegAsync(Addr.D_ZRelSpeed, speed, "Z相对速度 D2522", ct);
+            await WriteRegAsync(Addr.D_ZRelAccel, accel, "Z相对加速度 D2523", ct);
+            await WriteRegAsync(Addr.D_ZRelDecel, decel, "Z相对减速度 D2524", ct);
+
+            Console.WriteLine($"[CraneService] [{_name}] ✔ 相对速度设置完成（9个寄存器）");
+        }
+
+        // ─── 绝对位移 速度/加减速设置 ───────────────────────────────
+
+        /// <summary>
+        /// 设置 XYZ 三轴的绝对位移 速度/加速度/减速度。
+        /// 绝对移动前必须先调用此方法设置运行参数，否则 PLC 以默认速度运行。
+        /// <para>寄存器：X=D2501~D2503, Y=D2510~D2512, Z=D2519~D2521（三轴统一值）。</para>
+        /// </summary>
+        public async Task SetAbsSpeedAsync(int speed, int accel, int decel, CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 设置绝对速度 speed={speed} accel={accel} decel={decel}");
+            // 速度寄存器是配置参数，不需要手动模式（不在 D4500~D4518 手动操作区内）
+
+            await WriteRegAsync(Addr.D_XAbsSpeed, speed, "X绝对速度 D2501", ct);
+            await WriteRegAsync(Addr.D_XAbsAccel, accel, "X绝对加速度 D2502", ct);
+            await WriteRegAsync(Addr.D_XAbsDecel, decel, "X绝对减速度 D2503", ct);
+
+            await WriteRegAsync(Addr.D_YAbsSpeed, speed, "Y绝对速度 D2510", ct);
+            await WriteRegAsync(Addr.D_YAbsAccel, accel, "Y绝对加速度 D2511", ct);
+            await WriteRegAsync(Addr.D_YAbsDecel, decel, "Y绝对减速度 D2512", ct);
+
+            await WriteRegAsync(Addr.D_ZAbsSpeed, speed, "Z绝对速度 D2519", ct);
+            await WriteRegAsync(Addr.D_ZAbsAccel, accel, "Z绝对加速度 D2520", ct);
+            await WriteRegAsync(Addr.D_ZAbsDecel, decel, "Z绝对减速度 D2521", ct);
+
+            Console.WriteLine($"[CraneService] [{_name}] ✔ 绝对速度设置完成（9个寄存器）");
+        }
+
+        /// <summary>
+        /// 绝对位移：写入目标坐标 → 按 Z 轴方向决定触发顺序 → 轮询到位 → 复位。
+        /// <para>安全规范：Z 下降时先走 XY 再走 Z（防撞），Z 上升时先走 Z 再走 XY（防拖拽）。</para>
+        /// <para>
+        /// X 目标：D3102~D3103（DINT）→ 触发 D4522=2 → 到位后 D4522=0
+        /// Y 目标：D3104~D3105（DINT）→ 触发 D4521=2 → 到位后 D4521=0
+        /// Z 目标：D3106~D3107（DINT）→ 触发 D4520=2 → 到位后 D4520=0
+        /// </para>
+        /// </summary>
+        public async Task MoveAbsoluteAsync(
+            int xTarget, int yTarget, int zTarget,
+            int tolerance = 5, int timeoutMs = 30_000, CancellationToken ct = default)
+        {
+            var activeAxes = new List<string>();
+            if (xTarget >= 0) activeAxes.Add("X");
+            if (yTarget >= 0) activeAxes.Add("Y");
+            if (zTarget >= 0) activeAxes.Add("Z");
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 绝对移动 目标 X={xTarget} Y={yTarget} Z={zTarget} 轴={string.Join(",", activeAxes)}");
+
+            await EnsureManualModeAsync(ct);
+
+            // ── 1. 写入所有目标坐标 ──────────────────────────────────────
+            if (xTarget >= 0)
+                await WriteDintAsync(Addr.D_XAbsTarget, xTarget, "X绝对目标 D3102~D3103", ct);
+            if (yTarget >= 0)
+                await WriteDintAsync(Addr.D_YAbsTarget, yTarget, "Y绝对目标 D3104~D3105", ct);
+            if (zTarget >= 0)
+                await WriteDintAsync(Addr.D_ZAbsTarget, zTarget, "Z绝对目标 D3106~D3107", ct);
+
+            // ── 2. 读取当前 Z，判断升降方向 ──────────────────────────────
+            bool hasZMove = zTarget >= 0;
+            bool zGoingDown = false, zGoingUp = false;
+            if (hasZMove)
+            {
+                var curStatus = await ReadStatusAsync(ct);
+                if (curStatus != null)
+                {
+                    int dz = zTarget - curStatus.ZPos;
+                    zGoingDown = dz < -tolerance;  // 目标 < 当前 → 下降
+                    zGoingUp   = dz > tolerance;   // 目标 > 当前 → 上升
+                    Console.WriteLine($"[CraneService] [{_name}] 当前Z={curStatus.ZPos} 目标Z={zTarget} ΔZ={dz} " +
+                        $"{(zGoingDown ? "↓下降" : zGoingUp ? "↑上升" : "→水平")}");
+                }
+            }
+
+            // ── 3. 接液盘互锁：Z 下降前必须打开，Z 上升后必须关闭 ──────────
+            if (zGoingDown)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] 接液盘互锁：Z下降前先打开接液盘");
+                await DrainOpenAsync(ct);
+                await Task.Delay(500, ct); // 等接液盘打开到位（无DI反馈用延时兜底）
+            }
+
+            // ── 4. 按 Z 方向决定触发顺序 ──────────────────────────────────
+            try
+            {
+                if (zGoingDown)
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] Z下降 → 先走XY再走Z");
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
+                    await PollAxesAsync(xTarget, yTarget, -1, tolerance, timeoutMs / 2, ct);
+                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
+                }
+                else if (zGoingUp)
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] Z上升 → 先走Z再走XY");
+                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
+                    await PollAxesAsync(-1, -1, zTarget, tolerance, timeoutMs / 2, ct);
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
+                }
+                else
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] Z不变 → 三轴同时触发");
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
+                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
+                }
+
+                // ── 4. 轮询等待所有轴到位 ──────────────────────────────────
+                await PollAxesAsync(xTarget, yTarget, zTarget, tolerance, timeoutMs, ct);
+            }
+            finally
+            {
+                // ── 5. 复位所有触发信号 ──────────────────────────────────
+                if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
+                if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
+                if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
+
+                // ── 接液盘互锁：Z 上升后关闭接液盘 ────────────────────
+                if (zGoingUp)
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] 接液盘互锁：Z上升后关闭接液盘");
+                    await DrainCloseAsync(ct);
+                }
+            }
+
+            Console.WriteLine($"[CraneService] [{_name}] ✔ 绝对移动完成，触发已复位");
+        }
+
+        /// <summary>
+        /// Z 轴步进下探：取料时 Z 已到目标但磁铁没触发 → 再降 stepDistance mm → 再查。
+        /// 重复直到检到版(D5029=1)或超过 maxSteps 次。
+        /// </summary>
+        /// <param name="stepDistance">每次下探步距 mm（默认5）</param>
+        /// <param name="maxSteps">最大步数（默认10，即最多再降50mm）</param>
+        /// <returns>true=检到版，false=步数用完仍未检到版</returns>
+        public async Task<bool> StepDownUntilPickupAsync(int stepDistance = 5, int maxSteps = 10, CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ Z轴步进下探 step={stepDistance}mm maxSteps={maxSteps}");
+
+            for (int i = 1; i <= maxSteps; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var status = await ReadStatusAsync(ct);
+                if (status != null && status.HasRoller == 1)
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] ✔ Z步进下探：检到版 D5029=1（第{i}步） Z={status.ZPos}");
+                    return true;
+                }
+
+                // 在当前 Z 基础上再降 stepDistance
+                int nextZ = (status?.ZPos ?? 0) - stepDistance;
+                Console.WriteLine($"[CraneService] [{_name}]   Z步进 {i}/{maxSteps}：当前Z={status?.ZPos} → 目标Z={nextZ}");
+
+                await WriteDintAsync(Addr.D_ZAbsTarget, nextZ, "Z步进目标 D3106~D3107", ct);
+                await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z步进触发 D4520", ct);
+                await Task.Delay(500, ct);
+                await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z步进复位 D4520", ct);
+            }
+
+            Console.WriteLine($"[CraneService] [{_name}] ⚠ Z步进下探：{maxSteps}步后仍未检到版");
+            return false;
+        }
+
+        /// <summary>
+        /// 轮询等待指定轴到位（-1 表示跳过该轴）。
+        /// 首次超时后自动补偿重试一次（偏差较大时微调再试），仍失败才抛异常。
+        /// </summary>
+        private async Task PollAxesAsync(int xTarget, int yTarget, int zTarget,
+            int tolerance, int timeoutMs, CancellationToken ct)
+        {
+            bool retried = false;
+
+        retry:
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (DateTime.UtcNow < deadline)
+            {
+                ct.ThrowIfCancellationRequested();
+                await Task.Delay(500, ct);
+
+                var status = await ReadStatusAsync(ct);
+                if (status == null) continue;
+
+                bool xOk = xTarget < 0 || Math.Abs(status.XPos - xTarget) <= tolerance;
+                bool yOk = yTarget < 0 || Math.Abs(status.YPos - yTarget) <= tolerance;
+                bool zOk = zTarget < 0 || Math.Abs(status.ZPos - zTarget) <= tolerance;
+
+                if (xOk && yOk && zOk)
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] ✔ 到位 X={status.XPos} Y={status.YPos} Z={status.ZPos}" +
+                        (retried ? "（补偿后）" : ""));
+                    return;
+                }
+
+                if (DateTime.UtcNow >= deadline && !retried)
+                {
+                    // 首次超时 → 补偿重试：以当前位置再触发一次微调
+                    Console.WriteLine($"[CraneService] [{_name}] ⚠ 首次未到位，触发补偿重试...");
+                    Console.WriteLine($"[CraneService] [{_name}]   偏差 ΔX={status.XPos - xTarget} ΔY={status.YPos - yTarget} ΔZ={status.ZPos - zTarget}");
+
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X补偿重试触发 D4522", ct);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y补偿重试触发 D4521", ct);
+                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z补偿重试触发 D4520", ct);
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X补偿重试复位 D4522", ct);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y补偿重试复位 D4521", ct);
+                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z补偿重试复位 D4520", ct);
+
+                    retried = true;
+                    goto retry;
+                }
+            }
+
+            throw new TimeoutException($"[CraneService] [{_name}] 绝对移动超时（含补偿），当前 X={xTarget} Y={yTarget} Z={zTarget}");
+        }
+
+        /// <summary>
+        /// 原子写入 DINT（32bit）到两个连续 Modbus 寄存器（FC16 Write Multiple Registers）。
+        /// 一次 FC16 请求完成高字+低字写入，PLC 不会读到半新半旧的中间值。
+        /// </summary>
+        private async Task WriteDintAsync(int startAddr, int value, string label, CancellationToken ct)
+        {
+            await _client.WriteInt32Async(startAddr, value, ct);
+            Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{startAddr}~D{startAddr + 1}={value}");
+        }
+
+        // ─── 辅助：统一写入并打印调试日志 ───────────────────────────
+
+        /// <summary>写单个寄存器，并输出调试日志。</summary>
+        private async Task WriteRegAsync(int address, int value, string label, CancellationToken ct)
+        {
+            try
+            {
+                // 使用公共 WriteAsync（FC06 单寄存器写入）
+                await _client.WriteAsync(address, value, ct);
+                Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{address}={value}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] ✘ {label} 写入失败 D{address}：{ex.Message}");
+                throw;
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 天车状态快照（D5000~D5029）
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>天车状态快照（对应一次批量读取 D5000~D5029 的结果）。</summary>
+    public class CraneStatus
+    {
+        public short RequestData         { get; set; }  // D5000
+        public short ArrivedMagnet       { get; set; }  // D5001
+        public short PickDone            { get; set; }  // D5002
+        public short ArrivedTarget       { get; set; }  // D5003
+        public short LoadDone            { get; set; }  // D5004
+        public short CurrentTaskNo       { get; set; }  // D5005
+        /// <summary>忙碌(1) / 空闲(0)</summary>
+        public short Busy                { get; set; }  // D5006
+        public short StateMachineStep    { get; set; }  // D5007
+        /// <summary>模式：自动(1) / 手动(2)</summary>
+        public short Mode                { get; set; }  // D5008
+        /// <summary>故障标志：正常(0) / 故障(1)</summary>
+        public short Fault               { get; set; }  // D5009
+        /// <summary>运行条件缺失位图（0=全满足）</summary>
+        public short RunConditionMissing { get; set; }  // D5010
+        /// <summary>伺服报警位图（0=无报警）</summary>
+        public short ServoAlarm          { get; set; }  // D5011
+        public short PlcServoAlarm       { get; set; }  // D5012
+        public short PlcAlarm            { get; set; }  // D5013
+        /// <summary>X轴绝对编码器值（DINT，D5014~D5015）</summary>
+        public int   XEncoderAbs         { get; set; }
+        /// <summary>X轴原点清零值（DINT，D5016~D5017）</summary>
+        public int   XEncoderZero        { get; set; }
+        /// <summary>X轴显示坐标（DINT，D5018~D5019）</summary>
+        public int   XPos                { get; set; }
+        public int   YEncoderAbs         { get; set; }  // D5020（ushort→int）
+        public int   YEncoderZero        { get; set; }  // D5021（ushort→int）
+        /// <summary>Y轴显示坐标（INT，0~65535）</summary>
+        public int   YPos                { get; set; }  // D5022（ushort→int，无符号避免 32768+ 显示为负数）
+        public int   ZEncoderAbs         { get; set; }  // D5023（ushort→int）
+        public int   ZEncoderZero        { get; set; }  // D5024（ushort→int）
+        /// <summary>Z轴显示坐标（INT，0~65535）</summary>
+        public int   ZPos                { get; set; }  // D5025（ushort→int，无符号避免 32768+ 显示为负数）
+        public short PlcSeqNo            { get; set; }  // D5026
+        public short TaskSourceDevice    { get; set; }  // D5027
+        public short TaskTargetDevice    { get; set; }  // D5028
+        /// <summary>有版(1) / 无版(0)</summary>
+        public short HasRoller           { get; set; }  // D5029
+    }
+}
