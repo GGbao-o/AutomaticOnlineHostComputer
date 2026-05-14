@@ -129,7 +129,7 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
             if (first != null)
             {
                 Console.WriteLine($"[CraneCardVM] [{CraneName}] 首次读取成功。");
-                UpdateUiFromStatus(first);
+                await UpdateUiFromStatusAsync(first);
             }
             else
             {
@@ -173,7 +173,7 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
                 var status = await _service.ReadStatusAsync(ct);
                 if (status != null)
                 {
-                    UpdateUiFromStatus(status);
+                    await UpdateUiFromStatusAsync(status);
                 }
                 else
                 {
@@ -210,14 +210,19 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>将 <see cref="CraneStatus"/> 快照映射到 UI 绑定属性（Line1~5 + 颜色）。</summary>
-    private void UpdateUiFromStatus(CraneStatus s)
+    private async Task UpdateUiFromStatusAsync(CraneStatus s)
     {
         var hasFault = s.Fault != 0 || s.ServoAlarm != 0 || s.PlcAlarm != 0;
         Line1 = hasFault ? "已连接 | 故障" : "已连接，就绪";
         Line1Brush = hasFault ? Brushes.Red : Brushes.Green;
         ConnectedBrush = hasFault ? Brushes.Red : Brushes.LimeGreen;
         Line2 = s.Busy == 1 ? $"执行任务 #{s.CurrentTaskNo}" : "无任务";
-        Line3 = s.Mode == 1 ? "自动模式" : (s.Mode == 2 ? "手动模式" : $"模式未知({s.Mode})");
+
+        string modeText = s.Mode switch { 1 => "自动", 2 => "手动", _ => "待机" };
+        // D5029 HasRoller: 1=有版(充磁吸住) 0=无版(退磁松开)，无需额外读D63488
+        string magText = s.HasRoller == 1 ? " | 充磁到位" : " | 退磁到位";
+        Line3 = $"{modeText}模式{magText}";
+
         Line4 = s.RunConditionMissing != 0 ? $"条件缺失 0x{s.RunConditionMissing:X4}" : "运行条件满足";
         Line5 = $"{(s.HasRoller == 1 ? "有版" : "无版")} | X={s.XPos}  Y={s.YPos}  Z={s.ZPos}";
 

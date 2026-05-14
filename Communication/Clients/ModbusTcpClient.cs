@@ -173,15 +173,18 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
 
         /// <summary>
         /// 原子写入一个 Int32 值到两个连续 Modbus 寄存器（FC16 Write Multiple Registers）。
-        /// 高字在前（Big-Endian）。一次 FC16 请求完成，PLC 不会读到半新半旧的中间态。
+        /// 小端（Little-Endian）：低字在前（startAddr），高字在后（startAddr+1）。
+        /// 与汇川 PLC 的 32 位有符号整数小端字节交换一致。
+        /// 一次 FC16 请求完成，PLC 不会读到半新半旧的中间态。
         /// </summary>
-        /// <param name="startAddr">起始寄存器地址（高字）</param>
-        /// <param name="value">32 位整数值</param>
+        /// <param name="startAddr">起始寄存器地址（低字）</param>
+        /// <param name="value">32 位有符号整数值</param>
         public async Task WriteInt32Async(int startAddr, int value, CancellationToken ct = default)
         {
-            ushort hi = (ushort)((value >> 16) & 0xFFFF);
-            ushort lo = (ushort)(value & 0xFFFF);
-            await WriteMultipleRegistersAsync((ushort)startAddr, new[] { hi, lo }, ct);
+            ushort lo = (ushort)(value & 0xFFFF);          // bits 0~15
+            ushort hi = (ushort)((value >> 16) & 0xFFFF);  // bits 16~31
+            // 小端：低字在前 @ startAddr，高字在后 @ startAddr+1
+            await WriteMultipleRegistersAsync((ushort)startAddr, new[] { lo, hi }, ct);
         }
 
         /// <inheritdoc/>
@@ -254,6 +257,45 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             };
             var resp = await SendRequestAsync(pdu, 2 + count * 2, ct);
             // resp[0]=FC, resp[1]=字节数, resp[2..]=数据
+            var result = new ushort[count];
+            for (int i = 0; i < count; i++)
+                result[i] = (ushort)((resp[2 + i * 2] << 8) | resp[3 + i * 2]);
+            return result;
+        }
+
+        /// <summary>读线圈（FC=01）。X区二进制信号位，每个地址对应一个X点。</summary>
+        public async Task<bool> ReadCoilAsync(int address, CancellationToken ct = default)
+        {
+            var pdu = new byte[]
+            {
+                0x01,  // FC01 Read Coils
+                (byte)(address >> 8), (byte)(address & 0xFF),
+                0x00, 0x01  // count=1
+            };
+            var resp = await SendRequestAsync(pdu, 2, ct);
+            // resp[0]=FC, resp[1]=字节数(1), resp[2]=数据字节
+            return (resp[2] & 0x01) != 0;
+        }
+
+        /// <summary>读输入寄存器（FC=04）。D63488等只读区必须用此方法。</summary>
+        public async Task<int[]> ReadInputRegistersAsync(int startAddr, int count, CancellationToken ct = default)
+        {
+            var raw = await ReadInputRegistersInternalAsync((ushort)startAddr, (ushort)count, ct);
+            var result = new int[count];
+            for (int i = 0; i < count; i++)
+                result[i] = (short)raw[i];
+            return result;
+        }
+
+        private async Task<ushort[]> ReadInputRegistersInternalAsync(ushort startAddr, ushort count, CancellationToken ct)
+        {
+            var pdu = new byte[]
+            {
+                0x04,  // FC04 Read Input Registers（只读寄存器）
+                (byte)(startAddr >> 8), (byte)(startAddr & 0xFF),
+                (byte)(count     >> 8), (byte)(count     & 0xFF)
+            };
+            var resp = await SendRequestAsync(pdu, 2 + count * 2, ct);
             var result = new ushort[count];
             for (int i = 0; i < count; i++)
                 result[i] = (ushort)((resp[2 + i * 2] << 8) | resp[3 + i * 2]);

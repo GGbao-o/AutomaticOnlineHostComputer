@@ -6,6 +6,18 @@ using Addr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CraneAddr
 
 namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 {
+    /// <summary>下压信号触发导致的运动停止异常。</summary>
+    public sealed class PressureStopException : Exception
+    {
+        public string CraneName { get; }
+        public PressureStopException(string craneName)
+            : base($"下压信号触发 D4523，{craneName} 当前运动已紧急停止。手动恢复：①写D4523=0 ②清除报警D4514=2→0")
+        {
+            CraneName = craneName;
+        }
+    }
+
+    /// <summary>
     /// <summary>
     /// 天车通信服务（汇川 PLC，Modbus TCP）。
     /// <para>
@@ -98,10 +110,11 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     ServoAlarm          = (short)r[11],  // D5011
                     PlcServoAlarm       = (short)r[12],  // D5012
                     PlcAlarm            = (short)r[13],  // D5013
-                    // D5014~D5015 DINT：X轴绝对编码器（高字在前，大端序）
-                    XEncoderAbs  = (r[14] << 16) | (r[15] & 0xFFFF),  // D5014~5015
-                    XEncoderZero = (r[16] << 16) | (r[17] & 0xFFFF),  // D5016~5017
-                    XPos         = (r[18] << 16) | (r[19] & 0xFFFF),  // D5018~5019
+                    // DINT=32位有符号，小端（低字在前）：D5014=低字 D5015=高字
+                    // r[N] 被 IntValues 强转 short，必须先 &0xFFFF 清符号位再组合
+                    XEncoderAbs  = ((r[15] & 0xFFFF) << 16) | (r[14] & 0xFFFF),  // D5014(低)+D5015(高)
+                    XEncoderZero = ((r[17] & 0xFFFF) << 16) | (r[16] & 0xFFFF),  // D5016(低)+D5017(高)
+                    XPos         = ((r[19] & 0xFFFF) << 16) | (r[18] & 0xFFFF),  // D5018(低)+D5019(高)
                     YEncoderAbs  = (ushort)r[20],  // D5020
                     YEncoderZero = (ushort)r[21],  // D5021
                     YPos         = (ushort)r[22],  // D5022（无符号，0~65535）
@@ -301,72 +314,108 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             Console.WriteLine($"[CraneService] [{_name}] ▶ 清除报警");
             await EnsureManualModeAsync(ct);
             await WriteRegAsync(Addr.D_ManualClearAlarm, 2, "清除报警(触发)", ct);
+            await Task.Delay(50, ct); // 50ms 间隔确保 PLC 捕获上升沿
             await WriteRegAsync(Addr.D_ManualClearAlarm, 0, "清除报警(复位)", ct);
         }
 
         // ─── 充磁 / 退磁 ─────────────────────────────────────────────
 
         /// <summary>
-        /// 手动充磁：写 D4500=2（首次）→ D4510=2 触发 → D4510=0 复位。
+        /// 读 X 区输入信号（D63488起始，每个16bit寄存器=16个X点）。
+        /// X0~X15在D63488，X16~X31在D63489...
         /// </summary>
-        public async Task MagnetOnAsync(CancellationToken ct = default)
+        /// <summary>读 X 输入信号（FC01 Read Coils，地址=63488+X编号，如X6=63494）。</summary>
+        public async Task<bool> ReadXBitAsync(int address, CancellationToken ct = default)
         {
-            Console.WriteLine($"[CraneService] [{_name}] ▶ 充磁");
-            await EnsureManualModeAsync(ct);
-            await WriteRegAsync(Addr.D_ManualMagnetOn, 2, "充磁(触发)", ct);
-            await WriteRegAsync(Addr.D_ManualMagnetOn, 0, "充磁(复位)", ct);
+            try
+            {
+                return await _client.ReadCoilAsync(address, ct);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] X区读失败 D{address}：{ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
-        /// 退磁释放工件（带容错重试）。
-        /// <para>流程：写 D4511=2→0 → 等 500ms → 读 D5029 确认是否已松开。</para>
-        /// <para>失败累计 10 次 → 先充磁再退磁（参考项目验证的"充磁→退磁"容错策略）。</para>
-        /// <para>总重试上限 50 次（~25s），超限抛异常避免传感器故障时无限循环。</para>
+        /// 充磁：D4510=2触发 → 轮询X6(FC01)或D5029=1 → D4510=0停止。
+        /// </summary>
+        public async Task MagnetOnAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 充磁 D4510=2");
+            await EnsureManualModeAsync(ct);
+            await WriteRegAsync(Addr.D_ManualMagnetOn, 2, "充磁(触发)", ct);
+
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            bool ok = false;
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(100, ct);
+                bool x6 = await ReadXBitAsync(Addr.D_X6_MagnetizeOk, ct);
+                if (x6) { Console.WriteLine($"[CraneService] [{_name}] ✔ X6充磁反馈=1"); ok = true; break; }
+            }
+            if (!ok) Console.WriteLine($"[CraneService] [{_name}] ⚠ 充磁反馈超时3s，X6未置1");
+            await WriteRegAsync(Addr.D_ManualMagnetOn, 0, "充磁(停止)", ct);
+        }
+
+        /// <summary>
+        /// 退磁释放工件：D4511=2 → 轮询X7(FC01)=1 → D4511=0 → 查D5029=0确认。
+        /// 失败容错：10次→先充磁再退磁，总上限50次。
         /// </summary>
         public async Task MagnetOffAsync(CancellationToken ct = default)
         {
             Console.WriteLine($"[CraneService] [{_name}] ▶ 退磁释放工件");
             await EnsureManualModeAsync(ct);
 
-            const int maxTotalRetries = 50; // ~25秒上限，防止传感器故障无限循环
+            const int maxTotalRetries = 50;
             int failCount = 0;
             int totalRetries = 0;
 
             while (!ct.IsCancellationRequested && totalRetries < maxTotalRetries)
             {
                 totalRetries++;
-                // 1. 发退磁脉冲
+
                 await WriteRegAsync(Addr.D_ManualMagnetOff, 2, "退磁(触发)", ct);
-                await WriteRegAsync(Addr.D_ManualMagnetOff, 0, "退磁(复位)", ct);
 
-                // 2. 等 PLC 执行退磁动作
-                await Task.Delay(500, ct);
+                bool x7ok = false;
+                var dl = DateTime.UtcNow.AddSeconds(3);
+                while (DateTime.UtcNow < dl)
+                {
+                    await Task.Delay(100, ct);
+                    if (await ReadXBitAsync(Addr.D_X7_DemagnetizeOk, ct))
+                    {
+                        Console.WriteLine($"[CraneService] [{_name}] ✔ X7退磁反馈=1");
+                        x7ok = true;
+                        break;
+                    }
+                }
 
-                // 3. 检查是否有版（D5029 HasRoller）
+                await WriteRegAsync(Addr.D_ManualMagnetOff, 0, "退磁(停止)", ct);
+
                 var status = await ReadStatusAsync(ct);
                 if (status != null && status.HasRoller == 0)
                 {
-                    Console.WriteLine($"[CraneService] [{_name}] ✔ 退磁成功，工件已释放（重试{failCount}次）");
+                    Console.WriteLine($"[CraneService] [{_name}] ✔ 退磁成功 D5029=0（重试{failCount}次）");
                     return;
                 }
 
-                // 4. 退磁失败，累计
                 failCount++;
-                Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁失败（第{failCount}次），工件未释放 D5029={status?.HasRoller}");
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁失败 第{failCount}次 X7={(x7ok?"1":"超时")} D5029={status?.HasRoller}");
 
                 if (failCount >= 10)
                 {
-                    // 参考项目验证的容错策略：先充磁再退磁
-                    Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁连续失败{failCount}次 → 先充磁再退磁（容错策略）");
+                    Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁连续失败{failCount}次 → 先充磁再退磁");
                     failCount = 0;
                     await WriteRegAsync(Addr.D_ManualMagnetOn, 2, "充磁(容错)", ct);
-                    await WriteRegAsync(Addr.D_ManualMagnetOn, 0, "充磁(容错复位)", ct);
+                    await Task.Delay(2000, ct);
+                    await WriteRegAsync(Addr.D_ManualMagnetOn, 0, "充磁(容错停止)", ct);
                     await Task.Delay(300, ct);
                 }
             }
 
             if (totalRetries >= maxTotalRetries)
-                throw new TimeoutException($"退磁失败：超过最大重试次数 {maxTotalRetries}（~25s），请检查电磁铁/D5029传感器");
+                throw new TimeoutException($"退磁失败：超过最大重试次数 {maxTotalRetries}，请检查电磁铁");
         }
 
         /// <summary>
@@ -542,32 +591,27 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         // ─── 相对运动 速度/加减速设置 ───────────────────────────────
 
         /// <summary>
-        /// 设置 XYZ 三轴的相对位移 速度/加速度/减速度。
-        /// 手动点动（X±/Y±/Z±）通过 D4501（距离）+ D4502（方向）+ D4503~D4505（触发）
-        /// 走的是相对运动模式，PLC 按此处设置的相对速度运行。
+        /// 设置各轴独立的相对位移速度/加速度/减速度（手动点动用）。
+        /// <para>寄存器：X=D2504~D2506, Y=D2513~D2515, Z=D2522~D2524。</para>
         /// </summary>
-        /// <param name="speed">相对位移速度（三轴统一值，写 D2504/D2513/D2522）</param>
-        /// <param name="accel">相对位移加速度（三轴统一值，写 D2505/D2514/D2523）</param>
-        /// <param name="decel">相对位移减速度（三轴统一值，写 D2506/D2515/D2524）</param>
-        public async Task SetRelSpeedAsync(int speed, int accel, int decel, CancellationToken ct = default)
+        public async Task SetRelSpeedAsync(int speedX, int accelX, int decelX,
+                                             int speedY, int accelY, int decelY,
+                                             int speedZ, int accelZ, int decelZ,
+                                             CancellationToken ct = default)
         {
-            Console.WriteLine($"[CraneService] [{_name}] ▶ 设置相对速度 speed={speed} accel={accel} decel={decel}");
-            // 速度寄存器是配置参数，不需要手动模式
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 设置相对速度 X={speedX}/{accelX}/{decelX} Y={speedY}/{accelY}/{decelY} Z={speedZ}/{accelZ}/{decelZ}");
 
-            // X 轴相对位移速度/加减速：D2504~D2506
-            await WriteRegAsync(Addr.D_XRelSpeed, speed, "X相对速度 D2504", ct);
-            await WriteRegAsync(Addr.D_XRelAccel, accel, "X相对加速度 D2505", ct);
-            await WriteRegAsync(Addr.D_XRelDecel, decel, "X相对减速度 D2506", ct);
+            await WriteRegAsync(Addr.D_XRelSpeed, speedX, "X相对速度 D2504", ct);
+            await WriteRegAsync(Addr.D_XRelAccel, accelX, "X相对加速度 D2505", ct);
+            await WriteRegAsync(Addr.D_XRelDecel, decelX, "X相对减速度 D2506", ct);
 
-            // Y 轴相对位移速度/加减速：D2513~D2515
-            await WriteRegAsync(Addr.D_YRelSpeed, speed, "Y相对速度 D2513", ct);
-            await WriteRegAsync(Addr.D_YRelAccel, accel, "Y相对加速度 D2514", ct);
-            await WriteRegAsync(Addr.D_YRelDecel, decel, "Y相对减速度 D2515", ct);
+            await WriteRegAsync(Addr.D_YRelSpeed, speedY, "Y相对速度 D2513", ct);
+            await WriteRegAsync(Addr.D_YRelAccel, accelY, "Y相对加速度 D2514", ct);
+            await WriteRegAsync(Addr.D_YRelDecel, decelY, "Y相对减速度 D2515", ct);
 
-            // Z 轴相对位移速度/加减速：D2522~D2524
-            await WriteRegAsync(Addr.D_ZRelSpeed, speed, "Z相对速度 D2522", ct);
-            await WriteRegAsync(Addr.D_ZRelAccel, accel, "Z相对加速度 D2523", ct);
-            await WriteRegAsync(Addr.D_ZRelDecel, decel, "Z相对减速度 D2524", ct);
+            await WriteRegAsync(Addr.D_ZRelSpeed, speedZ, "Z相对速度 D2522", ct);
+            await WriteRegAsync(Addr.D_ZRelAccel, accelZ, "Z相对加速度 D2523", ct);
+            await WriteRegAsync(Addr.D_ZRelDecel, decelZ, "Z相对减速度 D2524", ct);
 
             Console.WriteLine($"[CraneService] [{_name}] ✔ 相对速度设置完成（9个寄存器）");
         }
@@ -575,26 +619,27 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         // ─── 绝对位移 速度/加减速设置 ───────────────────────────────
 
         /// <summary>
-        /// 设置 XYZ 三轴的绝对位移 速度/加速度/减速度。
-        /// 绝对移动前必须先调用此方法设置运行参数，否则 PLC 以默认速度运行。
-        /// <para>寄存器：X=D2501~D2503, Y=D2510~D2512, Z=D2519~D2521（三轴统一值）。</para>
+        /// 设置各轴独立的绝对位移速度/加速度/减速度。
+        /// <para>寄存器：X=D2501~D2503, Y=D2510~D2512, Z=D2519~D2521。</para>
         /// </summary>
-        public async Task SetAbsSpeedAsync(int speed, int accel, int decel, CancellationToken ct = default)
+        public async Task SetAbsSpeedAsync(int speedX, int accelX, int decelX,
+                                             int speedY, int accelY, int decelY,
+                                             int speedZ, int accelZ, int decelZ,
+                                             CancellationToken ct = default)
         {
-            Console.WriteLine($"[CraneService] [{_name}] ▶ 设置绝对速度 speed={speed} accel={accel} decel={decel}");
-            // 速度寄存器是配置参数，不需要手动模式（不在 D4500~D4518 手动操作区内）
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 设置绝对速度 X={speedX}/{accelX}/{decelX} Y={speedY}/{accelY}/{decelY} Z={speedZ}/{accelZ}/{decelZ}");
 
-            await WriteRegAsync(Addr.D_XAbsSpeed, speed, "X绝对速度 D2501", ct);
-            await WriteRegAsync(Addr.D_XAbsAccel, accel, "X绝对加速度 D2502", ct);
-            await WriteRegAsync(Addr.D_XAbsDecel, decel, "X绝对减速度 D2503", ct);
+            await WriteRegAsync(Addr.D_XAbsSpeed, speedX, "X绝对速度 D2501", ct);
+            await WriteRegAsync(Addr.D_XAbsAccel, accelX, "X绝对加速度 D2502", ct);
+            await WriteRegAsync(Addr.D_XAbsDecel, decelX, "X绝对减速度 D2503", ct);
 
-            await WriteRegAsync(Addr.D_YAbsSpeed, speed, "Y绝对速度 D2510", ct);
-            await WriteRegAsync(Addr.D_YAbsAccel, accel, "Y绝对加速度 D2511", ct);
-            await WriteRegAsync(Addr.D_YAbsDecel, decel, "Y绝对减速度 D2512", ct);
+            await WriteRegAsync(Addr.D_YAbsSpeed, speedY, "Y绝对速度 D2510", ct);
+            await WriteRegAsync(Addr.D_YAbsAccel, accelY, "Y绝对加速度 D2511", ct);
+            await WriteRegAsync(Addr.D_YAbsDecel, decelY, "Y绝对减速度 D2512", ct);
 
-            await WriteRegAsync(Addr.D_ZAbsSpeed, speed, "Z绝对速度 D2519", ct);
-            await WriteRegAsync(Addr.D_ZAbsAccel, accel, "Z绝对加速度 D2520", ct);
-            await WriteRegAsync(Addr.D_ZAbsDecel, decel, "Z绝对减速度 D2521", ct);
+            await WriteRegAsync(Addr.D_ZAbsSpeed, speedZ, "Z绝对速度 D2519", ct);
+            await WriteRegAsync(Addr.D_ZAbsAccel, accelZ, "Z绝对加速度 D2520", ct);
+            await WriteRegAsync(Addr.D_ZAbsDecel, decelZ, "Z绝对减速度 D2521", ct);
 
             Console.WriteLine($"[CraneService] [{_name}] ✔ 绝对速度设置完成（9个寄存器）");
         }
@@ -752,6 +797,24 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 ct.ThrowIfCancellationRequested();
                 await Task.Delay(500, ct);
 
+                // ── 下压信号检测：触发则立即停止XYZ当前运动 ──
+                if (zTarget >= 0)
+                {
+                    bool pStop = await IsPressureEStopAsync(ct);
+                    if (pStop)
+                    {
+                        Console.WriteLine($"══════════════════════════════════════");
+                        Console.WriteLine($"  [CraneService] [{_name}] ⚠⚠⚠ 下压信号触发 D4523=1 ⚠⚠⚠");
+                        Console.WriteLine($"  磁铁已接触工件/障碍物，立即停止 XYZ 当前运动");
+                        Console.WriteLine($"  恢复步骤：①写D4523=0 ②清除报警D4514=2→0");
+                        Console.WriteLine($"══════════════════════════════════════");
+                        if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X下压停止复位", ct);
+                        if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y下压停止复位", ct);
+                        if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z下压停止复位", ct);
+                        throw new PressureStopException(_name);
+                    }
+                }
+
                 var status = await ReadStatusAsync(ct);
                 if (status == null) continue;
 
@@ -789,7 +852,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
         /// <summary>
         /// 原子写入 DINT（32bit）到两个连续 Modbus 寄存器（FC16 Write Multiple Registers）。
-        /// 一次 FC16 请求完成高字+低字写入，PLC 不会读到半新半旧的中间值。
+        /// 小端（低字在前 @ startAddr，高字在后 @ startAddr+1），与汇川 PLC 一致。
         /// </summary>
         private async Task WriteDintAsync(int startAddr, int value, string label, CancellationToken ct)
         {

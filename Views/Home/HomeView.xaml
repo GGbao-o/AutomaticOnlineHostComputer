@@ -190,87 +190,37 @@
                         VerticalAlignment="Center"
                         Text="手动控制模式" />
 
-                    <!--  相对运动 速度/加减速设置  -->
-                    <TextBlock
-                        Grid.Row="2"
-                        Margin="4"
-                        VerticalAlignment="Center"
-                        Text="相对速度" />
-                    <StackPanel
-                        Grid.Row="2"
-                        Grid.Column="1"
-                        Orientation="Horizontal">
-                        <TextBox
-                            Width="55"
-                            Margin="0,4,2,4"
-                            Text="{Binding ManualControl.RelSpeed, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock
-                            Margin="2,4"
-                            VerticalAlignment="Center"
-                            Text="加速度" />
-                        <TextBox
-                            Width="55"
-                            Margin="2,4"
-                            Text="{Binding ManualControl.RelAccel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock
-                            Margin="2,4"
-                            VerticalAlignment="Center"
-                            Text="减速度" />
-                        <TextBox
-                            Width="55"
-                            Margin="2,4"
-                            Text="{Binding ManualControl.RelDecel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <!--  相对运动 速度/加减速设置（每轴独立）  -->
+                    <TextBlock Grid.Row="2" Margin="4" VerticalAlignment="Center" Text="相对速X" />
+                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
+                        <TextBox Width="45" Margin="0,4,2,4" Text="{Binding ManualControl.RelSpeedX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelAccelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelDecelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="6,4,2,4" VerticalAlignment="Center" Text="Y" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelSpeedY, Mode=TwoWay}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelAccelY, Mode=TwoWay}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelDecelY, Mode=TwoWay}" />
+                        <TextBlock Margin="6,4,2,4" VerticalAlignment="Center" Text="Z" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelSpeedZ, Mode=TwoWay}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelAccelZ, Mode=TwoWay}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelDecelZ, Mode=TwoWay}" />
                     </StackPanel>
-                    <Button
-                        Grid.Row="2"
-                        Grid.Column="2"
-                        Width="70"
-                        Height="26"
-                        Margin="4,0"
-                        VerticalAlignment="Center"
-                        Command="{Binding ManualControl.SetRelSpeedCommand}"
-                        Content="应用速度" />
+                    <Button Grid.Row="2" Grid.Column="2" Width="70" Height="26" Margin="4,0"
+                            VerticalAlignment="Center" Command="{Binding ManualControl.SetRelSpeedCommand}" Content="应用速度" />
 
-                    <!--  绝对运动 速度设置(绝对移动用)  -->
-                    <TextBlock
-                        Grid.Row="3"
-                        Margin="4"
-                        VerticalAlignment="Center"
-                        Text="绝对速度" />
-                    <StackPanel
-                        Grid.Row="3"
-                        Grid.Column="1"
-                        Orientation="Horizontal">
-                        <TextBox
-                            Width="55"
-                            Margin="0,4,2,4"
-                            Text="{Binding ManualControl.AbsSpeed, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock
-                            Margin="2,4"
-                            VerticalAlignment="Center"
-                            Text="加速度" />
-                        <TextBox
-                            Width="55"
-                            Margin="2,4"
-                            Text="{Binding ManualControl.AbsAccel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock
-                            Margin="2,4"
-                            VerticalAlignment="Center"
-                            Text="减速度" />
-                        <TextBox
-                            Width="55"
-                            Margin="2,4"
-                            Text="{Binding ManualControl.AbsDecel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <!--  绝对运动 速度设置(绝对移动用，每轴独立)  -->
+                    <TextBlock Grid.Row="3" Margin="4" VerticalAlignment="Center" Text="绝对速X" />
+                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+                        <TextBox Width="45" Margin="0,4,2,4" Text="{Binding ManualControl.AbsSpeedX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsAccelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsDecelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="6,4,2,4" VerticalAlignment="Center" Text="Y" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsSpeedY, Mode=TwoWay}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsAccelY, Mode=TwoWay}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsDecelY, Mode=TwoWay}" />
+                        <TextBlock Margin="6,4,2,4" VerticalAlignment="Center" Text="Z" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsSpeedZ, Mode=TwoWay}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsAccelZ, Mode=TwoWay}" />
+                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsDecelZ, Mode=TwoWay}" />
                     </StackPanel>
-                    <Button
-                        Grid.Row="3"
-                        Grid.Column="2"
-                        Width="70"
-                        Height="26"
-                        Margin="4,0"
-                        VerticalAlignment="Center"
-                        Command="{Binding ManualControl.SetAbsSpeedCommand}"
-                        Content="应用速度" />
+                    <Button Grid.Row="3" Grid.Column="2" Width="70" Height="26" Margin="4,0"
+                            VerticalAlignment="Center" Command="{Binding ManualControl.SetAbsSpeedCommand}" Content="应用速度" />
 
                     <!--  绝对位移 目标坐标 + 移动按钮  -->
                     <TextBlock

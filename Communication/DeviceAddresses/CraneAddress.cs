@@ -9,7 +9,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
     ///   - 手动操作：D4500~D4518（FC06 写单个寄存器）
     /// </para>
     /// <para>
-    /// 数据类型：INT = 单寄存器 16bit / DINT = 双寄存器 32bit（高字在前 Big-Endian）。
+    /// 数据类型：INT = 单寄存器 16bit / DINT = 双寄存器 32bit（低字在前 Little-Endian）。
     /// 端口：502。所有手动操作前需先写 D4001=2（手动模式），急停 D4518 除外。
     /// </para>
     /// <para>
@@ -77,7 +77,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         /// <summary>D5013 - PLC 报警（INT，位图）</summary>
         public const int D_PlcAlarm = 5013;
 
-        // ─── X 轴编码器（DINT = 2 寄存器，高字在前）────────────────
+        // ─── X 轴编码器（DINT = 2 寄存器，低字在前 Little-Endian）──
         /// <summary>D5014~D5015 - X 轴绝对编码器值（DINT）</summary>
         public const int D_XEncoderAbs  = 5014;
         /// <summary>D5016~D5017 - X 轴原点清零值（DINT）</summary>
@@ -190,6 +190,22 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         public const int D_ManualEStop       = 4518;
         /// <summary>D4523 - 下压急停（INT，PLC检测到压力写1，主机写0清除）。手动恢复流程：①D4523=0 ②清除报警D4514。</summary>
         public const int D_PressureEStop     = 4523;
+
+        // ═══════════════════════════════════════════════════════════════
+        //  X 区输入信号（PLC→上位机，只读，FC01 Read Coils）
+        //  每个 X 点一个独立线圈，地址 = 63488 + X编号
+        //  值：0=OFF, 1=ON
+        // ═══════════════════════════════════════════════════════════════
+        /// <summary>D63488 — X输入基地址（X0=63488, X6=63494, X7=63495...）</summary>
+        public const int D_XInput_Base       = 63488;
+        /// <summary>D63494 — X6 充磁反馈（读，1=充磁到位）</summary>
+        public const int D_X6_MagnetizeOk    = 63494;
+        /// <summary>D63495 — X7 退磁反馈（读，1=退磁到位）</summary>
+        public const int D_X7_DemagnetizeOk  = 63495;
+        /// <summary>D63490 — X2 磁铁下压限位（读，1=触发）</summary>
+        public const int D_X2_MagnetLimit    = 63490;
+        /// <summary>D63499 — X11 检测有版（读，1=有版）</summary>
+        public const int D_X11_HasPlate      = 63499;
         /// <summary>D4519 - Z JOG+（INT，写2触发）</summary>
         public const int D_ManualZJogPlus    = 4519;
         /// <summary>D4520 - 手动Z绝对位移（INT，写2触发）</summary>

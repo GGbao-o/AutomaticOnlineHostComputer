@@ -112,91 +112,79 @@ public sealed class HomeViewModel : ObservableObject
         _manipulatorCache.LoadFromMachineRows(machineRows);
         ManualControl.NotifyMappingsUpdated();
 
-        Console.WriteLine("[HomeViewModel] 开始启动5台天车卡片：连接成功后读取，轮询5s...");
-        await Task.WhenAll(
-            SafeStartAsync(Crane1F),
-            SafeStartAsync(Crane1R),
-            SafeStartAsync(Crane2F),
-            SafeStartAsync(Crane2R),
-            SafeStartAsync(CraneGL)
-        );
-
-        Console.WriteLine("[HomeViewModel] 开始启动3台机械手卡片：连接成功后读取，轮询5s...");
-        await Task.WhenAll(
-            SafeStartManipulatorAsync(Manipulator1),
-            SafeStartManipulatorAsync(Manipulator2),
-            SafeStartManipulatorAsync(Manipulator3)
-        );
-
         // ── 装载工位坐标到引擎 ──────────────────────────────────────
         _flowEngine.LoadStationCoords(machineRows);
         Console.WriteLine("[HomeViewModel] 引擎已装载工位坐标缓存");
 
-        // ── 启动研磨机卡片（IP从已缓存的IpMap取，不重复查库）───────
-        Console.WriteLine("[HomeViewModel] 开始启动4台研磨机卡片...");
-        Grinder1 = await CreateAndStartGrinderAsync("ST701", "研磨机1(新代)",   PlcGrinderService.GrinderType.TypeB);
-        Grinder2 = await CreateAndStartGrinderAsync("ST702", "研磨机2(新代)",   PlcGrinderService.GrinderType.TypeB);
-        Grinder3 = await CreateAndStartGrinderAsync("ST703", "研磨机3(西门子)", PlcGrinderService.GrinderType.TypeA);
-        Grinder4 = await CreateAndStartGrinderAsync("ST704", "研磨机4(西门子)", PlcGrinderService.GrinderType.TypeA);
-        OnPropertyChanged(nameof(Grinder1));
-        OnPropertyChanged(nameof(Grinder2));
-        OnPropertyChanged(nameof(Grinder3));
-        OnPropertyChanged(nameof(Grinder4));
-
         // ── 初始化全厂状态卡片 ──────────────────────────────────────
         Console.WriteLine("[HomeViewModel] 开始初始化全厂状态总览卡片...");
-
-        // 必须新建字典替换（不能 Clear+Add），否则 WPF 绑定引擎不刷新
         var newCards = new Dictionary<string, StationCardViewModel>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in machineRows)
         {
-            // 没有站号的跳过
             if (string.IsNullOrWhiteSpace(row.StationCode)) continue;
             var code = row.StationCode.Trim().ToUpperInvariant();
-
-            // 天车和机械手已在独立卡片中管理，状态总览区不重复
             var typeName = row.TypeName?.Trim() ?? string.Empty;
             if (typeName == "天车" || typeName == "机械手") continue;
-
-            // 研磨机由 GrinderPollLoopAsync 独占 PlcGrinderService 连接，
-            // 站卡仍创建（XAML绑定需要），但IP留空不启动通用Modbus轮询，避免双连接互踢
-            bool isGrinder = code == "ST701" || code == "ST702" || code == "ST703" || code == "ST704";
+            bool isGrinder = code is "ST701" or "ST702" or "ST703" or "ST704";
             var rawIp = string.IsNullOrWhiteSpace(row.Ip) ? "未配置IP" : row.Ip.Trim();
-            var ip = isGrinder ? "未配置IP" : rawIp; // 研磨机假装没IP，不启动StationCard轮询
-            var card = new StationCardViewModel(
-                code,
-                string.IsNullOrWhiteSpace(row.Name) ? code : row.Name.Trim(),
-                ip,
-                row.Port > 0 ? row.Port : 502,
-                typeName.Length > 0 ? typeName : "ModbusTCP");
-
+            var ip = isGrinder ? "未配置IP" : rawIp;
+            var card = new StationCardViewModel(code, string.IsNullOrWhiteSpace(row.Name) ? code : row.Name.Trim(),
+                ip, row.Port > 0 ? row.Port : 502, typeName.Length > 0 ? typeName : "ModbusTCP");
             newCards[code] = card;
-            // 研磨机站卡IP用于显示，实际连接由GrinderPollLoopAsync管理
             if (isGrinder) card.IpText = rawIp;
-            Console.WriteLine($"[HomeViewModel] 站卡 {code} {card.Title} IP={ip}" + (isGrinder ? "（研磨机，由GrinderPoll独占）" : ""));
         }
-
-        // 替换字典 → 触发 WPF 全局刷新所有站卡绑定
         StationCards = newCards;
 
-        // 启动所有有 IP 的站卡轮询（并发）
-        var startTasks = newCards.Values
-            .Where(c => c.HasIp)
-            .Select(c => SafeStartStationAsync(c))
-            .ToList();
-        if (startTasks.Count > 0)
-        {
-            await Task.WhenAll(startTasks);
-            Console.WriteLine($"[HomeViewModel] {startTasks.Count} 个站卡轮询已启动");
-        }
+        // ── 创建研磨机卡片（IP从IpMap缓存取，不启动连接）───────────
+        Grinder1 = CreateGrinderCard("ST701", "研磨机1(新代)",   PlcGrinderService.GrinderType.TypeB);
+        Grinder2 = CreateGrinderCard("ST702", "研磨机2(新代)",   PlcGrinderService.GrinderType.TypeB);
+        Grinder3 = CreateGrinderCard("ST703", "研磨机3(西门子)", PlcGrinderService.GrinderType.TypeA);
+        Grinder4 = CreateGrinderCard("ST704", "研磨机4(西门子)", PlcGrinderService.GrinderType.TypeA);
+        OnPropertyChanged(nameof(Grinder1)); OnPropertyChanged(nameof(Grinder2));
+        OnPropertyChanged(nameof(Grinder3)); OnPropertyChanged(nameof(Grinder4));
 
-        // ── 研磨机自动连接（4台：ST701/ST702新代 + ST703/ST704西门子） ──
-        await StartGrinderConnectionsAsync(newCards);
-
-        Console.WriteLine("[HomeViewModel] 主页面全部功能启动流程结束。");
-        OnPropertyChanged(nameof(IpMap));
+        // ═══════════════════════════════════════════════════════════
+        //  缓存全部就绪，关闭加载遮罩。连接放后台不阻塞。
+        // ═══════════════════════════════════════════════════════════
         IsLoading = false;
-        Console.WriteLine("[HomeViewModel] ========== LoadAsync 完成，页面就绪 ==========");
+        OnPropertyChanged(nameof(IpMap));
+        Console.WriteLine("[HomeViewModel] 缓存全部就绪，页面已显示。后台开始连接...");
+
+        _ = Task.Run(async () =>
+        {
+            await Task.WhenAll(
+                SafeStartAsync(Crane1F), SafeStartAsync(Crane1R),
+                SafeStartAsync(Crane2F), SafeStartAsync(Crane2R),
+                SafeStartAsync(CraneGL));
+            Console.WriteLine("[HomeViewModel] 5台天车后台连接完成");
+        });
+        _ = Task.Run(async () =>
+        {
+            await Task.WhenAll(
+                SafeStartManipulatorAsync(Manipulator1),
+                SafeStartManipulatorAsync(Manipulator2),
+                SafeStartManipulatorAsync(Manipulator3));
+            Console.WriteLine("[HomeViewModel] 3台机械手后台连接完成");
+        });
+        _ = Task.Run(async () =>
+        {
+            var tasks = newCards.Values.Where(c => c.HasIp).Select(c => SafeStartStationAsync(c)).ToList();
+            if (tasks.Count > 0) await Task.WhenAll(tasks);
+            Console.WriteLine($"[HomeViewModel] {tasks.Count} 个站卡后台连接完成");
+        });
+        _ = Task.Run(async () =>
+        {
+            await StartGrinderConnectionsAsync(newCards);
+            Console.WriteLine("[HomeViewModel] 研磨机GrinderPoll后台连接完成");
+        });
+        _ = Task.Run(async () =>
+        {
+            await SafeStartGrinderAsync(Grinder1); await SafeStartGrinderAsync(Grinder2);
+            await SafeStartGrinderAsync(Grinder3); await SafeStartGrinderAsync(Grinder4);
+            Console.WriteLine("[HomeViewModel] 4台研磨机卡片后台连接完成");
+        });
+
+        Console.WriteLine("[HomeViewModel] ========== LoadAsync 完成 ==========");
     }
     
     private static async Task SafeStartAsync(CraneCardViewModel vm)
@@ -221,6 +209,21 @@ public sealed class HomeViewModel : ObservableObject
         {
             Console.WriteLine($"[HomeViewModel] [{vm.Name}] StartAsync 异常：{ex.Message}");
         }
+    }
+
+    /// <summary>从IpMap缓存取IP创建研磨机卡片（不启动连接）。</summary>
+    private GrinderCardViewModel CreateGrinderCard(string stationCode, string name, PlcGrinderService.GrinderType type)
+    {
+        string ip = IpMap.TryGetValue(stationCode, out var v) && v != "未配置IP" ? v : "";
+        Console.WriteLine($"[GrinderCard] {name} ({stationCode}) 从IpMap缓存取IP={(string.IsNullOrWhiteSpace(ip) ? "无" : ip)}");
+        return new GrinderCardViewModel(name, ip, type);
+    }
+
+    /// <summary>安全启动研磨机卡片连接（fire-and-forget用）。</summary>
+    private static async Task SafeStartGrinderAsync(GrinderCardViewModel card)
+    {
+        try { await card.StartAsync(); }
+        catch (Exception ex) { Console.WriteLine($"[GrinderCard] [{card.Title}] 后台连接异常：{ex.Message}"); }
     }
 
     /// <summary>从IpMap缓存取IP，创建并启动研磨机卡片。</summary>

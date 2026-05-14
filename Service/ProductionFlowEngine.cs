@@ -264,7 +264,7 @@ public sealed class ProductionFlowEngine : IDisposable
             }
 
             // 2. 设置绝对速度
-            await craneSvc.SetAbsSpeedAsync(DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, ct);
+            await craneSvc.SetAbsSpeedAsync(DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, ct);
 
             // 3. 读取天车当前坐标（日志用）
             var before = await craneSvc.ReadStatusAsync(ct);
@@ -354,7 +354,7 @@ public sealed class ProductionFlowEngine : IDisposable
                 return false;
             }
 
-            await svc.SetAbsSpeedAsync(DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, ct);
+            await svc.SetAbsSpeedAsync(DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, ct);
             // 机械手 X 传 -1 跳过 X 轴
             await svc.MoveAbsoluteAsync(-1, yTarget, zTarget, ct: ct);
 

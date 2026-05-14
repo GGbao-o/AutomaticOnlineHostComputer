@@ -44,6 +44,9 @@ public enum ManualDeviceType
 /// <para>
 /// 机械手选中时自动禁用 X 轴（点动/回原点）、充/退磁、接液盘开/关按钮（机械手无这些硬件功能）。
 /// </para>
+///
+///
+/// 
 /// </summary>
 public sealed class CraneManualControlViewModel : ObservableObject
 {
@@ -118,40 +121,36 @@ public sealed class CraneManualControlViewModel : ObservableObject
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  相对运动 速度设置（D2504~D2506 / D2513~D2515 / D2522~D2524）
-    //  手动点动通过 D4501（距离）+ D4502（方向）+ D4503~D4505（触发）
-    //  走相对运动模式，PLC 按此处的相对速度值运行
+    //  相对运动 速度设置（每个轴独立）
     // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>相对位移速度（默认 500，写 D2504/D2513/D2522）</summary>
-    private int _relSpeed = 500;
-    public int RelSpeed { get => _relSpeed; set => SetField(ref _relSpeed, value); }
-
-    /// <summary>相对位移加速度（默认 200，写 D2505/D2514/D2523）</summary>
-    private int _relAccel = 200;
-    public int RelAccel { get => _relAccel; set => SetField(ref _relAccel, value); }
-
-    /// <summary>相对位移减速度（默认 200，写 D2506/D2515/D2524）</summary>
-    private int _relDecel = 200;
-    public int RelDecel { get => _relDecel; set => SetField(ref _relDecel, value); }
+    public int RelSpeedX { get => _relSpeedX; set => SetField(ref _relSpeedX, value); }
+    public int RelAccelX { get => _relAccelX; set => SetField(ref _relAccelX, value); }
+    public int RelDecelX { get => _relDecelX; set => SetField(ref _relDecelX, value); }
+    public int RelSpeedY { get => _relSpeedY; set => SetField(ref _relSpeedY, value); }
+    public int RelAccelY { get => _relAccelY; set => SetField(ref _relAccelY, value); }
+    public int RelDecelY { get => _relDecelY; set => SetField(ref _relDecelY, value); }
+    public int RelSpeedZ { get => _relSpeedZ; set => SetField(ref _relSpeedZ, value); }
+    public int RelAccelZ { get => _relAccelZ; set => SetField(ref _relAccelZ, value); }
+    public int RelDecelZ { get => _relDecelZ; set => SetField(ref _relDecelZ, value); }
+    private int _relSpeedX=300, _relAccelX=150, _relDecelX=150;
+    private int _relSpeedY=300, _relAccelY=150, _relDecelY=150;
+    private int _relSpeedZ=200, _relAccelZ=100, _relDecelZ=100;
 
     // ═══════════════════════════════════════════════════════════════
-    //  绝对位移 速度/目标设置
-    //  绝对移动流程：写绝对速度 → 写目标坐标(DINT) → 触发D4520~D4522=2
-    //  → 轮询读取 D5018/D5022/D5025 → 到位后复位触发=0
+    //  绝对位移 速度设置（每个轴独立）
     // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>绝对位移速度（默认 500，写 D2501/D2510/D2519）</summary>
-    private int _absSpeed = 500;
-    public int AbsSpeed { get => _absSpeed; set => SetField(ref _absSpeed, value); }
-
-    /// <summary>绝对位移加速度（默认 200，写 D2502/D2511/D2520）</summary>
-    private int _absAccel = 200;
-    public int AbsAccel { get => _absAccel; set => SetField(ref _absAccel, value); }
-
-    /// <summary>绝对位移减速度（默认 200，写 D2503/D2512/D2521）</summary>
-    private int _absDecel = 200;
-    public int AbsDecel { get => _absDecel; set => SetField(ref _absDecel, value); }
+    public int AbsSpeedX { get => _absSpeedX; set => SetField(ref _absSpeedX, value); }
+    public int AbsAccelX { get => _absAccelX; set => SetField(ref _absAccelX, value); }
+    public int AbsDecelX { get => _absDecelX; set => SetField(ref _absDecelX, value); }
+    public int AbsSpeedY { get => _absSpeedY; set => SetField(ref _absSpeedY, value); }
+    public int AbsAccelY { get => _absAccelY; set => SetField(ref _absAccelY, value); }
+    public int AbsDecelY { get => _absDecelY; set => SetField(ref _absDecelY, value); }
+    public int AbsSpeedZ { get => _absSpeedZ; set => SetField(ref _absSpeedZ, value); }
+    public int AbsAccelZ { get => _absAccelZ; set => SetField(ref _absAccelZ, value); }
+    public int AbsDecelZ { get => _absDecelZ; set => SetField(ref _absDecelZ, value); }
+    private int _absSpeedX=150, _absAccelX=100, _absDecelX=50;
+    private int _absSpeedY=50, _absAccelY=30, _absDecelY=20;
+    private int _absSpeedZ=50, _absAccelZ=30, _absDecelZ=20;
 
     /// <summary>绝对位移 X 目标坐标（mm），-1 表示跳过 X 轴</summary>
     private int _absXTarget;
@@ -550,16 +549,10 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     private async Task SetAbsSpeedAsync()
     {
-        if (AbsSpeed <= 0 || AbsAccel <= 0 || AbsDecel <= 0)
-        {
-            Console.WriteLine($"[CraneManualVM] 绝对速度参数无效 speed={AbsSpeed} accel={AbsAccel} decel={AbsDecel}");
-            return;
-        }
-
         var service = await EnsureConnectedServiceAsync();
         var name = CurrentDeviceName;
-        Console.WriteLine($"[CraneManualVM] [{name}] ▶ 写绝对速度 speed={AbsSpeed} accel={AbsAccel} decel={AbsDecel}");
-        await service.SetAbsSpeedAsync(AbsSpeed, AbsAccel, AbsDecel);
+        Console.WriteLine($"[CraneManualVM] [{name}] ▶ 写绝对速度 X={AbsSpeedX}/{AbsAccelX}/{AbsDecelX} Y={AbsSpeedY}/{AbsAccelY}/{AbsDecelY} Z={AbsSpeedZ}/{AbsAccelZ}/{AbsDecelZ}");
+        await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ);
         Console.WriteLine($"[CraneManualVM] [{name}] ✔ 绝对速度设置完成");
     }
 
@@ -571,27 +564,18 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     private async Task MoveAbsoluteAsync()
     {
-        if (AbsSpeed <= 0 || AbsAccel <= 0 || AbsDecel <= 0)
-        {
-            Console.WriteLine($"[CraneManualVM] 请先设置绝对速度（当前 speed={AbsSpeed} accel={AbsAccel} decel={AbsDecel}）");
-            return;
-        }
-
         var service = await EnsureConnectedServiceAsync();
         var name = CurrentDeviceName;
 
-        // 机械手无 X 轴：X 目标强制传 -1 跳过
         int xTarget = IsCraneSelected ? AbsXTarget : -1;
         int yTarget = AbsYTarget;
         int zTarget = AbsZTarget;
 
         Console.WriteLine($"[CraneManualVM] [{name}] ▶ 绝对移动 目标 X={xTarget} Y={yTarget} Z={zTarget}");
-        Console.WriteLine($"[CraneManualVM] [{name}] 使用绝对速度 speed={AbsSpeed} accel={AbsAccel} decel={AbsDecel}");
 
         try
         {
-            // 先写绝对速度，再写目标坐标，触发移动、轮询到位、自动复位
-            await service.SetAbsSpeedAsync(AbsSpeed, AbsAccel, AbsDecel);
+            await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ);
             await service.MoveAbsoluteAsync(xTarget, yTarget, zTarget);
             Console.WriteLine($"[CraneManualVM] [{name}] ✔ 绝对移动完成");
         }
@@ -612,16 +596,10 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     private async Task SetRelSpeedAsync()
     {
-        if (RelSpeed <= 0 || RelAccel <= 0 || RelDecel <= 0)
-        {
-            Console.WriteLine($"[CraneManualVM] 相对速度参数无效 speed={RelSpeed} accel={RelAccel} decel={RelDecel}");
-            return;
-        }
-
         var service = await EnsureConnectedServiceAsync();
         var name = CurrentDeviceName;
-        Console.WriteLine($"[CraneManualVM] [{name}] ▶ 写相对速度 speed={RelSpeed} accel={RelAccel} decel={RelDecel}");
-        await service.SetRelSpeedAsync(RelSpeed, RelAccel, RelDecel);
+        Console.WriteLine($"[CraneManualVM] [{name}] ▶ 写相对速度 X={RelSpeedX}/{RelAccelX}/{RelDecelX} Y={RelSpeedY}/{RelAccelY}/{RelDecelY} Z={RelSpeedZ}/{RelAccelZ}/{RelDecelZ}");
+        await service.SetRelSpeedAsync(RelSpeedX, RelAccelX, RelDecelX, RelSpeedY, RelAccelY, RelDecelY, RelSpeedZ, RelAccelZ, RelDecelZ);
         Console.WriteLine($"[CraneManualVM] [{name}] ✔ 相对速度设置完成");
     }
 
