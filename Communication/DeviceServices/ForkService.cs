@@ -9,8 +9,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
 /// <summary>
 /// 货叉通信服务（三菱 MC 协议，M 寄存器，端口 9000）。
 /// <para>
-/// 货叉由三菱 FX3G PLC 独立控制，3 个气缸完成伸缩动作。
-/// M900~M906 为输入信号（货叉→上位机），M911~M916 为输出信号（上位机→货叉）。
+/// 货叉由独立三菱 FX3G PLC 控制，4 个工位：待机位 / 1号位 / 2号位 / 3号位。
+/// M900~M904 为输入信号（货叉→中控），M911~M914 为输出信号（中控→货叉）。
 /// </para>
 /// </summary>
 public sealed class ForkService : IDisposable
@@ -50,23 +50,24 @@ public sealed class ForkService : IDisposable
 
         var status = new ForkStatus
         {
-            HasPlate          = (raw & (1 << 0)) != 0,  // M900
-            Cyl1RetractLimit  = (raw & (1 << 1)) != 0,  // M901
-            Cyl1ExtendLimit   = (raw & (1 << 2)) != 0,  // M902
-            Cyl2RetractLimit  = (raw & (1 << 3)) != 0,  // M903
-            Cyl2ExtendLimit   = (raw & (1 << 4)) != 0,  // M904
-            Cyl3RetractLimit  = (raw & (1 << 5)) != 0,  // M905
-            Cyl3ExtendInPlace = (raw & (1 << 6)) != 0,  // M906
-            Cyl1RetractCtrl   = (raw & (1 << 11)) != 0, // M911
-            Cyl1ExtendCtrl    = (raw & (1 << 12)) != 0, // M912
-            Cyl2RetractCtrl   = (raw & (1 << 13)) != 0, // M913
-            Cyl2ExtendCtrl    = (raw & (1 << 14)) != 0, // M914
-            Cyl3RetractCtrl   = (raw & (1 << 15)) != 0, // M915
-            RawValue          = raw,
+            // M900~M904: 输入信号（货叉→中控）
+            HasPlate      = (raw & (1 << 0)) != 0,  // M900 bit0
+            AtStandbyPos  = (raw & (1 << 1)) != 0,  // M901 bit1
+            AtPos1        = (raw & (1 << 2)) != 0,  // M902 bit2
+            AtPos2        = (raw & (1 << 3)) != 0,  // M903 bit3
+            AtPos3        = (raw & (1 << 4)) != 0,  // M904 bit4
+
+            // M911~M914: 输出信号（中控→货叉）
+            GoStandby     = (raw & (1 << 11)) != 0, // M911 bit11
+            GoPos1        = (raw & (1 << 12)) != 0, // M912 bit12
+            GoPos2        = (raw & (1 << 13)) != 0, // M913 bit13
+            GoPos3        = (raw & (1 << 14)) != 0, // M914 bit14
+
+            RawValue      = raw,
         };
 
         Console.WriteLine($"[ForkSvc] [{_name}] 状态 M900~M915=0x{raw:X4} " +
-            $"有版={status.HasPlate} 缸1={status.Cyl1State} 缸2={status.Cyl2State} 缸3={status.Cyl3State}");
+            $"有版={status.HasPlate} 待机位={status.AtStandbyPos} 1号位={status.AtPos1} 2号位={status.AtPos2} 3号位={status.AtPos3}");
         return status;
     }
 
@@ -85,18 +86,17 @@ public sealed class ForkService : IDisposable
         Console.WriteLine($"[ForkSvc] [{_name}] 写 M{mAddr}={(value ? 1 : 0)} (word 0x{current:X4}→0x{next:X4})");
     }
 
-    /// <summary>气缸1退回（M911=1）</summary>
-    public Task Cyl1RetractAsync(CancellationToken ct = default) => WriteMBitAsync(Addr.M_Cyl1RetractCtrl, true, ct);
-    /// <summary>气缸1伸出（M912=1）</summary>
-    public Task Cyl1ExtendAsync(CancellationToken ct = default) => WriteMBitAsync(Addr.M_Cyl1ExtendCtrl, true, ct);
-    /// <summary>气缸2退回（M913=1）</summary>
-    public Task Cyl2RetractAsync(CancellationToken ct = default) => WriteMBitAsync(Addr.M_Cyl2RetractCtrl, true, ct);
-    /// <summary>气缸2伸出（M914=1）</summary>
-    public Task Cyl2ExtendAsync(CancellationToken ct = default) => WriteMBitAsync(Addr.M_Cyl2ExtendCtrl, true, ct);
-    /// <summary>气缸3退回（M915=1）</summary>
-    public Task Cyl3RetractAsync(CancellationToken ct = default) => WriteMBitAsync(Addr.M_Cyl3RetractCtrl, true, ct);
-    /// <summary>气缸3伸出（M916=1）</summary>
-    public Task Cyl3ExtendAsync(CancellationToken ct = default) => WriteMBitAsync(Addr.M_Cyl3ExtendCtrl, true, ct);
+    /// <summary>货叉回待机位（M911=1）</summary>
+    public Task GoStandbyAsync(CancellationToken ct = default) => WriteMBitAsync(Addr.M_GoStandby, true, ct);
+
+    /// <summary>货叉去1号位（M912=1）</summary>
+    public Task GoPos1Async(CancellationToken ct = default) => WriteMBitAsync(Addr.M_GoPos1, true, ct);
+
+    /// <summary>货叉去2号位（M913=1）</summary>
+    public Task GoPos2Async(CancellationToken ct = default) => WriteMBitAsync(Addr.M_GoPos2, true, ct);
+
+    /// <summary>货叉去3号位（M914=1）</summary>
+    public Task GoPos3Async(CancellationToken ct = default) => WriteMBitAsync(Addr.M_GoPos3, true, ct);
 
     public void Dispose()
     {
@@ -110,21 +110,36 @@ public sealed class ForkService : IDisposable
 /// <summary>货叉状态快照（一次读取 M900~M915 的结果）。</summary>
 public sealed class ForkStatus
 {
-    public bool HasPlate          { get; set; }  // M900
-    public bool Cyl1RetractLimit  { get; set; }  // M901
-    public bool Cyl1ExtendLimit   { get; set; }  // M902
-    public bool Cyl2RetractLimit  { get; set; }  // M903
-    public bool Cyl2ExtendLimit   { get; set; }  // M904
-    public bool Cyl3RetractLimit  { get; set; }  // M905
-    public bool Cyl3ExtendInPlace { get; set; }  // M906
-    public bool Cyl1RetractCtrl   { get; set; }  // M911
-    public bool Cyl1ExtendCtrl    { get; set; }  // M912
-    public bool Cyl2RetractCtrl   { get; set; }  // M913
-    public bool Cyl2ExtendCtrl    { get; set; }  // M914
-    public bool Cyl3RetractCtrl   { get; set; }  // M915
-    public ushort RawValue        { get; set; }
+    // ── 输入信号（货叉→中控）─────────────────────────────────────
+    /// <summary>M900  货叉有版信号</summary>
+    public bool HasPlate      { get; set; }
+    /// <summary>M901  货叉在待机位状态</summary>
+    public bool AtStandbyPos  { get; set; }
+    /// <summary>M902  货叉在1号位状态</summary>
+    public bool AtPos1        { get; set; }
+    /// <summary>M903  货叉在2号位状态</summary>
+    public bool AtPos2        { get; set; }
+    /// <summary>M904  货叉在3号位状态</summary>
+    public bool AtPos3        { get; set; }
 
-    public string Cyl1State => Cyl1ExtendLimit ? "伸出" : (Cyl1RetractLimit ? "退回" : "运动/未知");
-    public string Cyl2State => Cyl2ExtendLimit ? "伸出" : (Cyl2RetractLimit ? "退回" : "运动/未知");
-    public string Cyl3State => Cyl3ExtendInPlace ? "伸出" : (Cyl3RetractLimit ? "退回" : "运动/未知");
+    // ── 输出信号（中控→货叉）─────────────────────────────────────
+    /// <summary>M911  货叉回待机位控制</summary>
+    public bool GoStandby     { get; set; }
+    /// <summary>M912  货叉去1号位置控制</summary>
+    public bool GoPos1        { get; set; }
+    /// <summary>M913  货叉去2号位置控制</summary>
+    public bool GoPos2        { get; set; }
+    /// <summary>M914  货叉去3号位置控制</summary>
+    public bool GoPos3        { get; set; }
+
+    /// <summary>原始字值（调试用）</summary>
+    public ushort RawValue    { get; set; }
+
+    /// <summary>当前所在工位描述</summary>
+    public string CurrentPosition =>
+        AtStandbyPos ? "待机位" :
+        AtPos1       ? "1号位" :
+        AtPos2       ? "2号位" :
+        AtPos3       ? "3号位" :
+        "未知/运动中";
 }

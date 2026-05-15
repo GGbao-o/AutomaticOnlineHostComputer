@@ -668,6 +668,55 @@
                             Line5Brush="{Binding Manipulator3.Line5Brush}" />
                     </UniformGrid>
 
+                    <!--  研磨自动流程控制栏  -->
+                    <Border Margin="0,6,0,0" Padding="6" CornerRadius="4"
+                            Background="#1A3A5C" BorderBrush="#2C86C8" BorderThickness="1">
+                        <UniformGrid Columns="10" Rows="1">
+                            <!-- 启动/暂停 -->
+                            <Button Width="100" Height="30"
+                                    Command="{Binding GrindingToggleCommand}"
+                                    Background="#2C86C8"
+                                    Foreground="White" FontWeight="Bold" FontSize="13"
+                                    Content="{Binding GrindingToggleText}" />
+                            <TextBlock Text="│" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                       Foreground="#4A6A8A" FontSize="20" />
+                            <!-- 工件缓存输入 -->
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+                                <TextBlock Text="直径:" VerticalAlignment="Center" Foreground="White" Margin="0,0,3,0" />
+                                <TextBox Width="50" Height="24" FontSize="12"
+                                         Text="{Binding CachedDiameter, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+                                <TextBlock Text="版孔(1大2小):" VerticalAlignment="Center" Foreground="White" Margin="0,0,3,0" />
+                                <TextBox Width="36" Height="24" FontSize="12"
+                                         Text="{Binding CachedBoreType, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+                                <TextBlock Text="长度:" VerticalAlignment="Center" Foreground="White" Margin="0,0,3,0" />
+                                <TextBox Width="50" Height="24" FontSize="12"
+                                         Text="{Binding CachedLength, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <!-- 写入/清空缓存 -->
+                            <Button Width="80" Height="28"
+                                    Command="{Binding WriteCacheCommand}"
+                                    Background="#FF8C00" Foreground="White" FontWeight="Bold"
+                                    Content="写入缓存" />
+                            <Button Width="80" Height="28"
+                                    Command="{Binding ClearCacheCommand}"
+                                    Background="#8B0000" Foreground="White" FontWeight="Bold"
+                                    Content="清空缓存" />
+                            <!-- 已缓存数量 -->
+                            <Border Width="36" Height="28" CornerRadius="4" Background="#333"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding CachedWorkpieceCount}" FontSize="18"
+                                           FontWeight="Bold" Foreground="#FFD700"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="个待处理" VerticalAlignment="Center" Foreground="#AAA" Margin="4,0,0,0" />
+                            <Border />
+                        </UniformGrid>
+                    </Border>
+
                     <!--  4台研磨机  -->
                     <TextBlock
                         Margin="2,8,2,4"
@@ -683,11 +732,16 @@
                             Btn2Command="{Binding Grinder1.ClearAlarmCommand}"
                             Btn3="读状态"
                             Btn3Command="{Binding Grinder1.ReadStatusCommand}"
-                            Btn4=""
-                            Btn5=""
-                            Btn6=""
-                            Btn7=""
-                            Btn8=""
+                            Btn4="数据完成"
+                            Btn4Command="{Binding Grinder1.DataSentDoneCommand}"
+                            Btn5="上料到达"
+                            Btn5Command="{Binding Grinder1.LoadInPlaceCommand}"
+                            Btn6="上料完成"
+                            Btn6Command="{Binding Grinder1.LoadDoneCommand}"
+                            Btn7="下料到达"
+                            Btn7Command="{Binding Grinder1.UnloadInPlaceCommand}"
+                            Btn8="下料完成"
+                            Btn8Command="{Binding Grinder1.UnloadDoneCommand}"
                             ConnectedBrush="{Binding Grinder1.ConnectedBrush}"
                             Line1="{Binding Grinder1.Line1}"
                             Line1Brush="{Binding Grinder1.Line1Brush}"
@@ -704,11 +758,16 @@
                             Btn2Command="{Binding Grinder2.ClearAlarmCommand}"
                             Btn3="读状态"
                             Btn3Command="{Binding Grinder2.ReadStatusCommand}"
-                            Btn4=""
-                            Btn5=""
-                            Btn6=""
-                            Btn7=""
-                            Btn8=""
+                            Btn4="数据完成"
+                            Btn4Command="{Binding Grinder2.DataSentDoneCommand}"
+                            Btn5="上料到达"
+                            Btn5Command="{Binding Grinder2.LoadInPlaceCommand}"
+                            Btn6="上料完成"
+                            Btn6Command="{Binding Grinder2.LoadDoneCommand}"
+                            Btn7="下料到达"
+                            Btn7Command="{Binding Grinder2.UnloadInPlaceCommand}"
+                            Btn8="下料完成"
+                            Btn8Command="{Binding Grinder2.UnloadDoneCommand}"
                             ConnectedBrush="{Binding Grinder2.ConnectedBrush}"
                             Line1="{Binding Grinder2.Line1}"
                             Line1Brush="{Binding Grinder2.Line1Brush}"
@@ -725,11 +784,16 @@
                             Btn2Command="{Binding Grinder3.ClearAlarmCommand}"
                             Btn3="读状态"
                             Btn3Command="{Binding Grinder3.ReadStatusCommand}"
-                            Btn4=""
-                            Btn5=""
-                            Btn6=""
-                            Btn7=""
-                            Btn8=""
+                            Btn4="数据完成"
+                            Btn4Command="{Binding Grinder3.DataSentDoneCommand}"
+                            Btn5="上料到达"
+                            Btn5Command="{Binding Grinder3.LoadInPlaceCommand}"
+                            Btn6="上料完成"
+                            Btn6Command="{Binding Grinder3.LoadDoneCommand}"
+                            Btn7="下料到达"
+                            Btn7Command="{Binding Grinder3.UnloadInPlaceCommand}"
+                            Btn8="下料完成"
+                            Btn8Command="{Binding Grinder3.UnloadDoneCommand}"
                             ConnectedBrush="{Binding Grinder3.ConnectedBrush}"
                             Line1="{Binding Grinder3.Line1}"
                             Line1Brush="{Binding Grinder3.Line1Brush}"
@@ -746,11 +810,16 @@
                             Btn2Command="{Binding Grinder4.ClearAlarmCommand}"
                             Btn3="读状态"
                             Btn3Command="{Binding Grinder4.ReadStatusCommand}"
-                            Btn4=""
-                            Btn5=""
-                            Btn6=""
-                            Btn7=""
-                            Btn8=""
+                            Btn4="数据完成"
+                            Btn4Command="{Binding Grinder4.DataSentDoneCommand}"
+                            Btn5="上料到达"
+                            Btn5Command="{Binding Grinder4.LoadInPlaceCommand}"
+                            Btn6="上料完成"
+                            Btn6Command="{Binding Grinder4.LoadDoneCommand}"
+                            Btn7="下料到达"
+                            Btn7Command="{Binding Grinder4.UnloadInPlaceCommand}"
+                            Btn8="下料完成"
+                            Btn8Command="{Binding Grinder4.UnloadDoneCommand}"
                             ConnectedBrush="{Binding Grinder4.ConnectedBrush}"
                             Line1="{Binding Grinder4.Line1}"
                             Line1Brush="{Binding Grinder4.Line1Brush}"
@@ -760,6 +829,55 @@
                             Line4Brush="{Binding Grinder4.Line4Brush}"
                             Line5="{Binding Grinder4.Line5}" />
                     </UniformGrid>
+
+                    <!--  研磨参数写入面板（测试用）  -->
+                    <Border Margin="0,6,0,0" Padding="6" CornerRadius="4"
+                            Background="#1A3A5C" BorderBrush="#2C86C8" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Margin="0,0,0,6" FontSize="13" FontWeight="Bold"
+                                       Foreground="#FFD700"
+                                       Text="研磨参数写入（测试） — 写入版辊直径/版孔/长度到 PLC Word 寄存器" />
+                            <UniformGrid Columns="7" Rows="1">
+                                <!-- 研磨机选择 -->
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+                                    <TextBlock Text="目标：" VerticalAlignment="Center" Foreground="White" Margin="0,0,4,0" />
+                                    <ComboBox Width="120" Height="26" FontSize="12"
+                                              SelectedIndex="{Binding GrinderParamIndex}">
+                                        <ComboBoxItem Content="研磨机1(新代)" />
+                                        <ComboBoxItem Content="研磨机2(新代)" />
+                                        <ComboBoxItem Content="研磨机3(西门子)" />
+                                        <ComboBoxItem Content="研磨机4(西门子)" />
+                                    </ComboBox>
+                                </StackPanel>
+                                <!-- 直径 -->
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+                                    <TextBlock Text="直径(mm):" VerticalAlignment="Center" Foreground="White" Margin="0,0,4,0" />
+                                    <TextBox Width="65" Height="24" FontSize="12"
+                                             Text="{Binding GrinderDiameter, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <!-- 版孔 -->
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+                                    <TextBlock Text="版孔(1大2小):" VerticalAlignment="Center" Foreground="White" Margin="0,0,4,0" />
+                                    <TextBox Width="40" Height="24" FontSize="12"
+                                             Text="{Binding GrinderBoreType, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <!-- 长度 -->
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+                                    <TextBlock Text="长度(mm):" VerticalAlignment="Center" Foreground="White" Margin="0,0,4,0" />
+                                    <TextBox Width="65" Height="24" FontSize="12"
+                                             Text="{Binding GrinderLength, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <!-- 写入按钮 -->
+                                <Button Width="90" Height="28"
+                                        Command="{Binding WriteGrinderParamsCommand}"
+                                        Background="#FF8C00" Foreground="White" FontWeight="Bold"
+                                        Content="写入参数" />
+                                <!-- 占位 -->
+                                <Border />
+                                <Border />
+                            </UniformGrid>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
         </Border>

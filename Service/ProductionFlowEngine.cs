@@ -796,9 +796,11 @@ public sealed class ProductionFlowEngine : IDisposable
             Console.WriteLine($"[FlowEngine]   ⚠ 研磨机状态读取异常：{ex.Message}");
         }
 
-        // TODO: 研磨天车取料 → 分派空闲研磨机 → 下发参数 → 加工 → 下料
-        Console.WriteLine($"[FlowEngine]   [占位] 研磨加工模拟...");
-        await Task.Delay(2000, ct);
+        // 研磨流程由 GrindingFlowEngine 独立控制（主页面启动/暂停按钮）
+        // HomeViewModel 创建 GrindingFlowEngine 实例，注入 station_coords + craneCache
+        // 引擎后台循环：扫描研磨机 → 分配工件 → 天车取料送料 → 握手 → 下料
+        Console.WriteLine($"[FlowEngine]   研磨流程由 GrindingFlowEngine 独立控制（主页面启动/暂停按钮）");
+        await Task.Delay(500, ct);
     }
 
     // ═══════════════════════════════════════════════════════════════

@@ -2,259 +2,316 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.Clients;
-using AutomaticOnlineHostComputer.Communication.DeviceAddresses;
+using Addr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.PlcGrinderAddress;
 
 namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 {
     /// <summary>
-    /// 研磨机设备服务（共 4 台，两款系统各 2 台）。
-    /// <para>研磨机1/2（ST701/ST702）→ TypeB 新代数控：R 区寄存器，Modbus 地址 = R编号 × 2 + 1。</para>
-    /// <para>研磨机3/4（ST703/ST704）→ TypeA 西门子 PLC：点位表 bit 型，DI=40001 / DO=40011。</para>
-    /// <para>通信：Modbus TCP，端口 502。IP：4#PLC 192.168.1.71 / 5#PLC 192.168.1.81。</para>
-    /// <para>握手规范：所有触发信号采用 1→0 脉冲模式（写1触发→写0复位），与天车 2→0 不同。</para>
+    /// 研磨机 Modbus TCP 通信服务。
+    /// <para>TypeA（西门子 PLC）：1 台 PLC 管 1 台研磨机。DI=40001 bit 型（FC03 读整字），DO=40011 bit 型（FC06 读-改-写），Word 参数=40012~40014。</para>
+    /// <para>TypeB（新代数控）：R 区寄存器，Modbus 地址 = R编号 × 2 + 1（FC03/FC06）。</para>
+    /// <para>DO 信号规范：3 秒长信号（写 1 → 等 3s → 写 0），与天车 2→0 脉冲不同。</para>
+    /// <para>UnitId：默认取 IP 末段（192.168.2.93 → 93），与数控 PLC 站号一致。</para>
     /// </summary>
     public sealed class PlcGrinderService : IDisposable
     {
-        /// <summary>研磨机型号：TypeA = 西门子 PLC（点位表 bit 型），TypeB = 新代数控（R 区字型）。</summary>
         public enum GrinderType { TypeA, TypeB }
 
         private readonly ModbusTcpClient _client;
         private readonly GrinderType _type;
-        private readonly string _name; // 调试用名称
+        private readonly string _name;
         private bool _disposed;
 
-        // TypeA 寄存器零起始地址（Modbus 地址 = 40001段 - 40001）
-        private static readonly int _doRegAddr  = PlcGrinderAddress.RegDO_Base - 40001;  // = 10
-        private static readonly int _diRegAddr  = PlcGrinderAddress.RegDI_Base - 40001;  // = 0
+        // TypeA 寄存器零起始 Modbus 地址（通信地址 - 40001）
+        private static readonly int _diRegAddr = Addr.RegDI_Base - 40001;  // = 0
+        private static readonly int _doRegAddr = Addr.RegDO_Base - 40001;  // = 10
 
-        /// <param name="name">调试名称（如"研磨机1(新代)"）</param>
-        /// <param name="ip">研磨机 PLC/CNC 的 IP 地址</param>
-        /// <param name="type">研磨机型号（西门子=TypeA，新代=TypeB）</param>
+        /// <param name="name">调试名称（如"研磨机3(西门子)"）</param>
+        /// <param name="ip">PLC/CNC 的 IP 地址</param>
+        /// <param name="type">西门子=TypeA，新代=TypeB</param>
         /// <param name="port">Modbus TCP 端口，默认 502</param>
-        /// <param name="unitId">Modbus 从站地址，默认用 IP 末段（新代规则：192.168.2.90→unitId=90）</param>
+        /// <param name="unitId">
+        /// Modbus 从站地址。null 时按类型自动取默认：
+        /// TypeA（西门子）= 1，TypeB（新代）= IP 末段（192.168.2.90→90）。
+        /// </param>
         public PlcGrinderService(string name, string ip, GrinderType type, int port = 502, int? unitId = null)
         {
             _name = name;
-            int uid = unitId ?? GetDefaultUnitId(ip);
+            int uid = unitId ?? GetDefaultUnitId(ip, type);
             _client = new ModbusTcpClient(ip, port, (byte)uid);
-            _type   = type;
-            Console.WriteLine($"[GrinderSvc] [{_name}] 创建实例 Type={type} IP={ip}:{port} UnitId={uid}");
+            _type = type;
+            Console.WriteLine($"[GrinderSvc] [{_name}] 创建 Type={type} IP={ip}:{port} UnitId={uid}");
         }
 
-        /// <summary>从 IP 末段提取默认从站地址（192.168.2.90 → 90）。</summary>
-        private static int GetDefaultUnitId(string ip)
+        /// <summary>按类型取默认 UnitId：TypeA（西门子）= 1，TypeB（新代）= IP 末段。</summary>
+        private static int GetDefaultUnitId(string ip, GrinderType type)
         {
+            if (type == GrinderType.TypeA)
+                return 1; // 西门子 PLC Modbus TCP Server 默认从站地址 = 1
+
+            // TypeB 新代数控：站号 = IP 末段
             int lastDot = ip.LastIndexOf('.');
             if (lastDot >= 0 && int.TryParse(ip.Substring(lastDot + 1), out int id))
                 return id;
-            return 1; // 兜底
+            return 1;
         }
 
         public async Task ConnectAsync(CancellationToken ct = default)
         {
             Console.WriteLine($"[GrinderSvc] [{_name}] 连接中...");
             await _client.ConnectAsync(ct);
-            Console.WriteLine($"[GrinderSvc] [{_name}] 连接成功");
+            Console.WriteLine($"[GrinderSvc] [{_name}] ✔ 连接成功");
         }
         public Task DisconnectAsync() => _client.DisconnectAsync();
         public bool IsConnected => _client.IsConnected;
 
-        /// <summary>读 TypeA 的 DI 寄存器原始值（Modbus地址=0，即40001的16bit整字）。</summary>
+        // ═══════════════════════════════════════════════════════════════
+        //  DI 原始值读取
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>读 TypeA DI 寄存器原始整字（Modbus 地址=0，即 40001 的 16bit）。调试用。</summary>
         public async Task<int> ReadDIRawAsync(CancellationToken ct = default)
         {
             int val = await _client.ReadIntAsync(_diRegAddr, ct);
-            Console.WriteLine($"[GrinderSvc] [{_name}] DI原始值=0x{val:X4} (b{Convert.ToString(val, 2).PadLeft(16, '0')})");
+            Console.WriteLine($"[GrinderSvc] [{_name}] DI=0x{val:X4} (b{Convert.ToString(val, 2).PadLeft(16, '0')})");
             return val;
         }
 
         // ═══════════════════════════════════════════════════════════════
-        //  批量状态读取（测试用）
+        //  心跳检测（TypeA：40001 bit8，1Hz 方波）
         // ═══════════════════════════════════════════════════════════════
 
-        /// <summary>一次性读取研磨机全部关键状态，输出到控制台日志。</summary>
+        /// <summary>
+        /// 检测 PLC 1Hz 心跳是否正常。
+        /// 连续读两次（间隔 500ms），bit 有变化说明 PLC 存活。
+        /// </summary>
+        public async Task<bool> IsHeartbeatOkAsync(CancellationToken ct = default)
+        {
+            int di1 = await _client.ReadIntAsync(_diRegAddr, ct);
+            bool bit1 = (di1 & (1 << Addr.Bit_Heartbeat)) != 0;
+
+            await Task.Delay(500, ct);
+
+            int di2 = await _client.ReadIntAsync(_diRegAddr, ct);
+            bool bit2 = (di2 & (1 << Addr.Bit_Heartbeat)) != 0;
+
+            bool ok = bit1 != bit2; // 1Hz 方波，500ms 内应翻转
+            Console.WriteLine($"[GrinderSvc] [{_name}] 心跳检测 bit8: {bit1}→{bit2} {(ok ? "✔ 正常" : "✘ 无变化(PLC可能离线)")}");
+            return ok;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  批量状态读取
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>一次性读取全部关键状态并输出到控制台。</summary>
         public async Task ReadAllStatusAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"══════════════════════════════════════");
-            Console.WriteLine($"[GrinderSvc] [{_name}] === 状态读取 ===");
+            Console.WriteLine($"═══ [GrinderSvc] [{_name}] 状态读取 ═══");
             Console.WriteLine($"[GrinderSvc]   Type={_type}");
 
             if (_type == GrinderType.TypeA)
             {
                 int di = await _client.ReadIntAsync(_diRegAddr, ct);
-                Console.WriteLine($"[GrinderSvc]   DI 40001=0x{di:X4} (b{Convert.ToString(di, 2).PadLeft(16, '0')})");
-                Console.WriteLine($"[GrinderSvc]   心跳      bit8  = {(di & (1 << 8)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   请求数据  bit9  = {(di & (1 << 9)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   请求上料  bit10 = {(di & (1 << 10)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   锁紧完成  bit11 = {(di & (1 << 11)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   请求下料  bit12 = {(di & (1 << 12)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   松开完成  bit13 = {(di & (1 << 13)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   加工中    bit14 = {(di & (1 << 14)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   门开      bit15 = {(di & (1 << 15)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   报警          bit0  = {(di & (1 << 0)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   磨石1厚度报警 bit1  = {(di & (1 << 1)) != 0}");
-                Console.WriteLine($"[GrinderSvc]   磨石2厚度报警 bit2  = {(di & (1 << 2)) != 0}");
+                int doReg = await _client.ReadIntAsync(_doRegAddr, ct);
+                Console.WriteLine($"[GrinderSvc]   DI 40001 =0x{di:X4} (b{Convert.ToString(di, 2).PadLeft(16, '0')})");
+                Console.WriteLine($"[GrinderSvc]   DO 40011 =0x{doReg:X4} (b{Convert.ToString(doReg, 2).PadLeft(16, '0')})");
+                Console.WriteLine($"[GrinderSvc]   bit8  心跳        = {(di & (1 << 8)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit9  请求数据    = {(di & (1 << 9)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit10 请求上料    = {(di & (1 << 10)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit11 锁紧完成    = {(di & (1 << 11)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit12 请求下料    = {(di & (1 << 12)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit13 松开完成    = {(di & (1 << 13)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit14 加工中      = {(di & (1 << 14)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit15 门开        = {(di & (1 << 15)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit0  报警        = {(di & (1 << 0)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit1  磨石1厚度报警 = {(di & (1 << 1)) != 0}");
+                Console.WriteLine($"[GrinderSvc]   bit2  磨石2厚度报警 = {(di & (1 << 2)) != 0}");
             }
             else
             {
-                int v7301 = await _client.ReadIntAsync(PlcGrinderAddress.RToModbus(PlcGrinderAddress.R_RequestData), ct);
-                int v7306 = await _client.ReadIntAsync(PlcGrinderAddress.RToModbus(PlcGrinderAddress.R_Machining), ct);
-                int v7307 = await _client.ReadIntAsync(PlcGrinderAddress.RToModbus(PlcGrinderAddress.R_DoorOpen), ct);
-                int v7308 = await _client.ReadIntAsync(PlcGrinderAddress.RToModbus(PlcGrinderAddress.R_MachineStatus), ct);
+                int v7301 = await _client.ReadIntAsync(Addr.RToModbus(Addr.R_RequestData), ct);
+                int v7306 = await _client.ReadIntAsync(Addr.RToModbus(Addr.R_Machining), ct);
+                int v7307 = await _client.ReadIntAsync(Addr.RToModbus(Addr.R_DoorOpen), ct);
+                int v7308 = await _client.ReadIntAsync(Addr.RToModbus(Addr.R_MachineStatus), ct);
                 Console.WriteLine($"[GrinderSvc]   R7301 请求数据={v7301} R7306 加工中={v7306} R7307 门开={v7307} R7308 状态={v7308}");
             }
-            Console.WriteLine($"══════════════════════════════════════");
+            Console.WriteLine($"══════════════════════════════════");
         }
 
-        // ─── 读取状态 ────────────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════════
+        //  状态读取（TypeA / TypeB 统一接口）
+        // ═══════════════════════════════════════════════════════════════
 
-        /// <summary>请求数据（读）。TypeA=40001 bit9，TypeB=R7301→Modbus 14603。</summary>
         public Task<bool> IsRequestDataAsync(CancellationToken ct = default) => _type == GrinderType.TypeA
-            ? ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_RequestData, ct)
-            : ReadBoolAsync(PlcGrinderAddress.R_RequestData, ct);
+            ? ReadBitAsync(_diRegAddr, Addr.Bit_RequestData, ct)
+            : ReadBoolAsync(Addr.R_RequestData, ct);
 
-        /// <summary>请求上料（读）。TypeA=40001 bit10，TypeB=R7302→Modbus 14605。</summary>
         public Task<bool> IsRequestLoadAsync(CancellationToken ct = default) => _type == GrinderType.TypeA
-            ? ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_RequestLoad, ct)
-            : ReadBoolAsync(PlcGrinderAddress.R_RequestLoad, ct);
+            ? ReadBitAsync(_diRegAddr, Addr.Bit_RequestLoad, ct)
+            : ReadBoolAsync(Addr.R_RequestLoad, ct);
 
-        /// <summary>锁紧完成上料退出（读）。TypeA=40001 bit11，TypeB=R7303→Modbus 14607。</summary>
         public Task<bool> IsClampDoneLoadOutAsync(CancellationToken ct = default) => _type == GrinderType.TypeA
-            ? ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_ClampDoneLoadOut, ct)
-            : ReadBoolAsync(PlcGrinderAddress.R_ClampDoneLoadOut, ct);
+            ? ReadBitAsync(_diRegAddr, Addr.Bit_ClampDoneLoadOut, ct)
+            : ReadBoolAsync(Addr.R_ClampDoneLoadOut, ct);
 
-        /// <summary>请求下料（读）。TypeA=40001 bit12，TypeB=R7304→Modbus 14609。</summary>
         public Task<bool> IsRequestUnloadAsync(CancellationToken ct = default) => _type == GrinderType.TypeA
-            ? ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_RequestUnload, ct)
-            : ReadBoolAsync(PlcGrinderAddress.R_RequestUnload, ct);
+            ? ReadBitAsync(_diRegAddr, Addr.Bit_RequestUnload, ct)
+            : ReadBoolAsync(Addr.R_RequestUnload, ct);
 
-        /// <summary>松开完成（读）。TypeA=40001 bit13，TypeB=R7305→Modbus 14611。</summary>
         public Task<bool> IsUnclampDoneAsync(CancellationToken ct = default) => _type == GrinderType.TypeA
-            ? ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_UnclampDone, ct)
-            : ReadBoolAsync(PlcGrinderAddress.R_UnclampDoneUnloadOut, ct);
+            ? ReadBitAsync(_diRegAddr, Addr.Bit_UnclampDone, ct)
+            : ReadBoolAsync(Addr.R_UnclampDoneUnloadOut, ct);
 
-        /// <summary>加工中（读）。TypeA=40001 bit14，TypeB=R7306→Modbus 14613。</summary>
         public Task<bool> IsMachiningAsync(CancellationToken ct = default) => _type == GrinderType.TypeA
-            ? ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_Machining, ct)
-            : ReadBoolAsync(PlcGrinderAddress.R_Machining, ct);
+            ? ReadBitAsync(_diRegAddr, Addr.Bit_Machining, ct)
+            : ReadBoolAsync(Addr.R_Machining, ct);
 
-        /// <summary>门开（读）。TypeA=40001 bit15，TypeB=R7307→Modbus 14615。</summary>
+        /// <summary>门开状态（读）。天车上下移动前必须确认门开=0（门已关闭）。</summary>
         public Task<bool> IsDoorOpenAsync(CancellationToken ct = default) => _type == GrinderType.TypeA
-            ? ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_DoorOpen, ct)
-            : ReadBoolAsync(PlcGrinderAddress.R_DoorOpen, ct);
+            ? ReadBitAsync(_diRegAddr, Addr.Bit_DoorOpen, ct)
+            : ReadBoolAsync(Addr.R_DoorOpen, ct);
 
-        /// <summary>磨石1厚度报警（读）。仅 TypeA=40001 bit1。</summary>
+        /// <summary>确认安全门已关闭（门开=0）。false=门开着/禁止天车移动，true=门已关/安全。</summary>
+        public async Task<bool> IsDoorClosedAsync(CancellationToken ct = default)
+        {
+            bool doorOpen = await IsDoorOpenAsync(ct);
+            Console.WriteLine($"[GrinderSvc] [{_name}] 安全门={(doorOpen ? "开(禁止天车升降)" : "关(安全)")}");
+            return !doorOpen;
+        }
+
         public Task<bool> IsGrindStone1AlarmAsync(CancellationToken ct = default)
-            => ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_GrindStone1Alarm, ct);
+            => ReadBitAsync(_diRegAddr, Addr.Bit_GrindStone1Alarm, ct);
 
-        /// <summary>磨石2厚度报警（读）。仅 TypeA=40001 bit2。</summary>
         public Task<bool> IsGrindStone2AlarmAsync(CancellationToken ct = default)
-            => ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_GrindStone2Alarm, ct);
+            => ReadBitAsync(_diRegAddr, Addr.Bit_GrindStone2Alarm, ct);
 
-        /// <summary>报警（读）。TypeA=40001 bit0，TypeB：R7308值=2为报警。</summary>
+        /// <summary>
+        /// 磨石厚度报警检测（TypeA 专用）。
+        /// 在「请求数据」阶段调用，任一磨石报警应暂停流程并提示更换磨石。
+        /// </summary>
+        /// <returns>true=有报警需停机，false=无报警可继续</returns>
+        public async Task<bool> HasAnyGrindStoneAlarmAsync(CancellationToken ct = default)
+        {
+            bool a1 = await IsGrindStone1AlarmAsync(ct);
+            bool a2 = await IsGrindStone2AlarmAsync(ct);
+            Console.WriteLine($"[GrinderSvc] [{_name}] 磨石厚度报警: 磨石1={(a1 ? "✘报警" : "✔正常")} 磨石2={(a2 ? "✘报警" : "✔正常")}");
+            return a1 || a2;
+        }
+
         public async Task<bool> IsAlarmAsync(CancellationToken ct = default)
         {
             if (_type == GrinderType.TypeA)
-                return await ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_Alarm, ct);
+                return await ReadBitAsync(_diRegAddr, Addr.Bit_Alarm, ct);
             else
-                return (await _client.ReadIntAsync(PlcGrinderAddress.RToModbus(PlcGrinderAddress.R_MachineStatus), ct)) == 2;
+                return (await _client.ReadIntAsync(Addr.RToModbus(Addr.R_MachineStatus), ct)) == 2;
         }
 
-        /// <summary>设备状态（读）：TypeA=40001 bit14加工中判定，TypeB=R7308值 0=空闲 1=忙碌 2=报警。</summary>
+        /// <summary>设备状态码：TypeA=加工中 bit 判定 0空闲/1忙碌，TypeB=R7308 0空闲/1忙碌/2报警。</summary>
         public async Task<int> GetMachineStatusAsync(CancellationToken ct = default)
         {
             if (_type == GrinderType.TypeA)
-                return await ReadBitAsync(_diRegAddr, PlcGrinderAddress.Bit_Machining, ct) ? 1 : 0;
+                return await ReadBitAsync(_diRegAddr, Addr.Bit_Machining, ct) ? 1 : 0;
             else
-                return await _client.ReadIntAsync(PlcGrinderAddress.RToModbus(PlcGrinderAddress.R_MachineStatus), ct);
+                return await _client.ReadIntAsync(Addr.RToModbus(Addr.R_MachineStatus), ct);
         }
 
-        // ─── 写入加工参数 ─────────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════════
+        //  写入加工参数
+        // ═══════════════════════════════════════════════════════════════
 
-        /// <summary>下发版辊参数（直径、版孔/模式、版长）。</summary>
-        public async Task SendRollerParamsAsync(
-            int rollerDiameter,
-            int boreType,
-            int rollerLength,
-            CancellationToken ct = default)
+        /// <summary>下发版辊参数（直径 mm、版孔 1大孔/2小孔、长度 mm）。</summary>
+        public async Task SendRollerParamsAsync(int rollerDiameter, int boreType, int rollerLength, CancellationToken ct = default)
         {
-            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 下发加工参数 直径={rollerDiameter} 版孔={boreType} 长度={rollerLength}");
+            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 下发加工参数 直径={rollerDiameter}mm 版孔={(boreType == 1 ? "大孔" : "小孔")} 长度={rollerLength}mm");
             if (_type == GrinderType.TypeA)
             {
-                await _client.WriteAsync(PlcGrinderAddress.RegDO_RollerDiameter - 40001, rollerDiameter, ct);
-                await _client.WriteAsync(PlcGrinderAddress.RegDO_BoreType        - 40001, boreType,       ct);
-                await _client.WriteAsync(PlcGrinderAddress.RegDO_RollerLength    - 40001, rollerLength,   ct);
+                await _client.WriteAsync(Addr.RegDO_RollerDiameter - 40001, rollerDiameter, ct);
+                await _client.WriteAsync(Addr.RegDO_BoreType      - 40001, boreType,       ct);
+                await _client.WriteAsync(Addr.RegDO_RollerLength  - 40001, rollerLength,   ct);
             }
             else
             {
-                await _client.WriteAsync(PlcGrinderAddress.RToModbus(PlcGrinderAddress.R_RollerDiameter), rollerDiameter, ct);
-                await _client.WriteAsync(PlcGrinderAddress.RToModbus(PlcGrinderAddress.R_MachiningMode),  boreType,       ct);
-                await _client.WriteAsync(PlcGrinderAddress.RToModbus(PlcGrinderAddress.R_RollerLength),   rollerLength,   ct);
+                await _client.WriteAsync(Addr.RToModbus(Addr.R_RollerDiameter), rollerDiameter, ct);
+                await _client.WriteAsync(Addr.RToModbus(Addr.R_MachiningMode),  boreType,       ct);
+                await _client.WriteAsync(Addr.RToModbus(Addr.R_RollerLength),   rollerLength,   ct);
             }
             Console.WriteLine($"[GrinderSvc] [{_name}] ✔ 加工参数已下发");
         }
 
-        // ─── 写入握手信号（1→0 脉冲，与天车 2→0 不同） ──────────────
+        // ═══════════════════════════════════════════════════════════════
+        //  握手信号（3 秒长信号：写 1 → 等 3s → 写 0）
+        // ═══════════════════════════════════════════════════════════════
 
-        /// <summary>数据传输完成（1→0）。TypeA=40011 bit9，TypeB=R7311→Modbus 14623。</summary>
+        /// <summary>数据传输完成（写 1→3s→0）。TypeA=40011 bit9，TypeB=R7311。</summary>
         public async Task SetDataSentDoneAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 数据传输完成(1→0)");
-            await PulseOutputAsync(PlcGrinderAddress.Bit_DataSentDone, PlcGrinderAddress.R_DataSentDone, ct);
+            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 数据传输完成(3秒长信号)");
+            await LongSignalAsync(Addr.Bit_DataSentDone, Addr.R_DataSentDone, ct);
         }
 
-        /// <summary>上料到达锁紧位置（1→0）。TypeA=40011 bit10，TypeB=R7312→Modbus 14625。</summary>
+        /// <summary>上料到达锁紧位置（写 1→3s→0）。TypeA=40011 bit10，TypeB=R7312。</summary>
         public async Task SetLoadInPlaceAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 上料到达锁紧位置(1→0)");
-            await PulseOutputAsync(PlcGrinderAddress.Bit_LoadInPlace, PlcGrinderAddress.R_LoadInPlace, ct);
+            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 上料到达锁紧位置(3秒长信号)");
+            await LongSignalAsync(Addr.Bit_LoadInPlace, Addr.R_LoadInPlace, ct);
         }
 
-        /// <summary>上料完成（1→0）。TypeA=40011 bit11，TypeB=R7313→Modbus 14627。</summary>
+        /// <summary>上料完成（写 1→3s→0）。TypeA=40011 bit11，TypeB=R7313。</summary>
         public async Task SetLoadDoneAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 上料完成(1→0)");
-            await PulseOutputAsync(PlcGrinderAddress.Bit_LoadDone, PlcGrinderAddress.R_LoadDone, ct);
+            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 上料完成(3秒长信号)");
+            await LongSignalAsync(Addr.Bit_LoadDone, Addr.R_LoadDone, ct);
         }
 
-        /// <summary>下料到达位置（1→0）。TypeA=40011 bit12，TypeB=R7314→Modbus 14629。</summary>
+        /// <summary>下料到达位置（写 1→3s→0）。TypeA=40011 bit12，TypeB=R7314。</summary>
         public async Task SetUnloadInPlaceAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 下料到达位置(1→0)");
-            await PulseOutputAsync(PlcGrinderAddress.Bit_UnloadInPlace, PlcGrinderAddress.R_UnloadInPlace, ct);
+            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 下料到达位置(3秒长信号)");
+            await LongSignalAsync(Addr.Bit_UnloadInPlace, Addr.R_UnloadInPlace, ct);
         }
 
-        /// <summary>下料完成（1→0）。TypeA=40011 bit13，TypeB=R7315→Modbus 14631。</summary>
+        /// <summary>下料完成（写 1→3s→0）。TypeA=40011 bit13，TypeB=R7315。</summary>
         public async Task SetUnloadDoneAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 下料完成(1→0)");
-            await PulseOutputAsync(PlcGrinderAddress.Bit_UnloadDone, PlcGrinderAddress.R_UnloadDone, ct);
+            Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 下料完成(3秒长信号)");
+            await LongSignalAsync(Addr.Bit_UnloadDone, Addr.R_UnloadDone, ct);
         }
 
-        // ─── 私有辅助 ─────────────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════════
+        //  私有辅助
+        // ═══════════════════════════════════════════════════════════════
 
-        /// <summary>1→0 脉冲：TypeA 操作 bit，TypeB 写 R 区寄存器。</summary>
-        private async Task PulseOutputAsync(int typeABit, int typeBRAddr, CancellationToken ct)
+        /// <summary>
+        /// 3 秒长信号：写 1 → 等 3000ms → 写 0。
+        /// TypeA 操作 DO 的 bit（读-改-写），TypeB 写 R 区字寄存器。
+        /// </summary>
+        private async Task LongSignalAsync(int typeABit, int typeBRAddr, CancellationToken ct)
         {
             if (_type == GrinderType.TypeA)
             {
                 await SetBitAsync(_doRegAddr, typeABit, true, ct);
-                await Task.Delay(100, ct);
+                Console.WriteLine($"[GrinderSvc] [{_name}]   DO bit{typeABit}=1（开始3s长信号）");
+                await Task.Delay(3000, ct);
                 await SetBitAsync(_doRegAddr, typeABit, false, ct);
+                Console.WriteLine($"[GrinderSvc] [{_name}]   DO bit{typeABit}=0（3s长信号结束）");
             }
             else
             {
-                int addr = PlcGrinderAddress.RToModbus(typeBRAddr);
+                int addr = Addr.RToModbus(typeBRAddr);
                 await _client.WriteAsync(addr, 1, ct);
-                await Task.Delay(100, ct);
+                Console.WriteLine($"[GrinderSvc] [{_name}]   R{typeBRAddr}=1（开始3s长信号）");
+                await Task.Delay(3000, ct);
                 await _client.WriteAsync(addr, 0, ct);
+                Console.WriteLine($"[GrinderSvc] [{_name}]   R{typeBRAddr}=0（3s长信号结束）");
             }
         }
 
-        /// <summary>TypeB：读 R 区 BOOL 信号，Modbus 地址 = R × 2 + 1，非零即为 true。</summary>
+        /// <summary>TypeB：读 R 区 BOOL 信号。非零为 true。</summary>
         private async Task<bool> ReadBoolAsync(int rAddr, CancellationToken ct)
-            => (await _client.ReadIntAsync(PlcGrinderAddress.RToModbus(rAddr), ct)) != 0;
+            => (await _client.ReadIntAsync(Addr.RToModbus(rAddr), ct)) != 0;
 
-        /// <summary>TypeA：读 DI 寄存器（地址=0）的指定位，1 即为 true。FC03 读整字后按位提取。</summary>
+        /// <summary>TypeA：读 DI 寄存器的指定位。FC03 读整字后按位提取。</summary>
         private async Task<bool> ReadBitAsync(int regAddr, int bitIndex, CancellationToken ct)
         {
             int val = await _client.ReadIntAsync(regAddr, ct);
@@ -262,8 +319,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         }
 
         /// <summary>
-        /// TypeA：写 DO 寄存器（地址=10）的指定位。
-        /// 先读当前值 → 修改目标 bit → 写回，避免覆盖其他 bit 的控制信号。
+        /// TypeA：写 DO 寄存器的指定位（读-改-写）。
+        /// 先读当前整字 → 修改目标 bit → 写回，保护其他 bit 不受影响。
         /// </summary>
         private async Task SetBitAsync(int regAddr, int bitIndex, bool value, CancellationToken ct)
         {
@@ -272,6 +329,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 ? cur | (1 << bitIndex)
                 : cur & ~(1 << bitIndex);
             await _client.WriteAsync(regAddr, next, ct);
+            Console.WriteLine($"[GrinderSvc] [{_name}]   SetBit reg={regAddr} bit{bitIndex}={(value ? 1 : 0)} (0x{cur:X4}→0x{next:X4})");
         }
 
         public void Dispose()

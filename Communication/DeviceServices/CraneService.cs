@@ -795,9 +795,11 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             while (DateTime.UtcNow < deadline)
             {
                 ct.ThrowIfCancellationRequested();
-                await Task.Delay(500, ct);
+                // Z 轴下降时用 200ms 快轮询，更快响应下压信号；其他情况 500ms
+                int pollDelay = zTarget >= 0 ? 200 : 500;
+                await Task.Delay(pollDelay, ct);
 
-                // ── 下压信号检测：触发则立即停止XYZ当前运动 ──
+                // ── 下压信号检测：D4523=1 立即急停+复位触发位 ──
                 if (zTarget >= 0)
                 {
                     bool pStop = await IsPressureEStopAsync(ct);
@@ -805,12 +807,21 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     {
                         Console.WriteLine($"══════════════════════════════════════");
                         Console.WriteLine($"  [CraneService] [{_name}] ⚠⚠⚠ 下压信号触发 D4523=1 ⚠⚠⚠");
-                        Console.WriteLine($"  磁铁已接触工件/障碍物，立即停止 XYZ 当前运动");
+                        Console.WriteLine($"  磁铁已接触工件/障碍物！");
+                        Console.WriteLine($"  ①急停 D4518=2→0（立即停止伺服）");
+                        Console.WriteLine($"  ②复位触发位 D4520/D4521/D4522=0");
                         Console.WriteLine($"  恢复步骤：①写D4523=0 ②清除报警D4514=2→0");
                         Console.WriteLine($"══════════════════════════════════════");
-                        if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X下压停止复位", ct);
-                        if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y下压停止复位", ct);
-                        if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z下压停止复位", ct);
+
+                        // 先急停伺服（D4518=2→0），确保立即停止
+                        await WriteRegAsync(Addr.D_ManualEStop, 2, "下压急停 D4518(触发)", ct);
+                        await WriteRegAsync(Addr.D_ManualEStop, 0, "下压急停 D4518(复位)", ct);
+
+                        // 再复位绝对移动触发位，防止急停恢复后继续运动
+                        if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X下压停止复位 D4522", ct);
+                        if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y下压停止复位 D4521", ct);
+                        if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z下压停止复位 D4520", ct);
+
                         throw new PressureStopException(_name);
                     }
                 }

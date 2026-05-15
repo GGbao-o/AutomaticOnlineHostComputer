@@ -34,5 +34,13 @@
   "engine": {
     "queuePollIntervalMs": 1000,
     "stationWaitTimeoutMs": 30000
+  },
+  "grinding": {
+    "zFactor1": 0.9537,
+    "zFactor2": 0.866,
+    "safeZHeight": 600,
+    "craneNo": 5,
+    "pollIntervalMs": 500,
+    "handshakeTimeoutMs": 60000
   }
 }

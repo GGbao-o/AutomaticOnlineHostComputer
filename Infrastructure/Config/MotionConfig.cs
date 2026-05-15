@@ -71,6 +71,25 @@ public sealed class MotionConfig
         public int StationWaitTimeoutMs { get; set; } = 30_000;
     }
 
+    /// <summary>研磨自动流程参数</summary>
+    public GrindingSection Grinding { get; set; } = new();
+
+    public sealed class GrindingSection
+    {
+        /// <summary>Z下降公式系数1：上料架取料 Z = 1506 - Round((d/2/zFactor1) + (d/2/zFactor2))</summary>
+        public double ZFactor1 { get; set; } = 0.9537;
+        /// <summary>Z下降公式系数2</summary>
+        public double ZFactor2 { get; set; } = 0.866;
+        /// <summary>Z轴安全高度(mm)，充磁/退磁后先升到此高度再水平移动</summary>
+        public int SafeZHeight { get; set; } = 600;
+        /// <summary>研磨机天车编号(默认5号)</summary>
+        public int CraneNo { get; set; } = 5;
+        /// <summary>研磨机状态轮询间隔(ms)</summary>
+        public int PollIntervalMs { get; set; } = 500;
+        /// <summary>研磨机握手超时(ms)，等待请求上料/锁紧/松开等信号</summary>
+        public int HandshakeTimeoutMs { get; set; } = 60_000;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  加载
     // ═══════════════════════════════════════════════════════════════

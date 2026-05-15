@@ -307,11 +307,14 @@ public sealed class CraneManualControlViewModel : ObservableObject
     //  连接管理
     // ═══════════════════════════════════════════════════════════════
 
+    /// <summary>手动按钮超时（秒）。后台轮询可能占着 Modbus 锁，手动命令设短超时避免 UI 卡死。</summary>
+    private static readonly TimeSpan ManualCommandTimeout = TimeSpan.FromSeconds(5);
+
     /// <summary>
     /// 确保选中设备已连接（根据类型走天车或机械手缓存），返回其 <see cref="CraneService"/> 实例。
     /// 重复调用复用已有连接。
     /// </summary>
-    private async Task<CraneService> EnsureConnectedServiceAsync()
+    private async Task<CraneService> EnsureConnectedServiceAsync(CancellationToken ct = default)
     {
         if (_selectedDevice == null)
             throw new InvalidOperationException("未选择设备");
@@ -339,7 +342,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
         if (!service.IsConnected)
         {
             Console.WriteLine($"[CraneManualVM] [{name}] 未连接，开始连接...");
-            await service.ConnectAsync();
+            await service.ConnectAsync(ct);
             Console.WriteLine($"[CraneManualVM] [{name}] 连接成功");
         }
         else
@@ -375,18 +378,21 @@ public sealed class CraneManualControlViewModel : ObservableObject
             return;
         }
 
-        var service = await EnsureConnectedServiceAsync();
+        var dirLabel = positive ? "正向(+" : "负向(-";
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【{axis}轴{dirLabel})】 步长={StepDistance}mm");
+
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
         var name = CurrentDeviceName;
-        Console.WriteLine($"[CraneManualVM] [{name}] 写寄存器动作：{axis}{(positive ? "+" : "-")} 步长={StepDistance}");
 
         switch (axis)
         {
-            case 'X': await service.MoveXAsync(StepDistance, positive); break;
-            case 'Y': await service.MoveYAsync(StepDistance, positive); break;
-            case 'Z': await service.MoveZAsync(StepDistance, positive); break;
+            case 'X': await service.MoveXAsync(StepDistance, positive, cts.Token); break;
+            case 'Y': await service.MoveYAsync(StepDistance, positive, cts.Token); break;
+            case 'Z': await service.MoveZAsync(StepDistance, positive, cts.Token); break;
         }
 
-        Console.WriteLine($"[CraneManualVM] [{name}] 写寄存器成功：{axis}{(positive ? "+" : "-")}");
+        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 写入寄存器成功：{axis}轴{dirLabel}) D450{(axis == 'Z' ? "3" : (axis == 'Y' ? "4" : "5"))}=2 步长={StepDistance}");
         await LogCurrentPositionAsync(service, name, $"{axis}{(positive ? "+" : "-")}{StepDistance}");
     }
 
@@ -396,16 +402,20 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task StopAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
-        await service.SlowStopAsync();
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 写寄存器成功：减速停止(D4517)");
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【减速停止】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        await service.SlowStopAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：减速停止 D4517=2→0");
     }
 
     private async Task EStopAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
-        await service.EmergencyStopAsync();
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 写寄存器成功：急停(D4518)");
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【急停】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        await service.EmergencyStopAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：急停 D4518=2→0");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -414,16 +424,20 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task ServoPowerOnAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
-        await service.ServoPowerOnAsync();
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 写寄存器成功：伺服通电(D4516)");
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【伺服通电】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        await service.ServoPowerOnAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：伺服通电 D4516=2→0");
     }
 
     private async Task ServoPowerOffAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
-        await service.ServoPowerOffAsync();
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 写寄存器成功：伺服断电(D4515)");
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【伺服断电】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        await service.ServoPowerOffAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：伺服断电 D4515=2→0");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -432,9 +446,11 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task ClearFaultAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
-        await service.ClearAlarmAsync();
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 写寄存器成功：清除报警(D4514)");
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【清除报警】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        await service.ClearAlarmAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：清除报警 D4514=2→0");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -443,18 +459,22 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task MagnetOnAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 机械手无充磁功能，已忽略。"); return; }
-        var service = await EnsureConnectedServiceAsync();
-        await service.MagnetOnAsync();
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 写寄存器成功：充磁(D4510)");
+        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无充磁功能"); return; }
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【充磁】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        await service.MagnetOnAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：充磁 D4510=2→0");
     }
 
     private async Task MagnetOffAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 机械手无退磁功能，已忽略。"); return; }
-        var service = await EnsureConnectedServiceAsync();
-        await service.MagnetOffAsync();
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 写寄存器成功：退磁(D4511)");
+        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无退磁功能"); return; }
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【退磁】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        await service.MagnetOffAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：退磁 D4511=2→0");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -463,18 +483,22 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task DrainOpenAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 机械手无接液盘功能，已忽略。"); return; }
-        var service = await EnsureConnectedServiceAsync();
-        await service.DrainOpenAsync();
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 写寄存器成功：接液盘打开(D4512)");
+        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无接液盘功能"); return; }
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【接液盘打开】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        await service.DrainOpenAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：接液盘打开 D4512=2→0");
     }
 
     private async Task DrainCloseAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 机械手无接液盘功能，已忽略。"); return; }
-        var service = await EnsureConnectedServiceAsync();
-        await service.DrainCloseAsync();
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 写寄存器成功：接液盘关闭(D4513)");
+        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无接液盘功能"); return; }
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【接液盘关闭】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        await service.DrainCloseAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：接液盘关闭 D4513=2→0");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -483,29 +507,35 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task HomeXAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 机械手无 X 轴，已忽略。"); return; }
-        var service = await EnsureConnectedServiceAsync();
+        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无 X 轴"); return; }
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【X轴回原点】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
         var name = CurrentDeviceName;
-        await service.HomeXAsync();
-        Console.WriteLine($"[CraneManualVM] [{name}] 写寄存器成功：X回原点(D4508)");
+        await service.HomeXAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 写入寄存器成功：X轴回原点 D4508=2→0");
         await LogCurrentPositionAsync(service, name, "X回原点");
     }
 
     private async Task HomeYAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【Y轴回原点】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
         var name = CurrentDeviceName;
-        await service.HomeYAsync();
-        Console.WriteLine($"[CraneManualVM] [{name}] 写寄存器成功：Y回原点(D4507)");
+        await service.HomeYAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 写入寄存器成功：Y轴回原点 D4507=2→0");
         await LogCurrentPositionAsync(service, name, "Y回原点");
     }
 
     private async Task HomeZAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【Z轴回原点】");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
         var name = CurrentDeviceName;
-        await service.HomeZAsync();
-        Console.WriteLine($"[CraneManualVM] [{name}] 写寄存器成功：Z回原点(D4506)");
+        await service.HomeZAsync(cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 写入寄存器成功：Z轴回原点 D4506=2→0");
         await LogCurrentPositionAsync(service, name, "Z回原点");
     }
 
@@ -520,10 +550,12 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     private async Task RefreshTargetsFromCurrentAsync()
     {
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【读取当前位置填入目标框】");
         try
         {
-            var service = await EnsureConnectedServiceAsync();
-            var status = await service.ReadStatusAsync();
+            using var cts = new CancellationTokenSource(ManualCommandTimeout);
+            var service = await EnsureConnectedServiceAsync(cts.Token);
+            var status = await service.ReadStatusAsync(cts.Token);
             if (status == null)
             {
                 Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 读取当前位置失败(status=null)，目标框未更新");
@@ -549,11 +581,12 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     private async Task SetAbsSpeedAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【应用绝对速度】 X={AbsSpeedX}/{AbsAccelX}/{AbsDecelX} Y={AbsSpeedY}/{AbsAccelY}/{AbsDecelY} Z={AbsSpeedZ}/{AbsAccelZ}/{AbsDecelZ}");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
         var name = CurrentDeviceName;
-        Console.WriteLine($"[CraneManualVM] [{name}] ▶ 写绝对速度 X={AbsSpeedX}/{AbsAccelX}/{AbsDecelX} Y={AbsSpeedY}/{AbsAccelY}/{AbsDecelY} Z={AbsSpeedZ}/{AbsAccelZ}/{AbsDecelZ}");
-        await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ);
-        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 绝对速度设置完成");
+        await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ, cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 绝对速度写入成功 D2501~D2521");
     }
 
     /// <summary>
@@ -564,19 +597,19 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     private async Task MoveAbsoluteAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
-        var name = CurrentDeviceName;
-
         int xTarget = IsCraneSelected ? AbsXTarget : -1;
         int yTarget = AbsYTarget;
         int zTarget = AbsZTarget;
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【绝对移动】 目标 X={xTarget} Y={yTarget} Z={zTarget}");
 
-        Console.WriteLine($"[CraneManualVM] [{name}] ▶ 绝对移动 目标 X={xTarget} Y={yTarget} Z={zTarget}");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        var name = CurrentDeviceName;
 
         try
         {
-            await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ);
-            await service.MoveAbsoluteAsync(xTarget, yTarget, zTarget);
+            await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ, cts.Token);
+            await service.MoveAbsoluteAsync(xTarget, yTarget, zTarget, ct: cts.Token);
             Console.WriteLine($"[CraneManualVM] [{name}] ✔ 绝对移动完成");
         }
         catch (TimeoutException ex)
@@ -596,11 +629,12 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     private async Task SetRelSpeedAsync()
     {
-        var service = await EnsureConnectedServiceAsync();
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【应用相对速度】 X={RelSpeedX}/{RelAccelX}/{RelDecelX} Y={RelSpeedY}/{RelAccelY}/{RelDecelY} Z={RelSpeedZ}/{RelAccelZ}/{RelDecelZ}");
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
         var name = CurrentDeviceName;
-        Console.WriteLine($"[CraneManualVM] [{name}] ▶ 写相对速度 X={RelSpeedX}/{RelAccelX}/{RelDecelX} Y={RelSpeedY}/{RelAccelY}/{RelDecelY} Z={RelSpeedZ}/{RelAccelZ}/{RelDecelZ}");
-        await service.SetRelSpeedAsync(RelSpeedX, RelAccelX, RelDecelX, RelSpeedY, RelAccelY, RelDecelY, RelSpeedZ, RelAccelZ, RelDecelZ);
-        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 相对速度设置完成");
+        await service.SetRelSpeedAsync(RelSpeedX, RelAccelX, RelDecelX, RelSpeedY, RelAccelY, RelDecelY, RelSpeedZ, RelAccelZ, RelDecelZ, cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 相对速度写入成功 D2504~D2524");
     }
 
     /// <summary>延迟 300ms 后读取设备状态，输出日志 + 异步写库。</summary>

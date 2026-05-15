@@ -4,7 +4,9 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows.Input;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
+using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service;
 
@@ -19,6 +21,75 @@ public sealed class HomeViewModel : ObservableObject
     private readonly ManipulatorConnectionCache _manipulatorCache;
 
     /// <summary>页面是否正在加载（绑定到启动动画）</summary>
+    // ═══════════════════════════════════════════════════════════════
+    //  研磨流程引擎控制
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>启动/暂停研磨自动流程</summary>
+    private async Task GrindingToggleAsync()
+    {
+        if (_grindingEngine == null)
+        {
+            Console.WriteLine("[HomeViewModel] ✘ 研磨引擎未初始化，无法启动");
+            return;
+        }
+
+        if (_isGrindingRunning)
+        {
+            Console.WriteLine("[HomeViewModel] ▶ 点击按钮【暂停研磨】→ 急停天车");
+            await _grindingEngine.PauseAsync();
+            IsGrindingRunning = false;
+            OnPropertyChanged(nameof(CachedWorkpieceCount));
+        }
+        else
+        {
+            Console.WriteLine("[HomeViewModel] ▶ 点击按钮【启动研磨】→ 开始自动流程");
+            _grindingEngine.Resume();  // 如果是暂停后恢复
+            if (!_grindingEngine.IsRunning)
+                _grindingEngine.Start();
+            IsGrindingRunning = true;
+            OnPropertyChanged(nameof(CachedWorkpieceCount));
+        }
+    }
+
+    /// <summary>将当前工件参数写入缓存</summary>
+    private async Task WriteCacheAsync()
+    {
+        if (_grindingEngine == null)
+        {
+            Console.WriteLine("[HomeViewModel] ✘ 研磨引擎未初始化");
+            return;
+        }
+        Console.WriteLine($"[HomeViewModel] ▶ 点击按钮【写入缓存】 直径={CachedDiameter} 版孔={(CachedBoreType == 1 ? "大孔" : "小孔")} 长度={CachedLength}");
+        _grindingEngine.EnqueueWorkpiece(CachedDiameter, CachedBoreType, CachedLength);
+        OnPropertyChanged(nameof(CachedWorkpieceCount));
+        await Task.CompletedTask;
+    }
+
+    /// <summary>清空工件缓存</summary>
+    private async Task ClearCacheAsync()
+    {
+        Console.WriteLine("[HomeViewModel] ▶ 点击按钮【清空缓存】");
+        _grindingEngine?.ClearCache();
+        OnPropertyChanged(nameof(CachedWorkpieceCount));
+        await Task.CompletedTask;
+    }
+
+    /// <summary>写入研磨参数到选中研磨机（0=Grinder1 1=Grinder2 2=Grinder3 3=Grinder4）。</summary>
+    private async Task WriteGrinderParamsAsync()
+    {
+        var grinders = new[] { Grinder1, Grinder2, Grinder3, Grinder4 };
+        if (GrinderParamIndex < 0 || GrinderParamIndex > 3)
+        {
+            Console.WriteLine($"[HomeViewModel] ✘ 研磨机编号无效：{GrinderParamIndex}");
+            return;
+        }
+        var card = grinders[GrinderParamIndex];
+        Console.WriteLine($"[HomeViewModel] ▶ 写入参数到 {card.Title}：直径={GrinderDiameter} 版孔={(GrinderBoreType == 1 ? "大孔" : "小孔")} 长度={GrinderLength}");
+        bool ok = await card.WriteParamsAsync(GrinderDiameter, GrinderBoreType, GrinderLength);
+        Console.WriteLine($"[HomeViewModel] {(ok ? "✔" : "✘")} 参数写入{(ok ? "成功" : "失败")}");
+    }
+
     private bool _isLoading = true;
     public bool IsLoading { get => _isLoading; private set => SetField(ref _isLoading, value); }
 
@@ -49,6 +120,12 @@ public sealed class HomeViewModel : ObservableObject
         Grinder2 = new GrinderCardViewModel("研磨机2(新代)",   "", PlcGrinderService.GrinderType.TypeB);
         Grinder3 = new GrinderCardViewModel("研磨机3(西门子)", "", PlcGrinderService.GrinderType.TypeA);
         Grinder4 = new GrinderCardViewModel("研磨机4(西门子)", "", PlcGrinderService.GrinderType.TypeA);
+
+        WriteGrinderParamsCommand = new AsyncRelayCommand(WriteGrinderParamsAsync, nameof(WriteGrinderParamsCommand));
+
+        GrindingToggleCommand = new AsyncRelayCommand(GrindingToggleAsync, nameof(GrindingToggleCommand));
+        WriteCacheCommand = new AsyncRelayCommand(WriteCacheAsync, nameof(WriteCacheCommand));
+        ClearCacheCommand = new AsyncRelayCommand(ClearCacheAsync, nameof(ClearCacheCommand));
 
         Console.WriteLine("[HomeViewModel] 初始化完成：天车+机械手+研磨机+手动控制+流程引擎 VM已创建。");
     }
@@ -83,6 +160,84 @@ public sealed class HomeViewModel : ObservableObject
     public GrinderCardViewModel Grinder3 { get; private set; }
     public GrinderCardViewModel Grinder4 { get; private set; }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  研磨参数写入面板（测试用）
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>选中写入哪台研磨机：0=1号 1=2号 2=3号 3=4号</summary>
+    private int _grinderParamIndex;
+    public int GrinderParamIndex
+    {
+        get => _grinderParamIndex;
+        set => SetField(ref _grinderParamIndex, value);
+    }
+
+    /// <summary>版辊直径（mm），Word 无符号 16 位</summary>
+    private int _grinderDiameter = 200;
+    public int GrinderDiameter
+    {
+        get => _grinderDiameter;
+        set => SetField(ref _grinderDiameter, value);
+    }
+
+    /// <summary>版孔类型：1=大孔 2=小孔</summary>
+    private int _grinderBoreType = 1;
+    public int GrinderBoreType
+    {
+        get => _grinderBoreType;
+        set => SetField(ref _grinderBoreType, value);
+    }
+
+    /// <summary>版棍长度（mm），Word 无符号 16 位</summary>
+    private int _grinderLength = 1000;
+    public int GrinderLength
+    {
+        get => _grinderLength;
+        set => SetField(ref _grinderLength, value);
+    }
+
+    /// <summary>写入研磨参数到选中研磨机</summary>
+    public ICommand WriteGrinderParamsCommand { get; }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  研磨自动流程引擎
+    // ═══════════════════════════════════════════════════════════════
+
+    private GrindingFlowEngine? _grindingEngine;
+
+    /// <summary>是否正在运行研磨自动流程</summary>
+    private bool _isGrindingRunning;
+    public bool IsGrindingRunning
+    {
+        get => _isGrindingRunning;
+        set { if (SetField(ref _isGrindingRunning, value)) OnPropertyChanged(nameof(GrindingToggleText)); }
+    }
+
+    /// <summary>启动/暂停按钮文本</summary>
+    public string GrindingToggleText => _isGrindingRunning ? "暂停研磨" : "启动研磨";
+
+    /// <summary>已缓存工件数量</summary>
+    public int CachedWorkpieceCount => _grindingEngine?.CachedCount ?? 0;
+
+    /// <summary>缓存工件直径（mm）</summary>
+    private int _cachedDiameter = 200;
+    public int CachedDiameter { get => _cachedDiameter; set => SetField(ref _cachedDiameter, value); }
+
+    /// <summary>缓存工件版孔（1=大孔 2=小孔）</summary>
+    private int _cachedBoreType = 1;
+    public int CachedBoreType { get => _cachedBoreType; set => SetField(ref _cachedBoreType, value); }
+
+    /// <summary>缓存工件长度（mm）</summary>
+    private int _cachedLength = 1000;
+    public int CachedLength { get => _cachedLength; set => SetField(ref _cachedLength, value); }
+
+    /// <summary>启动/暂停研磨流程</summary>
+    public ICommand GrindingToggleCommand { get; }
+    /// <summary>将工件写入缓存</summary>
+    public ICommand WriteCacheCommand { get; }
+    /// <summary>清空工件缓存</summary>
+    public ICommand ClearCacheCommand { get; }
+
     /// <summary>
     /// 主页面任务表数据源（左侧DataGrid绑定）。
     /// </summary>
@@ -115,6 +270,18 @@ public sealed class HomeViewModel : ObservableObject
         // ── 装载工位坐标到引擎 ──────────────────────────────────────
         _flowEngine.LoadStationCoords(machineRows);
         Console.WriteLine("[HomeViewModel] 引擎已装载工位坐标缓存");
+
+        // ── 创建研磨流程引擎 ─────────────────────────────────────────
+        var grindingCoords = machineRows
+            .Where(r => !string.IsNullOrWhiteSpace(r.StationCode))
+            .ToDictionary(r => r.StationCode.Trim().ToUpperInvariant(), r => r, StringComparer.OrdinalIgnoreCase);
+        _grindingEngine = new GrindingFlowEngine(_craneCache, MotionConfig.Load(), grindingCoords);
+        // 注册 4 台研磨机卡片的状态回调（引擎通知充磁/退磁到 Line5）
+        _grindingEngine.RegisterStatusCallback("ST701", status => Grinder1.SetFlowStatus(status));
+        _grindingEngine.RegisterStatusCallback("ST702", status => Grinder2.SetFlowStatus(status));
+        _grindingEngine.RegisterStatusCallback("ST703", status => Grinder3.SetFlowStatus(status));
+        _grindingEngine.RegisterStatusCallback("ST704", status => Grinder4.SetFlowStatus(status));
+        Console.WriteLine($"[HomeViewModel] 研磨流程引擎已创建（{grindingCoords.Count} 个工位坐标 + 4个卡片状态回调）");
 
         // ── 初始化全厂状态卡片 ──────────────────────────────────────
         Console.WriteLine("[HomeViewModel] 开始初始化全厂状态总览卡片...");
@@ -175,13 +342,7 @@ public sealed class HomeViewModel : ObservableObject
         _ = Task.Run(async () =>
         {
             await StartGrinderConnectionsAsync(newCards);
-            Console.WriteLine("[HomeViewModel] 研磨机GrinderPoll后台连接完成");
-        });
-        _ = Task.Run(async () =>
-        {
-            await SafeStartGrinderAsync(Grinder1); await SafeStartGrinderAsync(Grinder2);
-            await SafeStartGrinderAsync(Grinder3); await SafeStartGrinderAsync(Grinder4);
-            Console.WriteLine("[HomeViewModel] 4台研磨机卡片后台连接完成");
+            Console.WriteLine("[HomeViewModel] 研磨机GrinderPoll后台连接完成（已注入共享服务到卡片）");
         });
 
         Console.WriteLine("[HomeViewModel] ========== LoadAsync 完成 ==========");
@@ -219,30 +380,6 @@ public sealed class HomeViewModel : ObservableObject
         return new GrinderCardViewModel(name, ip, type);
     }
 
-    /// <summary>安全启动研磨机卡片连接（fire-and-forget用）。</summary>
-    private static async Task SafeStartGrinderAsync(GrinderCardViewModel card)
-    {
-        try { await card.StartAsync(); }
-        catch (Exception ex) { Console.WriteLine($"[GrinderCard] [{card.Title}] 后台连接异常：{ex.Message}"); }
-    }
-
-    /// <summary>从IpMap缓存取IP，创建并启动研磨机卡片。</summary>
-    private async Task<GrinderCardViewModel> CreateAndStartGrinderAsync(
-        string stationCode, string name, PlcGrinderService.GrinderType type)
-    {
-        string ip = IpMap.TryGetValue(stationCode, out var v) && v != "未配置IP" ? v : "";
-        if (string.IsNullOrWhiteSpace(ip))
-        {
-            Console.WriteLine($"[GrinderCard] {name} ({stationCode}) IP未配置（IpMap缓存中不存在），创建空卡片");
-            return new GrinderCardViewModel(name, "", type);
-        }
-
-        Console.WriteLine($"[GrinderCard] {name} ({stationCode}) 从IpMap缓存取IP={ip}");
-        var card = new GrinderCardViewModel(name, ip, type);
-        try { await card.StartAsync(); }
-        catch (Exception ex) { Console.WriteLine($"[GrinderCard] [{name}] 启动异常：{ex.Message}"); }
-        return card;
-    }
 
     /// <summary>安全启动站卡轮询，连接失败不抛异常。</summary>
     private static async Task SafeStartStationAsync(StationCardViewModel card)
@@ -257,15 +394,15 @@ public sealed class HomeViewModel : ObservableObject
     /// </summary>
     private async Task StartGrinderConnectionsAsync(Dictionary<string, StationCardViewModel> cards)
     {
-        var grinderDefs = new (string code, string name, PlcGrinderService.GrinderType type)[]
+        var grinderDefs = new (string code, string name, PlcGrinderService.GrinderType type, GrinderCardViewModel grinderCard)[]
         {
-            ("ST701", "研磨机1(新代)",   PlcGrinderService.GrinderType.TypeB),
-            ("ST702", "研磨机2(新代)",   PlcGrinderService.GrinderType.TypeB),
-            ("ST703", "研磨机3(西门子)", PlcGrinderService.GrinderType.TypeA),
-            ("ST704", "研磨机4(西门子)", PlcGrinderService.GrinderType.TypeA),
+            ("ST701", "研磨机1(新代)",   PlcGrinderService.GrinderType.TypeB, Grinder1),
+            ("ST702", "研磨机2(新代)",   PlcGrinderService.GrinderType.TypeB, Grinder2),
+            ("ST703", "研磨机3(西门子)", PlcGrinderService.GrinderType.TypeA, Grinder3),
+            ("ST704", "研磨机4(西门子)", PlcGrinderService.GrinderType.TypeA, Grinder4),
         };
 
-        foreach (var (code, name, gtype) in grinderDefs)
+        foreach (var (code, name, gtype, grinderCard) in grinderDefs)
         {
             // 必须有站卡
             if (!cards.TryGetValue(code, out var card))
@@ -283,13 +420,14 @@ public sealed class HomeViewModel : ObservableObject
 
             card.IpText = $"{ip}:502";
             Console.WriteLine($"[GrinderPoll] {name} ({code}) 启动轮询 Type={gtype} IP={ip}");
-            _ = GrinderPollLoopAsync(code, name, gtype, ip, card);
+            _ = GrinderPollLoopAsync(code, name, gtype, ip, card, grinderCard);
         }
     }
 
     /// <summary>研磨机轮询循环：连接 → 5s读状态 → 更新站卡 → 断开重连。</summary>
     private static async Task GrinderPollLoopAsync(string code, string name,
-        PlcGrinderService.GrinderType gtype, string ip, StationCardViewModel card)
+        PlcGrinderService.GrinderType gtype, string ip, StationCardViewModel stationCard,
+        GrinderCardViewModel grinderCard)
     {
         PlcGrinderService? svc = null;
         int delay = 5000;
@@ -311,7 +449,9 @@ public sealed class HomeViewModel : ObservableObject
                     await svc.ConnectAsync();
                     Console.WriteLine($"[GrinderPoll] [{name}] ✔ 连接成功 IP={ip} Type={gtype}");
                     delay = 5000;
-                    card.ConnectedBrush = System.Windows.Media.Brushes.LimeGreen;
+                    stationCard.ConnectedBrush = System.Windows.Media.Brushes.LimeGreen;
+                    // 注入共享服务到研磨机卡片，避免卡片另建连接
+                    grinderCard.SetSharedService(svc);
                 }
 
                 // 读全部状态
@@ -324,12 +464,15 @@ public sealed class HomeViewModel : ObservableObject
                     bool stone1  = (di & (1 << 1)) != 0;  // bit1=磨石1报警
                     bool stone2  = (di & (1 << 2)) != 0;  // bit2=磨石2报警
 
-                    card.ConnectedBrush = fault ? System.Windows.Media.Brushes.Red
+                    stationCard.ConnectedBrush = fault ? System.Windows.Media.Brushes.Red
                         : System.Windows.Media.Brushes.LimeGreen;
-                    card.Status1Brush = fault ? System.Windows.Media.Brushes.Red
+                    stationCard.Status1Brush = fault ? System.Windows.Media.Brushes.Red
                         : System.Windows.Media.Brushes.Green;
-                    card.Status1 = fault ? "故障" : (busy ? "加工中" : (reqData ? "请求数据" : "空闲"));
-                    card.Status2 = fault ? $"DI=0x{di:X4}" : "西门子PLC";
+                    stationCard.Status1 = fault ? "故障" : (busy ? "加工中" : (reqData ? "请求数据" : "空闲"));
+                    stationCard.Status2 = fault ? $"DI=0x{di:X4}" : "西门子PLC";
+
+                    // 同步更新研磨机卡片（共享同一 DI 读值）
+                    grinderCard.UpdateTypeA(di);
 
                     Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} TypeA DI=0x{di:X4} " +
                         $"报警={fault} 加工={busy} 请求数据={reqData} 磨石1={stone1} 磨石2={stone2}");
@@ -338,15 +481,22 @@ public sealed class HomeViewModel : ObservableObject
                 {
                     int status   = await svc.GetMachineStatusAsync();
                     bool reqData = await svc.IsRequestDataAsync();
+                    bool reqLoad = await svc.IsRequestLoadAsync();
+                    bool clamped = await svc.IsClampDoneLoadOutAsync();
+                    bool reqUnld = await svc.IsRequestUnloadAsync();
+                    bool unclamp = await svc.IsUnclampDoneAsync();
                     bool busy    = await svc.IsMachiningAsync();
                     bool door    = await svc.IsDoorOpenAsync();
 
-                    card.ConnectedBrush = status == 2 ? System.Windows.Media.Brushes.Red
+                    stationCard.ConnectedBrush = status == 2 ? System.Windows.Media.Brushes.Red
                         : System.Windows.Media.Brushes.LimeGreen;
-                    card.Status1Brush = status == 2 ? System.Windows.Media.Brushes.Red
+                    stationCard.Status1Brush = status == 2 ? System.Windows.Media.Brushes.Red
                         : System.Windows.Media.Brushes.Green;
-                    card.Status1 = status == 2 ? "报警" : (busy ? "加工中" : (reqData ? "请求数据" : "空闲"));
-                    card.Status2 = status == 2 ? $"R7308={status}" : (door ? "安全门开" : "新代数控");
+                    stationCard.Status1 = status == 2 ? "报警" : (busy ? "加工中" : (reqData ? "请求数据" : "空闲"));
+                    stationCard.Status2 = status == 2 ? $"R7308={status}" : (door ? "安全门开" : "新代数控");
+
+                    // 同步更新研磨机卡片
+                    grinderCard.UpdateTypeB(status, reqData, reqLoad, clamped, reqUnld, unclamp, busy, door);
 
                     Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} TypeB R7308={status} " +
                         $"加工={busy} 请求数据={reqData} 门开={door}");
@@ -357,10 +507,11 @@ public sealed class HomeViewModel : ObservableObject
             catch (Exception ex)
             {
                 Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} ✘ 异常：{ex.GetType().Name} — {ex.Message}");
-                card.Status1 = "连接失败";
-                card.Status2 = "等待重连...";
-                card.ConnectedBrush = System.Windows.Media.Brushes.Gray;
-                card.Status1Brush = System.Windows.Media.Brushes.Gray;
+                stationCard.Status1 = "连接失败";
+                stationCard.Status2 = "等待重连...";
+                stationCard.ConnectedBrush = System.Windows.Media.Brushes.Gray;
+                stationCard.Status1Brush = System.Windows.Media.Brushes.Gray;
+                grinderCard.SetDisconnected();
                 Console.WriteLine($"[GrinderPoll] [{name}] 退避 {delay / 1000}s 后重试...");
                 await Task.Delay(delay);
                 delay = Math.Min(delay * 2, 30000);
