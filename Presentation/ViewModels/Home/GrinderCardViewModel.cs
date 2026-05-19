@@ -91,16 +91,6 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
         Console.WriteLine($"[GrinderCardVM] [{_name}] 共享服务已注入");
     }
 
-    /// <summary>设置研磨流程磁铁状态（由 GrindingFlowEngine 回调更新 Line5）。</summary>
-    public void SetFlowStatus(string status)
-    {
-        _flowStatus = status;
-        Console.WriteLine($"[GrinderCardVM] [{_name}] 流程状态更新：{status}");
-        // 不直接 SetField，等下次 UpdateTypeA/UpdateTypeB 时拼到 Line5
-    }
-
-    private string _flowStatus = string.Empty;
-
     /// <summary>GrinderPoll 连接断开时通知卡片显示未连接状态。</summary>
     public void SetDisconnected()
     {
@@ -151,8 +141,7 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
 
         Line4 = "西门子PLC (TypeA)";
         Line4Brush = Brushes.DarkBlue;
-        string flow = string.IsNullOrEmpty(_flowStatus) ? "" : $" | {_flowStatus}";
-        Line5 = $"DI=0x{di:X4}{flow}";
+        Line5 = $"DI=0x{di:X4} 心跳={(di & (1 << 8)) != 0}";
     }
 
     public void UpdateTypeB(int machineStatus, bool reqData, bool reqLoad, bool clamped,
@@ -174,8 +163,7 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
 
         Line4 = "新代数控 (TypeB)";
         Line4Brush = Brushes.DarkGreen;
-        string flow = string.IsNullOrEmpty(_flowStatus) ? "" : $" | {_flowStatus}";
-        Line5 = $"R7308={machineStatus} 门={(door ? "开" : "关")}{flow}";
+        Line5 = $"R7308={machineStatus} 门={(door ? "开" : "关")}";
     }
 
     // ═══════════════════════════════════════════════════════════════

@@ -28,25 +28,20 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>启动/暂停研磨自动流程</summary>
     private async Task GrindingToggleAsync()
     {
-        if (_grindingEngine == null)
-        {
-            Console.WriteLine("[HomeViewModel] ✘ 研磨引擎未初始化，无法启动");
-            return;
-        }
+        if (_grindingEngine == null) { Console.WriteLine("[HomeViewModel] ✘ 研磨引擎未初始化"); return; }
 
         if (_isGrindingRunning)
         {
-            Console.WriteLine("[HomeViewModel] ▶ 点击按钮【暂停研磨】→ 急停天车");
+            Console.WriteLine("[HomeViewModel] ▶ 【暂停研磨】");
             await _grindingEngine.PauseAsync();
             IsGrindingRunning = false;
             OnPropertyChanged(nameof(CachedWorkpieceCount));
         }
         else
         {
-            Console.WriteLine("[HomeViewModel] ▶ 点击按钮【启动研磨】→ 开始自动流程");
-            _grindingEngine.Resume();  // 如果是暂停后恢复
-            if (!_grindingEngine.IsRunning)
-                _grindingEngine.Start();
+            Console.WriteLine("[HomeViewModel] ▶ 【启动研磨】");
+            // Start() 内部已有 IsRunning 防重复逻辑，直接调用即可
+            _grindingEngine.Start();
             IsGrindingRunning = true;
             OnPropertyChanged(nameof(CachedWorkpieceCount));
         }
@@ -124,6 +119,7 @@ public sealed class HomeViewModel : ObservableObject
         WriteGrinderParamsCommand = new AsyncRelayCommand(WriteGrinderParamsAsync, nameof(WriteGrinderParamsCommand));
 
         GrindingToggleCommand = new AsyncRelayCommand(GrindingToggleAsync, nameof(GrindingToggleCommand));
+        Line1ToggleCommand = new AsyncRelayCommand(Line1ToggleAsync, nameof(Line1ToggleCommand));
         WriteCacheCommand = new AsyncRelayCommand(WriteCacheAsync, nameof(WriteCacheCommand));
         ClearCacheCommand = new AsyncRelayCommand(ClearCacheAsync, nameof(ClearCacheCommand));
 
@@ -207,11 +203,7 @@ public sealed class HomeViewModel : ObservableObject
 
     /// <summary>是否正在运行研磨自动流程</summary>
     private bool _isGrindingRunning;
-    public bool IsGrindingRunning
-    {
-        get => _isGrindingRunning;
-        set { if (SetField(ref _isGrindingRunning, value)) OnPropertyChanged(nameof(GrindingToggleText)); }
-    }
+    public bool IsGrindingRunning { get => _isGrindingRunning; set { if (SetField(ref _isGrindingRunning, value)) OnPropertyChanged(nameof(GrindingToggleText)); } }
 
     /// <summary>启动/暂停按钮文本</summary>
     public string GrindingToggleText => _isGrindingRunning ? "暂停研磨" : "启动研磨";
@@ -219,8 +211,21 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>已缓存工件数量</summary>
     public int CachedWorkpieceCount => _grindingEngine?.CachedCount ?? 0;
 
+    // ── 1号线前端流程引擎 ──────────────────────────────────────────
+    private Line1FrontFlowEngine? _line1Engine;
+
+    private bool _isLine1Running;
+    /// <summary>1号线是否在运行</summary>
+    public bool IsLine1Running { get => _isLine1Running; set { if (SetField(ref _isLine1Running, value)) OnPropertyChanged(nameof(Line1ToggleText)); } }
+
+    /// <summary>1号线启动/暂停按钮文本</summary>
+    public string Line1ToggleText => _isLine1Running ? "暂停1号线" : "启动1号线";
+
+    /// <summary>1号线缓存工件数量</summary>
+    public int Line1CachedCount => _line1Engine?.CachedCount ?? 0;
+
     /// <summary>缓存工件直径（mm）</summary>
-    private int _cachedDiameter = 200;
+    private int _cachedDiameter = 205;
     public int CachedDiameter { get => _cachedDiameter; set => SetField(ref _cachedDiameter, value); }
 
     /// <summary>缓存工件版孔（1=大孔 2=小孔）</summary>
@@ -228,11 +233,21 @@ public sealed class HomeViewModel : ObservableObject
     public int CachedBoreType { get => _cachedBoreType; set => SetField(ref _cachedBoreType, value); }
 
     /// <summary>缓存工件长度（mm）</summary>
-    private int _cachedLength = 1000;
+    private int _cachedLength = 650;
     public int CachedLength { get => _cachedLength; set => SetField(ref _cachedLength, value); }
 
     /// <summary>启动/暂停研磨流程</summary>
     public ICommand GrindingToggleCommand { get; }
+
+    /// <summary>启动/暂停1号线</summary>
+    private async Task Line1ToggleAsync()
+    {
+        if (_line1Engine == null) { Console.WriteLine("[HomeViewModel] ✘ 1号线引擎未初始化"); return; }
+        if (_isLine1Running) { Console.WriteLine("[HomeViewModel] ▶ 【暂停1号线】"); _line1Engine.Pause(); IsLine1Running = false; }
+        else { Console.WriteLine("[HomeViewModel] ▶ 【启动1号线】→ 开始前端流程"); _line1Engine.Start(); IsLine1Running = true; }
+    }
+
+    public ICommand Line1ToggleCommand { get; }
     /// <summary>将工件写入缓存</summary>
     public ICommand WriteCacheCommand { get; }
     /// <summary>清空工件缓存</summary>
@@ -276,12 +291,11 @@ public sealed class HomeViewModel : ObservableObject
             .Where(r => !string.IsNullOrWhiteSpace(r.StationCode))
             .ToDictionary(r => r.StationCode.Trim().ToUpperInvariant(), r => r, StringComparer.OrdinalIgnoreCase);
         _grindingEngine = new GrindingFlowEngine(_craneCache, MotionConfig.Load(), grindingCoords);
-        // 注册 4 台研磨机卡片的状态回调（引擎通知充磁/退磁到 Line5）
-        _grindingEngine.RegisterStatusCallback("ST701", status => Grinder1.SetFlowStatus(status));
-        _grindingEngine.RegisterStatusCallback("ST702", status => Grinder2.SetFlowStatus(status));
-        _grindingEngine.RegisterStatusCallback("ST703", status => Grinder3.SetFlowStatus(status));
-        _grindingEngine.RegisterStatusCallback("ST704", status => Grinder4.SetFlowStatus(status));
-        Console.WriteLine($"[HomeViewModel] 研磨流程引擎已创建（{grindingCoords.Count} 个工位坐标 + 4个卡片状态回调）");
+        Console.WriteLine($"[HomeViewModel] 研磨流程引擎已创建（{grindingCoords.Count} 个工位坐标）");
+
+        // ── 创建1号线前端流程引擎 ─────────────────────────────────────
+        _line1Engine = new Line1FrontFlowEngine(_craneCache, MotionConfig.Load(), grindingCoords);
+        Console.WriteLine("[HomeViewModel] 1号线前端流程引擎已创建");
 
         // ── 初始化全厂状态卡片 ──────────────────────────────────────
         Console.WriteLine("[HomeViewModel] 开始初始化全厂状态总览卡片...");
@@ -420,14 +434,14 @@ public sealed class HomeViewModel : ObservableObject
 
             card.IpText = $"{ip}:502";
             Console.WriteLine($"[GrinderPoll] {name} ({code}) 启动轮询 Type={gtype} IP={ip}");
-            _ = GrinderPollLoopAsync(code, name, gtype, ip, card, grinderCard);
+            _ = GrinderPollLoopAsync(code, name, gtype, ip, card, grinderCard, _grindingEngine!);
         }
     }
 
     /// <summary>研磨机轮询循环：连接 → 5s读状态 → 更新站卡 → 断开重连。</summary>
     private static async Task GrinderPollLoopAsync(string code, string name,
         PlcGrinderService.GrinderType gtype, string ip, StationCardViewModel stationCard,
-        GrinderCardViewModel grinderCard)
+        GrinderCardViewModel grinderCard, GrindingFlowEngine grindingEngine)
     {
         PlcGrinderService? svc = null;
         int delay = 5000;
@@ -450,8 +464,9 @@ public sealed class HomeViewModel : ObservableObject
                     Console.WriteLine($"[GrinderPoll] [{name}] ✔ 连接成功 IP={ip} Type={gtype}");
                     delay = 5000;
                     stationCard.ConnectedBrush = System.Windows.Media.Brushes.LimeGreen;
-                    // 注入共享服务到研磨机卡片，避免卡片另建连接
+                    // 注入共享服务到研磨机卡片 + 研磨流程引擎，避免各自另建连接导致双连接冲突
                     grinderCard.SetSharedService(svc);
+                    grindingEngine.SetGrinderService(code, svc);
                 }
 
                 // 读全部状态
@@ -540,38 +555,39 @@ public sealed class HomeViewModel : ObservableObject
     /// </summary>
     public void AddTask(TaskRowViewModel row)
     {
-        TaskRows.Add(row);
-        Console.WriteLine($"[HomeViewModel] 新增任务：版号={row.PlateNo} 序号={row.Sequence} 工序={row.Step}");
-
-        // 构建工件上下文并投入引擎
-        var ctx = new Domain.Models.WorkpieceContext
+        // 设置启动回调：用户点任务行的「启动」→ 分配工件到对应线路
+        row.OnStartRequested = taskRow =>
         {
-            PlateNo            = row.PlateNo,
-            Sequence           = row.Sequence,
-            Length             = row.Length,
-            Diameter           = row.Diameter,
-            PlugHole           = row.PlugHole,
-            LeftPlugThickness  = row.LeftPlugThickness,
-            RightPlugThickness = row.RightPlugThickness,
-            MarkingContent     = row.MarkingContent,
-            ProcessType        = row.ProcessType,
+            // ① 自动分配线路（400-1200→1或2优先1, 1200-1500→只能1）
+            int line = taskRow.Length > 1200 ? 1
+                : (taskRow.Length >= 400 && taskRow.Length <= 1200) ? 1  // 1号线优先
+                : 0;
+            taskRow.AssignedLine = line;
+            Console.WriteLine($"[HomeViewModel] 工件分配 版号={taskRow.PlateNo} L={taskRow.Length} → {line}号线");
+
+            if (line == 0) { Console.WriteLine("[HomeViewModel] ⚠ 版长不在任何线路范围内"); return; }
+
+            // ② 构建 WorkpieceCache
+            var wp = new Service.WorkpieceCache
+            {
+                Diameter = (int)taskRow.Diameter,
+                BoreType = (int)taskRow.PlugHole,  // 70=小孔, 100=大孔
+                Length = (int)taskRow.Length,
+                MarkingContent = taskRow.MarkingContent,
+                LeftPlugThickness = taskRow.LeftPlugThickness,
+                RightPlugThickness = taskRow.RightPlugThickness,
+                BoringProcess = taskRow.BoringProcess,
+                SkewBedProcess = taskRow.SkewBedProcess,
+            };
+
+            // ③ 入队对应线路引擎
+            if (line == 1) _line1Engine?.EnqueueWorkpiece(wp);
+            // else if (line == 2) _line2Engine?.EnqueueWorkpiece(wp); // TODO: 2号线引擎
+            Console.WriteLine($"[HomeViewModel] 📥 工件入{line}号线缓存 d={wp.Diameter} L={wp.Length}");
         };
 
-        // 绑定 UI 行到工件上下文（引擎推进阶段时自动更新 DataGrid）
-        ctx.UiRow = row;
-
-        _flowEngine.EnqueueWorkpiece(ctx);
-
-        // 如果引擎还没启动，启动它
-        if (!_flowEngine.IsRunning)
-        {
-            _flowEngine.Start();
-            Console.WriteLine("[HomeViewModel] 流程引擎已启动");
-        }
-
-        // 更新 UI 状态
-        row.State = "已入队";
-        row.Step  = ctx.CurrentStepText;
+        TaskRows.Add(row);
+        Console.WriteLine($"[HomeViewModel] 新增任务：版号={row.PlateNo} 序号={row.Sequence} 版长={row.Length}mm");
     }
 }
 

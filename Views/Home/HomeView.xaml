@@ -63,7 +63,8 @@
                         Width="90"
                         Height="30"
                         Margin="2"
-                        Content="启动一号线" />
+                        Command="{Binding Line1ToggleCommand}"
+                        Content="{Binding Line1ToggleText}" />
                     <Button
                         Width="90"
                         Height="30"

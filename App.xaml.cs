@@ -1,5 +1,7 @@
 using AutomaticOnlineHostComputer.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.IO;
 using System.Windows;
 
 namespace AutomaticOnlineHostComputer;
@@ -39,6 +41,23 @@ public partial class App : Application
     /// </summary>
     protected override void OnStartup(StartupEventArgs e)
     {
+        // ── 日志文件重定向：Console 输出同步写入 D:\BSH\1.txt ───────────
+        var logPath = @"D:\BSH\1.txt";
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            var logWriter = new DualWriter(Console.Out, logPath);
+            Console.SetOut(logWriter);
+            Console.WriteLine($"══════════════════════════════════════════");
+            Console.WriteLine($"  启动时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+            Console.WriteLine($"  日志文件：{logPath}");
+            Console.WriteLine($"══════════════════════════════════════════");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[App] ⚠ 日志文件初始化失败：{ex.Message}");
+        }
+
         Console.WriteLine("App.OnStartup: 构建 DI 容器...");
         base.OnStartup(e);
 
@@ -50,5 +69,43 @@ public partial class App : Application
 
         // BuildServiceProvider() 冻结注册表，返回可解析服务的容器
         Services = serviceCollection.BuildServiceProvider();
+    }
+}
+
+/// <summary>
+/// 双路 TextWriter：同时写入控制台和日志文件。
+/// </summary>
+internal sealed class DualWriter : TextWriter
+{
+    private readonly TextWriter _console;
+    private readonly StreamWriter _file;
+
+    public DualWriter(TextWriter console, string logPath)
+    {
+        _console = console;
+        _file = new StreamWriter(logPath, append: true) { AutoFlush = true };
+    }
+
+    public override System.Text.Encoding Encoding => _console.Encoding;
+
+    public override void Write(char value)
+    {
+        _console.Write(value);
+        _file.Write(value);
+    }
+
+    public override void WriteLine(string? value)
+    {
+        _console.WriteLine(value);
+        _file.WriteLine(value);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _file.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }

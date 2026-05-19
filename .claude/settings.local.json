@@ -12,7 +12,14 @@
       "Bash(git checkout *)",
       "Bash(awk ' *)",
       "Read(//tmp/**)",
-      "Bash(xxd)"
+      "Bash(xxd)",
+      "Bash(python -c ' *)",
+      "Bash(pip install *)",
+      "Bash(where python *)",
+      "Bash(\"D:\\\\python3.12.7\\\\python.exe\" -m pip install xlrd pandas -q)",
+      "Bash('D:\\\\python3.12.7\\\\python.exe' -c ' *)",
+      "Bash(python -c \"import xlrd; print\\('xlrd ok'\\)\")",
+      "Bash(C:\\\\Users\\\\30935\\\\Miniconda3\\\\python.exe *)"
     ]
   }
 }

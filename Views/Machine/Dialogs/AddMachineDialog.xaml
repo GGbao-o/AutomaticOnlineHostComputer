@@ -178,7 +178,7 @@
                             Grid.Row="9"
                             Margin="0,8"
                             VerticalAlignment="Center"
-                            Text="X位移" />
+                            Text="X偏移" />
                         <TextBox
                             x:Name="XDisTextBox"
                             Grid.Row="9"
@@ -190,7 +190,7 @@
                             Grid.Row="10"
                             Margin="0,8"
                             VerticalAlignment="Center"
-                            Text="Y位移" />
+                            Text="Y偏移" />
                         <TextBox
                             x:Name="YDisTextBox"
                             Grid.Row="10"
@@ -202,7 +202,7 @@
                             Grid.Row="11"
                             Margin="0,8"
                             VerticalAlignment="Center"
-                            Text="Z位移" />
+                            Text="Z偏移" />
                         <TextBox
                             x:Name="ZDisTextBox"
                             Grid.Row="11"

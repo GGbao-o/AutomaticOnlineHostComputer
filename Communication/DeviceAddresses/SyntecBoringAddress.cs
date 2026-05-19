@@ -22,8 +22,11 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         /// <summary>@705 外圆直径（mm，浮点）</summary>
         public const int MacroOuterDiameter   = 705;
 
-        /// <summary>@703 堵头厚度（mm，浮点）</summary>
-        public const int MacroPlugThickness   = 703;
+        /// <summary>@702 左堵厚（mm，浮点）</summary>
+        public const int MacroLeftPlugThickness  = 702;
+
+        /// <summary>@703 右堵厚（mm，浮点）</summary>
+        public const int MacroRightPlugThickness = 703;
 
         /// <summary>@708 内孔锥度（mm/m，浮点）</summary>
         public const int MacroInnerConicity   = 708;

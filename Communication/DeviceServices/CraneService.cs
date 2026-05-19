@@ -257,25 +257,35 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             await WriteRegAsync(Addr.D_ManualMoveZ, 2, "Z轴相对运动", ct);
         }
 
+        /// <summary>X轴回原点：D4508=2 触发 → 等回零完成 → D4508=0 复位（必须写0）。</summary>
         public async Task HomeXAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[CraneService] [{_name}] ▶ X轴回原点");
+            Console.WriteLine($"[CraneService] [{_name}] ▶ X轴回原点 D4508=2");
             await EnsureManualModeAsync(ct);
-            await WriteRegAsync(Addr.D_ManualHomeX, 2, "X轴回原点", ct);
+            await WriteRegAsync(Addr.D_ManualHomeX, 2, "X轴回原点(触发)", ct);
+            // 等待 X 轴回零完成（PLC 定位完成信号 X23=63511）
+            await Task.Delay(200, ct);
+            await WriteRegAsync(Addr.D_ManualHomeX, 0, "X轴回原点(复位)", ct);
         }
 
+        /// <summary>Y轴回原点：D4507=2 触发 → D4507=0 复位（必须写0）。</summary>
         public async Task HomeYAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[CraneService] [{_name}] ▶ Y轴回原点");
+            Console.WriteLine($"[CraneService] [{_name}] ▶ Y轴回原点 D4507=2");
             await EnsureManualModeAsync(ct);
-            await WriteRegAsync(Addr.D_ManualHomeY, 2, "Y轴回原点", ct);
+            await WriteRegAsync(Addr.D_ManualHomeY, 2, "Y轴回原点(触发)", ct);
+            await Task.Delay(200, ct);
+            await WriteRegAsync(Addr.D_ManualHomeY, 0, "Y轴回原点(复位)", ct);
         }
 
+        /// <summary>Z轴回原点：D4506=2 触发 → D4506=0 复位（必须写0）。</summary>
         public async Task HomeZAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[CraneService] [{_name}] ▶ Z轴回原点");
+            Console.WriteLine($"[CraneService] [{_name}] ▶ Z轴回原点 D4506=2");
             await EnsureManualModeAsync(ct);
-            await WriteRegAsync(Addr.D_ManualHomeZ, 2, "Z轴回原点", ct);
+            await WriteRegAsync(Addr.D_ManualHomeZ, 2, "Z轴回原点(触发)", ct);
+            await Task.Delay(200, ct);
+            await WriteRegAsync(Addr.D_ManualHomeZ, 0, "Z轴回原点(复位)", ct);
         }
 
         // ─── 伺服通/断电 ──────────────────────────────────────────────
@@ -655,7 +665,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// </summary>
         public async Task MoveAbsoluteAsync(
             int xTarget, int yTarget, int zTarget,
-            int tolerance = 5, int timeoutMs = 30_000, CancellationToken ct = default)
+            int tolerance = 5, int timeoutMs = 240_000, CancellationToken ct = default)
         {
             var activeAxes = new List<string>();
             if (xTarget >= 0) activeAxes.Add("X");
@@ -682,8 +692,9 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 if (curStatus != null)
                 {
                     int dz = zTarget - curStatus.ZPos;
-                    zGoingDown = dz < -tolerance;  // 目标 < 当前 → 下降
-                    zGoingUp   = dz > tolerance;   // 目标 > 当前 → 上升
+                    // Z轴方向：Z从0起始，变大=向下走 ↓，变小=向上走 ↑
+                    zGoingDown = dz > tolerance;   // 目标 > 当前（Z变大）→ ↓下降
+                    zGoingUp   = dz < -tolerance;  // 目标 < 当前（Z变小）→ ↑上升
                     Console.WriteLine($"[CraneService] [{_name}] 当前Z={curStatus.ZPos} 目标Z={zTarget} ΔZ={dz} " +
                         $"{(zGoingDown ? "↓下降" : zGoingUp ? "↑上升" : "→水平")}");
                 }
@@ -700,28 +711,52 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             // ── 4. 按 Z 方向决定触发顺序 ──────────────────────────────────
             try
             {
+                // ── 绝对移动触发：2→500ms→0 脉冲模式 ──
+                //    PLC 收到 2 脉冲后开始执行移动，写 0 是复位清理。
+                //    Z下降：先脉冲XY → 等XY到位 → 脉冲Z → 等全部到位
+                //    Z上升：先脉冲Z → 等Z到位 → 脉冲XY → 等全部到位
                 if (zGoingDown)
                 {
-                    Console.WriteLine($"[CraneService] [{_name}] Z下降 → 先走XY再走Z");
+                    Console.WriteLine($"[CraneService] [{_name}] Z下降 → 先脉冲XY再脉冲Z");
                     if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
                     if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
+                    await Task.Delay(500, ct);
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
                     await PollAxesAsync(xTarget, yTarget, -1, tolerance, timeoutMs / 2, ct);
-                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
+                    if (zTarget >= 0)
+                    {
+                        await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
+                        await Task.Delay(500, ct);
+                        await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
+                    }
                 }
                 else if (zGoingUp)
                 {
-                    Console.WriteLine($"[CraneService] [{_name}] Z上升 → 先走Z再走XY");
-                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
+                    Console.WriteLine($"[CraneService] [{_name}] Z上升 → 先脉冲Z再脉冲XY");
+                    if (zTarget >= 0)
+                    {
+                        await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
+                        await Task.Delay(500, ct);
+                        await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
+                    }
                     await PollAxesAsync(-1, -1, zTarget, tolerance, timeoutMs / 2, ct);
                     if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
                     if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
+                    await Task.Delay(500, ct);
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
                 }
                 else
                 {
-                    Console.WriteLine($"[CraneService] [{_name}] Z不变 → 三轴同时触发");
+                    Console.WriteLine($"[CraneService] [{_name}] Z不变 → 三轴同时脉冲");
                     if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
                     if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
                     if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
+                    await Task.Delay(500, ct);
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
+                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
                 }
 
                 // ── 4. 轮询等待所有轴到位 ──────────────────────────────────
@@ -729,16 +764,21 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             }
             finally
             {
+                // ⚠️ finally 复位必须用 CancellationToken.None！
+                // 上层可能传了带超时的 ct（如手动面板 5s），移动本身耗时远超 5s，
+                // ct 取消后 finally 里再写寄存器会被拒绝，导致 D4520/D4521/D4522 卡在 2 不复位。
+                var resetCt = CancellationToken.None;
+
                 // ── 5. 复位所有触发信号 ──────────────────────────────────
-                if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
-                if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
-                if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
+                if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", resetCt);
+                if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", resetCt);
+                if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", resetCt);
 
                 // ── 接液盘互锁：Z 上升后关闭接液盘 ────────────────────
                 if (zGoingUp)
                 {
                     Console.WriteLine($"[CraneService] [{_name}] 接液盘互锁：Z上升后关闭接液盘");
-                    await DrainCloseAsync(ct);
+                    await DrainCloseAsync(resetCt);
                 }
             }
 
@@ -799,28 +839,39 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 int pollDelay = zTarget >= 0 ? 200 : 500;
                 await Task.Delay(pollDelay, ct);
 
-                // ── 下压信号检测：D4523=1 立即急停+复位触发位 ──
+                // ── 磁铁下压限位检测：X2=63490 线圈=1 → 下压急停 ──
+                //    X2（FC01 Read Coil）是磁铁物理下压限位开关，PLC 无法直接停止伺服，
+                //    上位机检测到 X2=1 后主动写 D4523=2→0（下压急停触发）、D4518=2→0（伺服急停）。
                 if (zTarget >= 0)
                 {
-                    bool pStop = await IsPressureEStopAsync(ct);
-                    if (pStop)
+                    bool x2Pressed = await ReadXBitAsync(Addr.D_X2_MagnetLimit, ct);
+                    if (x2Pressed)
                     {
                         Console.WriteLine($"══════════════════════════════════════");
-                        Console.WriteLine($"  [CraneService] [{_name}] ⚠⚠⚠ 下压信号触发 D4523=1 ⚠⚠⚠");
+                        Console.WriteLine($"  [CraneService] [{_name}] ⚠⚠⚠ 磁铁下压限位 X2=1 ⚠⚠⚠");
                         Console.WriteLine($"  磁铁已接触工件/障碍物！");
-                        Console.WriteLine($"  ①急停 D4518=2→0（立即停止伺服）");
-                        Console.WriteLine($"  ②复位触发位 D4520/D4521/D4522=0");
+                        Console.WriteLine($"  ① D4523=2→0 下压急停（500ms脉冲）");
+                        Console.WriteLine($"  ② D4518=2→0 伺服急停");
+                        Console.WriteLine($"  ③ 复位绝对触发位 D4520/D4521/D4522=0");
                         Console.WriteLine($"  恢复步骤：①写D4523=0 ②清除报警D4514=2→0");
                         Console.WriteLine($"══════════════════════════════════════");
 
-                        // 先急停伺服（D4518=2→0），确保立即停止
-                        await WriteRegAsync(Addr.D_ManualEStop, 2, "下压急停 D4518(触发)", ct);
-                        await WriteRegAsync(Addr.D_ManualEStop, 0, "下压急停 D4518(复位)", ct);
+                        // 下压急停是安全关键操作，必须用 CancellationToken.None
+                        var emergencyCt = CancellationToken.None;
 
-                        // 再复位绝对移动触发位，防止急停恢复后继续运动
-                        if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X下压停止复位 D4522", ct);
-                        if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y下压停止复位 D4521", ct);
-                        if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z下压停止复位 D4520", ct);
+                        // ① 下压急停 D4523=2 → 500ms → 0（通知 PLC 进入下压急停状态）
+                        await WriteRegAsync(Addr.D_PressureEStop, 2, "下压急停 D4523(触发)", emergencyCt);
+                        await Task.Delay(500, emergencyCt);
+                        await WriteRegAsync(Addr.D_PressureEStop, 0, "下压急停 D4523(复位)", emergencyCt);
+
+                        // ② 伺服急停 D4518=2→0（立即停止伺服电机）
+                        await WriteRegAsync(Addr.D_ManualEStop, 2, "伺服急停 D4518(触发)", emergencyCt);
+                        await WriteRegAsync(Addr.D_ManualEStop, 0, "伺服急停 D4518(复位)", emergencyCt);
+
+                        // ③ 复位绝对移动触发位，防止急停恢复后继续运动
+                        if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X下压停止复位 D4522", emergencyCt);
+                        if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y下压停止复位 D4521", emergencyCt);
+                        if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z下压停止复位 D4520", emergencyCt);
 
                         throw new PressureStopException(_name);
                     }
@@ -846,12 +897,15 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     Console.WriteLine($"[CraneService] [{_name}] ⚠ 首次未到位，触发补偿重试...");
                     Console.WriteLine($"[CraneService] [{_name}]   偏差 ΔX={status.XPos - xTarget} ΔY={status.YPos - yTarget} ΔZ={status.ZPos - zTarget}");
 
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X补偿重试触发 D4522", ct);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y补偿重试触发 D4521", ct);
-                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z补偿重试触发 D4520", ct);
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X补偿重试复位 D4522", ct);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y补偿重试复位 D4521", ct);
-                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z补偿重试复位 D4520", ct);
+                    // 补偿重试：2→500ms→0 脉冲，使用 CancellationToken.None
+                    var retryCt = CancellationToken.None;
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X补偿重试触发 D4522", retryCt);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y补偿重试触发 D4521", retryCt);
+                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z补偿重试触发 D4520", retryCt);
+                    await Task.Delay(500, retryCt);
+                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X补偿重试复位 D4522", retryCt);
+                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y补偿重试复位 D4521", retryCt);
+                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z补偿重试复位 D4520", retryCt);
 
                     retried = true;
                     goto retry;

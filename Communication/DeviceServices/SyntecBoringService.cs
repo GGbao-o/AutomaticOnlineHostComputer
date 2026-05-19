@@ -47,16 +47,18 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public async Task SendMachiningParamsAsync(
             double rollerLength,
             double outerDiameter,
-            double plugThickness,
+            double leftPlugThickness,
+            double rightPlugThickness,
             double innerConicity,
             double innerDiameter,
             CancellationToken ct = default)
         {
-            await _client.WriteAsync(SyntecBoringAddress.MacroRollerLength,  rollerLength,  ct);
-            await _client.WriteAsync(SyntecBoringAddress.MacroOuterDiameter, outerDiameter, ct);
-            await _client.WriteAsync(SyntecBoringAddress.MacroPlugThickness, plugThickness, ct);
-            await _client.WriteAsync(SyntecBoringAddress.MacroInnerConicity, innerConicity, ct);
-            await _client.WriteAsync(SyntecBoringAddress.MacroInnerDiameter, innerDiameter, ct);
+            await _client.WriteAsync(SyntecBoringAddress.MacroRollerLength,     rollerLength,      ct);
+            await _client.WriteAsync(SyntecBoringAddress.MacroOuterDiameter,    outerDiameter,     ct);
+            await _client.WriteAsync(SyntecBoringAddress.MacroLeftPlugThickness,  leftPlugThickness,  ct);
+            await _client.WriteAsync(SyntecBoringAddress.MacroRightPlugThickness, rightPlugThickness, ct);
+            await _client.WriteAsync(SyntecBoringAddress.MacroInnerConicity,    innerConicity,     ct);
+            await _client.WriteAsync(SyntecBoringAddress.MacroInnerDiameter,    innerDiameter,     ct);
         }
 
         // ─── 写 R区信号（上位机→机床握手） ───────────────────────────

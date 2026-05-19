@@ -1,12 +1,12 @@
 
 {
   "absMove": {
-    "defaultSpeed": 500,
-    "defaultAccel": 200,
-    "defaultDecel": 200,
     "tolerance": 5,
-    "timeoutMs": 30000,
-    "pollIntervalMs": 500
+    "timeoutMs": 300000,
+    "pollIntervalMs": 500,
+    "x": { "speed": 300, "accel": 80, "decel": 80 },
+    "y": { "speed": 80, "accel": 60, "decel": 60 },
+    "z": { "speed": 50, "accel": 40,  "decel": 40 }
   },
   "relMove": {
     "defaultSpeed": 300,
@@ -34,5 +34,13 @@
   "engine": {
     "queuePollIntervalMs": 1000,
     "stationWaitTimeoutMs": 30000
+  },
+  "grinding": {
+    "zFactor1": 0.9537,
+    "zFactor2": 0.866,
+    "safeZHeight": 250,
+    "craneNo": 5,
+    "pollIntervalMs": 500,
+    "handshakeTimeoutMs": 60000
   }
 }

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Media;
+using AutomaticOnlineHostComputer.Communication.DeviceAddresses;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Service;
 
@@ -128,8 +129,12 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
             var first = await _service.ReadStatusAsync();
             if (first != null)
             {
+                // 首次也读 X6/X7 线圈
+                bool x6Ok = false, x7Ok = false;
+                try { x6Ok = await _service.ReadXBitAsync(CraneAddress.D_X6_MagnetizeOk); } catch { }
+                try { x7Ok = await _service.ReadXBitAsync(CraneAddress.D_X7_DemagnetizeOk); } catch { }
                 Console.WriteLine($"[CraneCardVM] [{CraneName}] 首次读取成功。");
-                await UpdateUiFromStatusAsync(first);
+                await UpdateUiFromStatusAsync(first, x6Ok, x7Ok);
             }
             else
             {
@@ -173,7 +178,18 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
                 var status = await _service.ReadStatusAsync(ct);
                 if (status != null)
                 {
-                    await UpdateUiFromStatusAsync(status);
+                    // 同时读 X6/X7 线圈（FC01），获取真实磁铁反馈
+                    bool x6MagnetOk = false, x7DemagnetOk = false;
+                    try
+                    {
+                        x6MagnetOk   = await _service.ReadXBitAsync(CraneAddress.D_X6_MagnetizeOk, ct);
+                        x7DemagnetOk = await _service.ReadXBitAsync(CraneAddress.D_X7_DemagnetizeOk, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[CraneCardVM] [{CraneName}] ⚠ 读取X6/X7线圈异常：{ex.Message}");
+                    }
+                    await UpdateUiFromStatusAsync(status, x6MagnetOk, x7DemagnetOk);
                 }
                 else
                 {
@@ -209,8 +225,11 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>将 <see cref="CraneStatus"/> 快照映射到 UI 绑定属性（Line1~5 + 颜色）。</summary>
-    private async Task UpdateUiFromStatusAsync(CraneStatus s)
+    /// <summary>
+    /// 将 <see cref="CraneStatus"/> 快照 + X6/X7 线圈状态映射到 UI 绑定属性（Line1~5 + 颜色）。
+    /// <para>X6(63494)=充磁反馈，X7(63495)=退磁反馈，FC01 Read Coil 读取。</para>
+    /// </summary>
+    private async Task UpdateUiFromStatusAsync(CraneStatus s, bool x6MagnetOk, bool x7DemagnetOk)
     {
         var hasFault = s.Fault != 0 || s.ServoAlarm != 0 || s.PlcAlarm != 0;
         Line1 = hasFault ? "已连接 | 故障" : "已连接，就绪";
@@ -219,12 +238,21 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
         Line2 = s.Busy == 1 ? $"执行任务 #{s.CurrentTaskNo}" : "无任务";
 
         string modeText = s.Mode switch { 1 => "自动", 2 => "手动", _ => "待机" };
-        // D5029 HasRoller: 1=有版(充磁吸住) 0=无版(退磁松开)，无需额外读D63488
-        string magText = s.HasRoller == 1 ? " | 充磁到位" : " | 退磁到位";
+        // 磁铁状态：X6(充磁反馈线圈) + X7(退磁反馈线圈) + D5029(有版信号) 三重确认
+        string magText;
+        if (x6MagnetOk)
+            magText = " | 充磁到位 ✓(X6)";
+        else if (x7DemagnetOk)
+            magText = " | 退磁到位 ✓(X7)";
+        else if (s.HasRoller == 1)
+            magText = " | 有版(D5029)";
+        else
+            magText = " | 无版";
         Line3 = $"{modeText}模式{magText}";
 
         Line4 = s.RunConditionMissing != 0 ? $"条件缺失 0x{s.RunConditionMissing:X4}" : "运行条件满足";
-        Line5 = $"{(s.HasRoller == 1 ? "有版" : "无版")} | X={s.XPos}  Y={s.YPos}  Z={s.ZPos}";
+        // Line5：坐标 + 磁铁线圈原始值
+        Line5 = $"X6={(x6MagnetOk?1:0)} X7={(x7DemagnetOk?1:0)} D5029={s.HasRoller} | X={s.XPos} Y={s.YPos} Z={s.ZPos}";
 
         // 异步更新当前位置到数据库（fire-and-forget，不阻塞轮询）
         if (_posSvc != null)

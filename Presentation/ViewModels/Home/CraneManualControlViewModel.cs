@@ -609,6 +609,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
         try
         {
             await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ, cts.Token);
+            //绝对位移 service
             await service.MoveAbsoluteAsync(xTarget, yTarget, zTarget, ct: cts.Token);
             Console.WriteLine($"[CraneManualVM] [{name}] ✔ 绝对移动完成");
         }

@@ -38,12 +38,16 @@ public sealed class ProductionFlowEngine : IDisposable
     /// <summary>运动参数配置（从 Config/motion_settings.json 加载）</summary>
     private readonly MotionConfig _cfg;
 
-    /// <summary>默认绝对移动速度（mm/s），可调。</summary>
-    public int DefaultAbsSpeed { get; set; } = 500;
-    /// <summary>默认绝对移动加速度</summary>
-    public int DefaultAbsAccel { get; set; } = 200;
-    /// <summary>默认绝对移动减速度</summary>
-    public int DefaultAbsDecel { get; set; } = 200;
+    /// <summary>默认绝对速度 X/Y/Z（mm/s），从配置文件加载。</summary>
+    public int DefaultAbsSpeedX { get; set; } = 300;
+    public int DefaultAbsAccelX { get; set; } = 150;
+    public int DefaultAbsDecelX { get; set; } = 150;
+    public int DefaultAbsSpeedY { get; set; } = 300;
+    public int DefaultAbsAccelY { get; set; } = 150;
+    public int DefaultAbsDecelY { get; set; } = 150;
+    public int DefaultAbsSpeedZ { get; set; } = 150;
+    public int DefaultAbsAccelZ { get; set; } = 80;
+    public int DefaultAbsDecelZ { get; set; } = 80;
 
     // ═══════════════════════════════════════════════════════════════
     //  预约系统 — 防多天车/机械手同时操作同一工位
@@ -178,10 +182,10 @@ public sealed class ProductionFlowEngine : IDisposable
         _cfg = MotionConfig.Load();
 
         // 用配置文件覆盖默认值
-        DefaultAbsSpeed = _cfg.AbsMove.DefaultSpeed;
-        DefaultAbsAccel = _cfg.AbsMove.DefaultAccel;
-        DefaultAbsDecel = _cfg.AbsMove.DefaultDecel;
-        Console.WriteLine($"[FlowEngine] 引擎实例已创建（AbsSpeed={DefaultAbsSpeed} Tolerance={_cfg.AbsMove.Tolerance}）");
+        DefaultAbsSpeedX = _cfg.AbsMove.X.Speed; DefaultAbsAccelX = _cfg.AbsMove.X.Accel; DefaultAbsDecelX = _cfg.AbsMove.X.Decel;
+        DefaultAbsSpeedY = _cfg.AbsMove.Y.Speed; DefaultAbsAccelY = _cfg.AbsMove.Y.Accel; DefaultAbsDecelY = _cfg.AbsMove.Y.Decel;
+        DefaultAbsSpeedZ = _cfg.AbsMove.Z.Speed; DefaultAbsAccelZ = _cfg.AbsMove.Z.Accel; DefaultAbsDecelZ = _cfg.AbsMove.Z.Decel;
+        Console.WriteLine($"[FlowEngine] 引擎实例已创建（AbsSpeed X={DefaultAbsSpeedX} Y={DefaultAbsSpeedY} Z={DefaultAbsSpeedZ}）");
     }
 
     /// <summary>
@@ -231,7 +235,7 @@ public sealed class ProductionFlowEngine : IDisposable
         Console.WriteLine($"[FlowEngine] [{craneName}] ▶ 自动调度到工位");
         Console.WriteLine($"[FlowEngine]   目标站号={stationCode} 站名={station.Name}");
         Console.WriteLine($"[FlowEngine]   目标坐标 X={xTarget} Y={yTarget} Z={zTarget}");
-        Console.WriteLine($"[FlowEngine]   绝对速度 speed={DefaultAbsSpeed} accel={DefaultAbsAccel} decel={DefaultAbsDecel}");
+        Console.WriteLine($"[FlowEngine]   绝对速度 X={DefaultAbsSpeedX}/{DefaultAbsAccelX}/{DefaultAbsDecelX} Y={DefaultAbsSpeedY}/{DefaultAbsAccelY}/{DefaultAbsDecelY} Z={DefaultAbsSpeedZ}/{DefaultAbsAccelZ}/{DefaultAbsDecelZ}");
         Console.WriteLine($"══════════════════════════════════════════");
 
         // ── 预约机制：尝试预约目标工位，被占用则等待释放 ──────────
@@ -264,7 +268,7 @@ public sealed class ProductionFlowEngine : IDisposable
             }
 
             // 2. 设置绝对速度
-            await craneSvc.SetAbsSpeedAsync(DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, ct);
+            await craneSvc.SetAbsSpeedAsync(DefaultAbsSpeedX, DefaultAbsAccelX, DefaultAbsDecelX, DefaultAbsSpeedY, DefaultAbsAccelY, DefaultAbsDecelY, DefaultAbsSpeedZ, DefaultAbsAccelZ, DefaultAbsDecelZ, ct);
 
             // 3. 读取天车当前坐标（日志用）
             var before = await craneSvc.ReadStatusAsync(ct);
@@ -354,7 +358,7 @@ public sealed class ProductionFlowEngine : IDisposable
                 return false;
             }
 
-            await svc.SetAbsSpeedAsync(DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, DefaultAbsSpeed, DefaultAbsAccel, DefaultAbsDecel, ct);
+            await svc.SetAbsSpeedAsync(DefaultAbsSpeedX, DefaultAbsAccelX, DefaultAbsDecelX, DefaultAbsSpeedY, DefaultAbsAccelY, DefaultAbsDecelY, DefaultAbsSpeedZ, DefaultAbsAccelZ, DefaultAbsDecelZ, ct);
             // 机械手 X 传 -1 跳过 X 轴
             await svc.MoveAbsoluteAsync(-1, yTarget, zTarget, ct: ct);
 

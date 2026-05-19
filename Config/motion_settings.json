@@ -1,12 +1,12 @@
 
 {
   "absMove": {
-    "defaultSpeed": 500,
-    "defaultAccel": 200,
-    "defaultDecel": 200,
     "tolerance": 5,
-    "timeoutMs": 30000,
-    "pollIntervalMs": 500
+    "timeoutMs": 240000,
+    "pollIntervalMs": 500,
+    "x": { "speed": 150, "accel": 80, "decel": 80 },
+    "y": { "speed": 80, "accel": 60, "decel": 60 },
+    "z": { "speed": 50, "accel": 40,  "decel": 40 }
   },
   "relMove": {
     "defaultSpeed": 300,
@@ -38,9 +38,18 @@
   "grinding": {
     "zFactor1": 0.9537,
     "zFactor2": 0.866,
-    "safeZHeight": 600,
+    "safeZHeight": 400,
     "craneNo": 5,
     "pollIntervalMs": 500,
     "handshakeTimeoutMs": 60000
+  },
+  "skewBed": {
+    "centerDistances": {
+      "ST601": 1410, "ST602": 1450, "ST603": 1450, "ST604": 1450, "ST605": 1450,
+      "ST606": 1450, "ST607": 1450, "ST608": 1450, "ST609": 1450, "ST610": 1450
+    },
+    "largeBoreOffset": 117,
+    "smallBoreOffset": 55,
+    "manipulator1SafeY": 12000
   }
 }

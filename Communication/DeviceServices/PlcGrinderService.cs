@@ -291,7 +291,14 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             if (_type == GrinderType.TypeA)
             {
                 await SetBitAsync(_doRegAddr, typeABit, true, ct);
-                Console.WriteLine($"[GrinderSvc] [{_name}]   DO bit{typeABit}=1（开始3s长信号）");
+
+                // ── 读回验证：确认寄存器确实被写入了 ────────────────
+                int verify = await _client.ReadIntAsync(_doRegAddr, ct);
+                bool confirmed = (verify & (1 << typeABit)) != 0;
+                Console.WriteLine($"[GrinderSvc] [{_name}]   DO bit{typeABit}=1（开始3s长信号） 读回验证={(confirmed ? "✔ 已置位" : "✘ 写入失败！当前0x" + verify.ToString("X4"))}");
+                if (!confirmed)
+                    Console.WriteLine($"[GrinderSvc] [{_name}] ⚠⚠⚠ 严重：写入 DO bit{typeABit}=1 但读回为 0！寄存器 40011 当前值=0x{verify:X4}");
+
                 await Task.Delay(3000, ct);
                 await SetBitAsync(_doRegAddr, typeABit, false, ct);
                 Console.WriteLine($"[GrinderSvc] [{_name}]   DO bit{typeABit}=0（3s长信号结束）");
@@ -300,7 +307,10 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             {
                 int addr = Addr.RToModbus(typeBRAddr);
                 await _client.WriteAsync(addr, 1, ct);
-                Console.WriteLine($"[GrinderSvc] [{_name}]   R{typeBRAddr}=1（开始3s长信号）");
+
+                int verify = await _client.ReadIntAsync(addr, ct);
+                Console.WriteLine($"[GrinderSvc] [{_name}]   R{typeBRAddr}=1（开始3s长信号） 读回验证={(verify == 1 ? "✔" : "✘ 当前值=" + verify)}");
+
                 await Task.Delay(3000, ct);
                 await _client.WriteAsync(addr, 0, ct);
                 Console.WriteLine($"[GrinderSvc] [{_name}]   R{typeBRAddr}=0（3s长信号结束）");

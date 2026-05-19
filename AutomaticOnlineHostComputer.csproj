@@ -26,6 +26,8 @@
     <None Update="dbsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="bin\Debug\net8.0-windows\Config\motion_settings.json" />
+    <None Include="bin\Debug\net8.0-windows\motion_settings.json" />
   </ItemGroup>
 
   <ItemGroup>

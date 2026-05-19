@@ -12,11 +12,13 @@ public sealed class AddTaskDialogViewModel : ObservableObject
     private int _sequence;
     private double _length;
     private double _diameter;
-    private double _plugHole;
+    private double _plugHole = 70;
     private double _leftPlugThickness;
     private double _rightPlugThickness;
     private string _markingContent = string.Empty;
     private string _processType = "总工艺";
+    private string _boringProcess = string.Empty;
+    private string _skewBedProcess = string.Empty;
 
     public string PlateNo { get => _plateNo; set => SetField(ref _plateNo, value); }
     public int Sequence { get => _sequence; set => SetField(ref _sequence, value); }
@@ -28,6 +30,11 @@ public sealed class AddTaskDialogViewModel : ObservableObject
     public string MarkingContent { get => _markingContent; set => SetField(ref _markingContent, value); }
 
     public string ProcessType { get => _processType; set => SetField(ref _processType, value); }
+    public string BoringProcess { get => _boringProcess; set => SetField(ref _boringProcess, value); }
+    public string SkewBedProcess { get => _skewBedProcess; set => SetField(ref _skewBedProcess, value); }
+
+    /// <summary>堵孔选项：70=小孔，100=大孔</summary>
+    public List<double> PlugHoleOptions { get; } = new() { 70, 100 };
 
     public List<string> ProcessTypeOptions { get; } = new() { "总工艺", "省去双头镗工艺" };
 
@@ -65,6 +72,8 @@ public sealed class AddTaskDialogViewModel : ObservableObject
             RightPlugThickness = RightPlugThickness,
             MarkingContent = MarkingContent.Trim(),
             ProcessType = ProcessType,
+            BoringProcess = BoringProcess.Trim(),
+            SkewBedProcess = SkewBedProcess.Trim(),
             Step = "待上料",
             State = "待执行"
         };

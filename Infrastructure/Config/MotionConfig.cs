@@ -24,14 +24,25 @@ public sealed class MotionConfig
     /// <summary>流程引擎参数</summary>
     public EngineSection Engine { get; set; } = new();
 
+    /// <summary>单轴速度/加减速参数</summary>
+    public sealed class AxisSpeed
+    {
+        public int Speed { get; set; } = 300;
+        public int Accel { get; set; } = 150;
+        public int Decel { get; set; } = 150;
+    }
+
     public sealed class AbsMoveSection
     {
-        public int DefaultSpeed { get; set; } = 500;
-        public int DefaultAccel { get; set; } = 200;
-        public int DefaultDecel { get; set; } = 200;
         public int Tolerance { get; set; } = 5;
-        public int TimeoutMs { get; set; } = 30_000;
+        public int TimeoutMs { get; set; } = 240_000;
         public int PollIntervalMs { get; set; } = 500;
+        /// <summary>X轴绝对速度</summary>
+        public AxisSpeed X { get; set; } = new() { Speed = 150, Accel = 80, Decel = 80 };
+        /// <summary>Y轴绝对速度</summary>
+        public AxisSpeed Y { get; set; } = new() { Speed = 80, Accel = 60, Decel = 60 };
+        /// <summary>Z轴绝对速度</summary>
+        public AxisSpeed Z { get; set; } = new() { Speed = 50, Accel = 40, Decel = 40 };
     }
 
     public sealed class RelMoveSection
@@ -80,14 +91,41 @@ public sealed class MotionConfig
         public double ZFactor1 { get; set; } = 0.9537;
         /// <summary>Z下降公式系数2</summary>
         public double ZFactor2 { get; set; } = 0.866;
-        /// <summary>Z轴安全高度(mm)，充磁/退磁后先升到此高度再水平移动</summary>
-        public int SafeZHeight { get; set; } = 600;
+        /// <summary>Z轴安全高度(mm)，充磁/退磁后先升到此绝对Z坐标再水平移动（Z变小=向上）</summary>
+        public int SafeZHeight { get; set; } = 400;
         /// <summary>研磨机天车编号(默认5号)</summary>
         public int CraneNo { get; set; } = 5;
         /// <summary>研磨机状态轮询间隔(ms)</summary>
         public int PollIntervalMs { get; set; } = 500;
         /// <summary>研磨机握手超时(ms)，等待请求上料/锁紧/松开等信号</summary>
         public int HandshakeTimeoutMs { get; set; } = 60_000;
+    }
+
+    /// <summary>斜床 Y 轴移动公式参数</summary>
+    public SkewBedSection SkewBed { get; set; } = new();
+
+    public sealed class SkewBedSection
+    {
+        /// <summary>各斜床顶尖距离 (站号→mm)，默认 1450</summary>
+        public Dictionary<string, int> CenterDistances { get; set; } = new()
+        {
+            ["ST601"] = 1410, ["ST602"] = 1450, ["ST603"] = 1450, ["ST604"] = 1450, ["ST605"] = 1450,
+            ["ST606"] = 1450, ["ST607"] = 1450, ["ST608"] = 1450, ["ST609"] = 1450, ["ST610"] = 1450,
+        };
+        /// <summary>大孔(堵孔100) Y轴移动距离，默认 125mm</summary>
+        public int LargeBoreOffset { get; set; } = 117;
+        /// <summary>小孔(堵孔70) Y轴移动距离，默认 65mm</summary>
+        public int SmallBoreOffset { get; set; } = 55;
+        /// <summary>机械手1 安全位置 Y 坐标(mm)，天车进入货叉区域前必须确认机械手在此位置</summary>
+        public int Manipulator1SafeY { get; set; } = 800;
+
+        /// <summary>根据站号和版孔类型计算 Y 轴目标偏移：Y = (顶尖距离-长度)/2 + 孔偏移</summary>
+        public int ComputeYOffset(string stationCode, int workpieceLength, int plugHole)
+        {
+            int centerDist = CenterDistances.TryGetValue(stationCode, out var d) ? d : 1450;
+            int boreOffset = plugHole == 100 ? LargeBoreOffset : SmallBoreOffset; // 100=大孔, 70=小孔
+            return (centerDist - workpieceLength) / 2 + boreOffset;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -117,7 +155,7 @@ public sealed class MotionConfig
                 PropertyNameCaseInsensitive = true
             });
             Console.WriteLine($"[MotionConfig] 配置加载成功：{path}");
-            Console.WriteLine($"[MotionConfig]   AbsSpeed={config!.AbsMove.DefaultSpeed} Tolerance={config.AbsMove.Tolerance}");
+            Console.WriteLine($"[MotionConfig]   AbsSpeed X={config!.AbsMove.X.Speed} Y={config.AbsMove.Y.Speed} Z={config.AbsMove.Z.Speed}");
             Console.WriteLine($"[MotionConfig]   ZAxis Fast={config.ZAxis.FastSpeed} Slow={config.ZAxis.SlowSpeed}");
             return config;
         }
