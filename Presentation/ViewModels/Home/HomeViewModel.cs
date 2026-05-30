@@ -3,9 +3,13 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using System.Windows.Media;
+using AutomaticOnlineHostComputer.Communication.Clients;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
+using AutomaticOnlineHostComputer.Communication.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service;
@@ -18,7 +22,9 @@ public sealed class HomeViewModel : ObservableObject
     private readonly PositionUpdateService _positionService;
     private readonly ProductionFlowEngine _flowEngine;
     private readonly CraneConnectionCache _craneCache;
+    private readonly MotionConfig _cfg;
     private readonly ManipulatorConnectionCache _manipulatorCache;
+    private readonly McConnectionCache _mcCache = new();
 
     /// <summary>页面是否正在加载（绑定到启动动画）</summary>
     // ═══════════════════════════════════════════════════════════════
@@ -35,7 +41,7 @@ public sealed class HomeViewModel : ObservableObject
             Console.WriteLine("[HomeViewModel] ▶ 【暂停研磨】");
             await _grindingEngine.PauseAsync();
             IsGrindingRunning = false;
-            OnPropertyChanged(nameof(CachedWorkpieceCount));
+            OnPropertyChanged(nameof(GrindingCachedCount));
         }
         else
         {
@@ -43,7 +49,7 @@ public sealed class HomeViewModel : ObservableObject
             // Start() 内部已有 IsRunning 防重复逻辑，直接调用即可
             _grindingEngine.Start();
             IsGrindingRunning = true;
-            OnPropertyChanged(nameof(CachedWorkpieceCount));
+            OnPropertyChanged(nameof(GrindingCachedCount));
         }
     }
 
@@ -57,7 +63,7 @@ public sealed class HomeViewModel : ObservableObject
         }
         Console.WriteLine($"[HomeViewModel] ▶ 点击按钮【写入缓存】 直径={CachedDiameter} 版孔={(CachedBoreType == 1 ? "大孔" : "小孔")} 长度={CachedLength}");
         _grindingEngine.EnqueueWorkpiece(CachedDiameter, CachedBoreType, CachedLength);
-        OnPropertyChanged(nameof(CachedWorkpieceCount));
+        OnPropertyChanged(nameof(GrindingCachedCount));
         await Task.CompletedTask;
     }
 
@@ -66,7 +72,23 @@ public sealed class HomeViewModel : ObservableObject
     {
         Console.WriteLine("[HomeViewModel] ▶ 点击按钮【清空缓存】");
         _grindingEngine?.ClearCache();
-        OnPropertyChanged(nameof(CachedWorkpieceCount));
+        OnPropertyChanged(nameof(GrindingCachedCount));
+        await Task.CompletedTask;
+    }
+
+    /// <summary>测试: 手动给中转架1注入工件缓存</summary>
+    private async Task TestRearPickupAsync()
+    {
+        Console.WriteLine("[HomeViewModel] ▶ 点击【测试后天车取料】");
+        if (_line1RearEngine == null) { Console.WriteLine("[HomeViewModel] ⚠ 后端引擎未创建"); return; }
+        var wp = new WorkpieceCache
+        {
+            Diameter = 147, Length = 700, BoreType = 100,
+            MarkingContent = "TEST", LeftPlugThickness = 14, RightPlugThickness = 14,
+            SkipBoring = false, BoringProcess = "粗镗"
+        };
+        _line1RearEngine.EnqueueWorkpiece("ST105", wp);
+        Console.WriteLine($"[HomeViewModel] 已注入测试工件到中转架1 d=200 L=1000");
         await Task.CompletedTask;
     }
 
@@ -95,6 +117,7 @@ public sealed class HomeViewModel : ObservableObject
         _positionService = positionService;
         _craneCache = new CraneConnectionCache();
         _manipulatorCache = new ManipulatorConnectionCache();
+        _cfg = MotionConfig.Load();  // 提前加载，引擎创建和UI同步都要用
 
         // 引擎依赖天车/机械手缓存，由 HomeVM 创建并持有引用
         _flowEngine = new ProductionFlowEngine(_craneCache, _manipulatorCache, _positionService);
@@ -120,8 +143,11 @@ public sealed class HomeViewModel : ObservableObject
 
         GrindingToggleCommand = new AsyncRelayCommand(GrindingToggleAsync, nameof(GrindingToggleCommand));
         Line1ToggleCommand = new AsyncRelayCommand(Line1ToggleAsync, nameof(Line1ToggleCommand));
+        Line2ToggleCommand = new AsyncRelayCommand(Line2ToggleAsync, nameof(Line2ToggleCommand));
+        BalancingToggleCommand = new AsyncRelayCommand(BalancingToggleAsync, nameof(BalancingToggleCommand));
         WriteCacheCommand = new AsyncRelayCommand(WriteCacheAsync, nameof(WriteCacheCommand));
         ClearCacheCommand = new AsyncRelayCommand(ClearCacheAsync, nameof(ClearCacheCommand));
+        TestRearPickupCommand = new AsyncRelayCommand(TestRearPickupAsync, nameof(TestRearPickupCommand));
 
         Console.WriteLine("[HomeViewModel] 初始化完成：天车+机械手+研磨机+手动控制+流程引擎 VM已创建。");
     }
@@ -208,11 +234,181 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>启动/暂停按钮文本</summary>
     public string GrindingToggleText => _isGrindingRunning ? "暂停研磨" : "启动研磨";
 
-    /// <summary>已缓存工件数量</summary>
-    public int CachedWorkpieceCount => _grindingEngine?.CachedCount ?? 0;
+    /// <summary>已缓存研磨工件数量</summary>
+    public int GrindingCachedCount => _grindingEngine?.CachedCount ?? 0;
 
-    // ── 1号线前端流程引擎 ──────────────────────────────────────────
+    // ── 1号线流程引擎 ────────────────────────────────────────────────
     private Line1FrontFlowEngine? _line1Engine;
+    private Line1RearFlowEngine? _line1RearEngine;
+    private BalancingFlowEngine? _line1BalancingEngine; // 机械手2动平衡流转(两条线共用)
+    private SemaphoreSlim? _sharedTransferRackLock; // 1号线前后端共享中转架锁
+    private CancellationTokenSource? _line1StatusCts;
+
+    // ── 2号线流程引擎 ────────────────────────────────────────────────
+    private Line2FrontFlowEngine? _line2Engine;
+    private Line2RearFlowEngine? _line2RearEngine;
+    private SemaphoreSlim? _sharedManipulatorLock; // 机械手1互斥锁(1号线+2号线共享)
+    private SemaphoreSlim? _sharedTransferRackLock2; // 2号线前后端共享中转架锁
+    private CancellationTokenSource? _line2StatusCts;
+
+    /// <summary>后台任务：从引擎 DeviceStatus 同步到 UI 卡片（不另建连接）</summary>
+    private async Task SyncLine1StatusToCardsAsync(CancellationToken ct)
+    {
+        // XAML 显示码 → 数据来源:
+        //   引擎托管(仅运行时刷): ST001→ST007, ST002→ST002, ST011→ST711, ST401→ST401, ST501→ST501, ST901→ST901, ST031~ST033→M811~M813
+        //   第三部分镜像(一直刷): ST005→机械手2VM, ST006→机械手3VM
+        //   研磨机(独立线程刷): ST701~ST704→GrinderPollLoop
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var cards = StationCards;
+                bool engineRunning = _line1Engine is { IsRunning: true };
+
+                // ═══════════════════════════════════════════════════════
+                //  A. 机械手2/3 状态镜像 — 一直刷新（从第三部分 VM 取）
+                // ═══════════════════════════════════════════════════════
+                SyncManipulatorMirror(cards, "ST005", Manipulator2, "机械手2");
+                SyncManipulatorMirror(cards, "ST006", Manipulator3, "机械手3");
+
+                // ═══════════════════════════════════════════════════════
+                //  B. 引擎托管卡片 — 仅在1号线运行时刷新
+                // ═══════════════════════════════════════════════════════
+                if (engineRunning && _line1Engine!.DeviceStatus is { } ds)
+                {
+                    // 确保 XAML 显示码有对应卡片条目（已预建，此处兜底）
+                    EnsureCard("ST001", "总上料架");
+                    EnsureCard("ST002", "机械手1");
+                    EnsureCard("ST011", "货叉1");
+                    EnsureCard("ST901", "1号线天车前");
+                    EnsureCard("ST401", "一号双头镗");
+                    EnsureCard("ST501", "一号打号机");
+                    EnsureCard("ST031", "中转站1");
+                    EnsureCard("ST032", "中转站2");
+                    EnsureCard("ST033", "中转站3");
+                    EnsureCard("ST108", "一号斜床");
+                    EnsureCard("ST109", "二号斜床");
+                    EnsureCard("ST111", "三号斜床");
+                    EnsureCard("ST110", "四号斜床");
+                    EnsureCard("ST112", "五号斜床");
+
+                    // ── 总上料架 ST001 (MC:192.168.2.63:9000 M800~M816+D100) ──
+                    if (cards.TryGetValue("ST001", out var c))
+                    { c.ConnectedBrush = ds.RackConnected ? Brushes.LimeGreen : Brushes.Gray;
+                      c.Status1 = ds.RackConnected ? (ds.RackRequestPickup ? "请求取料" : "空闲") : "断开";
+                      c.Status1Brush = ds.RackRequestPickup ? Brushes.Orange : Brushes.Green;
+                      c.Status2 = ds.RackConnected ? $"板长={ds.RackPlateLength}mm 中1={(ds.TransferRack1Free?"空":"满")} 2={(ds.TransferRack2Free?"空":"满")} 3={(ds.TransferRack3Free?"空":"满")}" : "—"; }
+
+                    // ── 机械手1 ST002 (Modbus:192.168.2.85:502 D5000~D4522) ──
+                    if (cards.TryGetValue("ST002", out var c2))
+                    { c2.ConnectedBrush = ds.Manipulator1Connected ? Brushes.LimeGreen : Brushes.Gray;
+                      c2.Status1 = ds.Manipulator1Connected ? (ds.Manipulator1Safe ? "安全位" : $"Y={ds.Manipulator1Y}") : "断开";
+                      c2.Status1Brush = ds.Manipulator1Safe ? Brushes.Green : Brushes.Orange;
+                      c2.Status2 = ds.Manipulator1Connected ? $"安全Y={_cfg.SkewBed.Manipulator1SafeY}" : "—"; }
+
+                    // ── 货叉1 ST011 (MC:192.168.2.88:9000 M900~M915) ──
+                    if (cards.TryGetValue("ST011", out var c3))
+                    { c3.ConnectedBrush = ds.ForkConnected ? Brushes.LimeGreen : Brushes.Gray;
+                      c3.Status1 = ds.ForkConnected ? (ds.ForkHasPlate ? "有版" : "无版") : "断开";
+                      c3.Status1Brush = ds.ForkHasPlate ? Brushes.Orange : Brushes.Green;
+                      c3.Status2 = ds.ForkConnected ? ds.ForkPosition : "—"; }
+
+                    // ── 双头镗 ST401 (Syntec R6101~R6110) ──
+                    if (cards.TryGetValue("ST401", out var c4))
+                    {
+                        c4.ConnectedBrush = ds.BoringConnected ? Brushes.LimeGreen : Brushes.Gray;
+                        bool idle = ds.Boring_R6101 && !ds.Boring_R6103 && !ds.Boring_R6105 && !ds.Boring_R6107 && !ds.Boring_R6109;
+                        c4.Status1 = ds.BoringConnected ? (idle ? "空闲" : "加工中") : "断开";
+                        c4.Status1Brush = idle ? Brushes.Green : Brushes.Orange;
+                        c4.Status2 = ds.BoringConnected
+                            ? $"R6101={To01(ds.Boring_R6101)} R6103={To01(ds.Boring_R6103)} R6105={To01(ds.Boring_R6105)} R6107={To01(ds.Boring_R6107)} R6109={To01(ds.Boring_R6109)}"
+                            : "—";
+                    }
+
+                    // ── 打号机 ST501 (文件握手:D:\1\ A/B/3) ──
+                    if (cards.TryGetValue("ST501", out var c5))
+                    { c5.ConnectedBrush = ds.MarkerConnected ? Brushes.LimeGreen : Brushes.Gray;
+                      c5.Status1 = ds.MarkerConnected ? "就绪" : "断开";
+                      c5.Status1Brush = ds.MarkerConnected ? Brushes.Green : Brushes.Gray;
+                      c5.Status2 = ds.MarkerConnected ? @"\\192.168.2.67\1" : "—"; }
+
+                    // ── 1号线天车前 ST901 (Modbus:192.168.2.81:502) ──
+                    if (cards.TryGetValue("ST901", out var c6))
+                    { c6.ConnectedBrush = ds.CraneFrontConnected ? Brushes.LimeGreen : Brushes.Gray;
+                      c6.Status1 = ds.CraneFrontConnected ? "就绪" : "断开";
+                      c6.Status1Brush = ds.CraneFrontConnected ? Brushes.Green : Brushes.Gray;
+                      c6.Status2 = ds.CraneFrontConnected ? "192.168.2.81:502" : "—"; }
+
+                    // ── 中转站1 ST031 (MC:192.168.2.63 M811) ──
+                    if (cards.TryGetValue("ST031", out var c7))
+                    { c7.ConnectedBrush = ds.RackConnected ? Brushes.LimeGreen : Brushes.Gray;
+                      c7.Status1 = ds.RackConnected ? (ds.TransferRack1Free ? "空闲" : "有版") : "断开";
+                      c7.Status1Brush = ds.TransferRack1Free ? Brushes.Green : Brushes.Orange;
+                      c7.Status2 = "M811"; }
+
+                    // ── 中转站2 ST032 (MC:192.168.2.63 M812) ──
+                    if (cards.TryGetValue("ST032", out var c8))
+                    { c8.ConnectedBrush = ds.RackConnected ? Brushes.LimeGreen : Brushes.Gray;
+                      c8.Status1 = ds.RackConnected ? (ds.TransferRack2Free ? "空闲" : "有版") : "断开";
+                      c8.Status1Brush = ds.TransferRack2Free ? Brushes.Green : Brushes.Orange;
+                      c8.Status2 = "M812"; }
+
+                    // ── 中转站3 ST033 (MC:192.168.2.63 M813) ──
+                    if (cards.TryGetValue("ST033", out var c9))
+                    { c9.ConnectedBrush = ds.RackConnected ? Brushes.LimeGreen : Brushes.Gray;
+                      c9.Status1 = ds.RackConnected ? (ds.TransferRack3Free ? "空闲" : "有版") : "断开";
+                      c9.Status1Brush = ds.TransferRack3Free ? Brushes.Green : Brushes.Orange;
+                      c9.Status2 = "M813"; }
+
+                }
+
+                // ═══════════════════════════════════════════════════════
+                //  C. 后端引擎状态 — 仅在1号线运行时刷新
+                // ═══════════════════════════════════════════════════════
+                if (engineRunning && _line1RearEngine?.DeviceStatus is { } rds)
+                {
+                    // 1号线天车后 ST102 (Modbus:192.168.2.82:502)
+                    if (cards.TryGetValue("ST901", out var cr))  // ST901也在XAML里? 检查...显示ST102用哪个码?
+                    { cr.ConnectedBrush = rds.CraneRearConnected ? Brushes.LimeGreen : Brushes.Gray; }
+
+                    // 斜床 ST108~ST112 — 各自独立显示连接+状态+寄存器信号
+                    if (cards.TryGetValue("ST108", out var sk1) && rds.Skew1Connected) { sk1.ConnectedBrush = Brushes.LimeGreen; sk1.Status1 = rds.Skew1State; sk1.Status1Brush = Brushes.Green; sk1.Status2 = rds.Skew1Signals; }
+                    if (cards.TryGetValue("ST109", out var sk2) && rds.Skew2Connected) { sk2.ConnectedBrush = Brushes.LimeGreen; sk2.Status1 = rds.Skew2State; sk2.Status1Brush = Brushes.Green; sk2.Status2 = rds.Skew2Signals; }
+                    if (cards.TryGetValue("ST111", out var sk3) && rds.Skew3Connected) { sk3.ConnectedBrush = Brushes.LimeGreen; sk3.Status1 = rds.Skew3State; sk3.Status1Brush = Brushes.Green; sk3.Status2 = rds.Skew3Signals; }
+                    if (cards.TryGetValue("ST110", out var sk4) && rds.Skew4Connected) { sk4.ConnectedBrush = Brushes.LimeGreen; sk4.Status1 = rds.Skew4State; sk4.Status1Brush = Brushes.Green; sk4.Status2 = rds.Skew4Signals; }
+                    if (cards.TryGetValue("ST112", out var sk5) && rds.Skew5Connected) { sk5.ConnectedBrush = Brushes.LimeGreen; sk5.Status1 = rds.Skew5State; sk5.Status1Brush = Brushes.Green; sk5.Status2 = rds.Skew5Signals; }
+
+                }
+            }
+            catch { }
+            await Task.Delay(1500, ct);
+        }
+    }
+
+    /// <summary>StationCards 缺失时自动创建（不建TCP连接，引擎托管）。替换字典引用触发WPF PropertyChanged。</summary>
+    private void EnsureCard(string code, string name)
+    {
+        if (!StationCards.ContainsKey(code))
+        {
+            var newDict = new Dictionary<string, StationCardViewModel>(StationCards, StringComparer.OrdinalIgnoreCase);
+            newDict[code] = new StationCardViewModel(code, name, "引擎托管", 0, "引擎托管");
+            StationCards = newDict;  // 替换引用 → PropertyChanged → WPF重新解析所有索引器绑定
+            Console.WriteLine($"[HomeViewModel] +卡片 {code} {name} (已触发PropertyChanged)");
+        }
+    }
+
+    /// <summary>将第三部分机械手卡片的状态镜像到第四部分 StatusCard（不建新连接，复用已有 VM）。</summary>
+    private static string To01(bool b) => b ? "1" : "0";
+
+    private static void SyncManipulatorMirror(Dictionary<string, StationCardViewModel> cards,
+        string code, ManipulatorCardViewModel manipVm, string name)
+    {
+        if (!cards.TryGetValue(code, out var sc)) return;
+        sc.ConnectedBrush = manipVm.ConnectedBrush;
+        sc.Status1 = manipVm.Line1;          // "已连接，就绪" / "未连接" / "故障"
+        sc.Status1Brush = manipVm.Line1Brush;
+        sc.Status2 = $"{manipVm.Line5}";     // Y/Z 坐标
+    }
 
     private bool _isLine1Running;
     /// <summary>1号线是否在运行</summary>
@@ -223,6 +419,22 @@ public sealed class HomeViewModel : ObservableObject
 
     /// <summary>1号线缓存工件数量</summary>
     public int Line1CachedCount => _line1Engine?.CachedCount ?? 0;
+
+    // ── 2号线运行状态 ────────────────────────────────────────────────
+    private bool _isLine2Running;
+    public bool IsLine2Running { get => _isLine2Running; set { if (SetField(ref _isLine2Running, value)) OnPropertyChanged(nameof(Line2ToggleText)); } }
+    public string Line2ToggleText => _isLine2Running ? "暂停2号线" : "启动2号线";
+    public int Line2CachedCount => _line2Engine?.CachedCount ?? 0;
+
+    // ── 动平衡引擎 ────────────────────────────────────────────────
+    private bool _isBalancingRunning;
+    public bool IsBalancingRunning { get => _isBalancingRunning; set { if (SetField(ref _isBalancingRunning, value)) OnPropertyChanged(nameof(BalancingToggleText)); } }
+    public string BalancingToggleText => _isBalancingRunning ? "暂停动平衡" : "启动动平衡";
+
+    /// <summary>默认线路(1或2), 线路选取按钮切换</summary>
+    private int _defaultRouteLine = 1;
+    /// <summary>供View层设置默认线路</summary>
+    public int DefaultRouteLine { get => _defaultRouteLine; set { _defaultRouteLine = value; Console.WriteLine($"[HomeViewModel] 线路选取→{value}号线"); } }
 
     /// <summary>缓存工件直径（mm）</summary>
     private int _cachedDiameter = 205;
@@ -242,16 +454,78 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>启动/暂停1号线</summary>
     private async Task Line1ToggleAsync()
     {
-        if (_line1Engine == null) { Console.WriteLine("[HomeViewModel] ✘ 1号线引擎未初始化"); return; }
-        if (_isLine1Running) { Console.WriteLine("[HomeViewModel] ▶ 【暂停1号线】"); _line1Engine.Pause(); IsLine1Running = false; }
-        else { Console.WriteLine("[HomeViewModel] ▶ 【启动1号线】→ 开始前端流程"); _line1Engine.Start(); IsLine1Running = true; }
+        if (_line1Engine == null)
+        {
+            Console.WriteLine("[HomeViewModel] ✘ 1号线引擎未初始化"); return;
+        }
+
+        if (_isLine1Running)
+        {
+            Console.WriteLine("[HomeViewModel] ▶ 【暂停1号线】"); 
+            _line1Engine.Pause();
+            _line1RearEngine?.Pause();
+            IsLine1Running = false;
+        }
+        else
+        {
+            Console.WriteLine("[HomeViewModel] ▶ 【启动1号线】→ 前端+后端(动平衡单独启动)"); 
+            _line1Engine.Start();
+            _line1RearEngine?.Start();
+            IsLine1Running = true;
+        }
+    }
+
+    /// <summary>启动/暂停2号线(平衡引擎共用1号线的, 不重复启停)</summary>
+    private async Task Line2ToggleAsync()
+    {
+        if (_line2Engine == null) { Console.WriteLine("[HomeViewModel] ✘ 2号线引擎未初始化"); return; }
+
+        if (_isLine2Running)
+        {
+            Console.WriteLine("[HomeViewModel] ▶ 【暂停2号线】");
+            _line2Engine.Pause();
+            _line2RearEngine?.Pause();
+            IsLine2Running = false;
+        }
+        else
+        {
+            Console.WriteLine("[HomeViewModel] ▶ 【启动2号线】→ 前端+后端");
+            _line2Engine.Start();
+            _line2RearEngine?.Start();
+            IsLine2Running = true;
+        }
+    }
+
+    /// <summary>启动/暂停动平衡流转(两条线共用)</summary>
+    private async Task BalancingToggleAsync()
+    {
+        if (_line1BalancingEngine == null) { Console.WriteLine("[HomeViewModel] ✘ 动平衡引擎未初始化"); return; }
+
+        if (_isBalancingRunning)
+        {
+            Console.WriteLine("[HomeViewModel] ▶ 【暂停动平衡】");
+            _line1BalancingEngine.Pause();
+            IsBalancingRunning = false;
+        }
+        else
+        {
+            Console.WriteLine("[HomeViewModel] ▶ 【启动动平衡】");
+            _line1BalancingEngine.Start();
+            IsBalancingRunning = true;
+        }
+        await Task.CompletedTask;
     }
 
     public ICommand Line1ToggleCommand { get; }
+    /// <summary>2号线启动/暂停</summary>
+    public ICommand Line2ToggleCommand { get; }
+    /// <summary>动平衡流转启动/暂停</summary>
+    public ICommand BalancingToggleCommand { get; }
     /// <summary>将工件写入缓存</summary>
     public ICommand WriteCacheCommand { get; }
     /// <summary>清空工件缓存</summary>
     public ICommand ClearCacheCommand { get; }
+    public ICommand TestRearPickupCommand { get; }
 
     /// <summary>
     /// 主页面任务表数据源（左侧DataGrid绑定）。
@@ -290,12 +564,81 @@ public sealed class HomeViewModel : ObservableObject
         var grindingCoords = machineRows
             .Where(r => !string.IsNullOrWhiteSpace(r.StationCode))
             .ToDictionary(r => r.StationCode.Trim().ToUpperInvariant(), r => r, StringComparer.OrdinalIgnoreCase);
-        _grindingEngine = new GrindingFlowEngine(_craneCache, MotionConfig.Load(), grindingCoords);
+        _grindingEngine = new GrindingFlowEngine(_craneCache, _cfg, grindingCoords);
         Console.WriteLine($"[HomeViewModel] 研磨流程引擎已创建（{grindingCoords.Count} 个工位坐标）");
 
-        // ── 创建1号线前端流程引擎 ─────────────────────────────────────
-        _line1Engine = new Line1FrontFlowEngine(_craneCache, MotionConfig.Load(), grindingCoords);
-        Console.WriteLine("[HomeViewModel] 1号线前端流程引擎已创建");
+        // ── 前后端共享中转架互斥锁 ──
+        _sharedTransferRackLock = new SemaphoreSlim(1, 1);
+        var sharedSafety = new SafetyFlags();
+
+        // ── 创建共享MC连接给前端引擎(避免和平衡引擎重复连63) ──
+        //     加5s超时, 避免UI线程死锁(ConfigureAwait(false)已在McConnectionCache层处理)
+        MitsubishiMcClient? sharedMc63 = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(5000);
+            sharedMc63 = await _mcCache.GetOrCreateAsync("192.168.2.63", 9000, cts.Token);
+            Console.WriteLine("[HomeViewModel] MC 192.168.2.63:9000 共享连接成功 ✓");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[HomeViewModel] ⚠ MC 192.168.2.63 连接失败(5s超时): {ex.Message}");
+            Console.WriteLine("[HomeViewModel]   前端引擎启动后将自行连接总上料架");
+        }
+        var frontRackSvc = sharedMc63 != null
+            ? new CenteringRackService("总上料架+中转架", sharedMc63)
+            : null;
+        _line1Engine = new Line1FrontFlowEngine(_craneCache, _manipulatorCache, _cfg, grindingCoords, _sharedTransferRackLock, sharedSafety, rackSvc: frontRackSvc);
+        Console.WriteLine("[HomeViewModel] 1号线前端流程引擎已创建" + (sharedMc63 != null ? "(共享MC63连接)" : "(MC63未连,自行连接)"));
+
+        // ── 创建1号线后端流程引擎 (中转架状态从前端DeviceStatus读取) ──
+        _line1RearEngine = new Line1RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords, _sharedTransferRackLock, sharedSafety, _line1Engine.DeviceStatus);
+        Console.WriteLine("[HomeViewModel] 1号线后端流程引擎已创建");
+
+        // ── 创建机械手2动平衡流转引擎 ──
+        _line1BalancingEngine = new BalancingFlowEngine(_manipulatorCache, _mcCache, _cfg, grindingCoords);
+        Console.WriteLine("[HomeViewModel] 机械手2动平衡流转引擎已创建(两条线共用)");
+
+        // ── 创建2号线流程引擎 ──────────────────────────────────────
+        _sharedManipulatorLock = new SemaphoreSlim(1, 1);
+        _sharedTransferRackLock2 = new SemaphoreSlim(1, 1);
+        var sharedSafety2 = new SafetyFlags();
+
+        _line2Engine = new Line2FrontFlowEngine(_craneCache, _manipulatorCache, _cfg, grindingCoords,
+            transferRackLock: _sharedTransferRackLock2, safety: sharedSafety2,
+            rackSvc: frontRackSvc, manipulatorLock: _sharedManipulatorLock);
+        Console.WriteLine("[HomeViewModel] 2号线前端流程引擎已创建(共享机械手锁)");
+
+        _line2RearEngine = new Line2RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords,
+            _sharedTransferRackLock2, sharedSafety2, _line2Engine.DeviceStatus);
+        Console.WriteLine("[HomeViewModel] 2号线后端流程引擎已创建");
+
+        // 1号线+2号线共用机械手锁
+        // _line1Engine已在上面创建, 需要注入共享锁。但由于构造已调用, 这里通过反射或重新赋值。
+        // 实际方案: Line1FrontFlowEngine的_manipulatorLock已在构造中自建, 需要改为接受外部锁。
+        // 当前修复: Line1FrontFlowEngine构造已支持manipulatorLock参数, 重新创建
+        _line1Engine = new Line1FrontFlowEngine(_craneCache, _manipulatorCache, _cfg, grindingCoords,
+            _sharedTransferRackLock, sharedSafety, rackSvc: frontRackSvc,
+            manipulatorLock: _sharedManipulatorLock);
+        _line1RearEngine = new Line1RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords,
+            _sharedTransferRackLock, sharedSafety, _line1Engine.DeviceStatus);
+        Console.WriteLine("[HomeViewModel] 1号线引擎已重建(共享机械手锁)");
+
+        // ── 前后端联动: 前端放中转架→通知后端工件数据 ──
+        _line1Engine.OnRackPlaced = (code, wp) => _line1RearEngine?.SetRackWorkpiece(code, wp);
+        _line2Engine.OnRackPlaced = (code, wp) => _line2RearEngine?.SetRackWorkpiece(code, wp);
+
+        // ── 下料联动: 后天车放动平衡/下料架→通知平衡引擎(只有一台, 两条线共用) ──
+        _line1RearEngine!.OnBalancingRackPlaced = (reg, wp) => _line1BalancingEngine?.SetBalancingWp(reg, wp);
+        _line2RearEngine!.OnBalancingRackPlaced = (reg, wp) => _line1BalancingEngine?.SetBalancingWp(reg, wp);
+        Console.WriteLine("[HomeViewModel] 机械手2动平衡流转引擎已创建");
+
+        // ── 前后端联动: 前端放中转架 → 通知后端工件数据 ──
+        _line1Engine.OnRackPlaced = (code, wp) => _line1RearEngine?.SetRackWorkpiece(code, wp);
+
+        // ── 启动1号线状态同步（引擎→UI卡片，不另建连接，500ms刷新）───
+        _line1StatusCts = new CancellationTokenSource();
+        _ = SyncLine1StatusToCardsAsync(_line1StatusCts.Token);
 
         // ── 初始化全厂状态卡片 ──────────────────────────────────────
         Console.WriteLine("[HomeViewModel] 开始初始化全厂状态总览卡片...");
@@ -307,15 +650,47 @@ public sealed class HomeViewModel : ObservableObject
             var typeName = row.TypeName?.Trim() ?? string.Empty;
             if (typeName == "天车" || typeName == "机械手") continue;
             bool isGrinder = code is "ST701" or "ST702" or "ST703" or "ST704";
+            bool isFanuc = code is "ST112" or "ST606" or "ST607" or "ST608" or "ST609" or "ST610";
             var rawIp = string.IsNullOrWhiteSpace(row.Ip) ? "未配置IP" : row.Ip.Trim();
+            // MC协议设备(端口9000): 192.168.2.63/64/65/88/89
+            bool isMc = rawIp is "192.168.2.63" or "192.168.2.64" or "192.168.2.65" or "192.168.2.88" or "192.168.2.89";
             var ip = isGrinder ? "未配置IP" : rawIp;
+            var port = isFanuc ? 8193 : (isMc ? 9000 : (row.Port > 0 ? row.Port : 502));
+            // MC设备: 指定探测的M寄存器地址
+            int mcReg = code switch { "ST019" => 817, "ST020" => 818, "ST021" => 821, _ => 0 };
             var card = new StationCardViewModel(code, string.IsNullOrWhiteSpace(row.Name) ? code : row.Name.Trim(),
-                ip, row.Port > 0 ? row.Port : 502, typeName.Length > 0 ? typeName : "ModbusTCP");
+                ip, port, typeName.Length > 0 ? typeName : "ModbusTCP", mcReg);
             newCards[code] = card;
             if (isGrinder) card.IpText = rawIp;
         }
+        // ── 补全 XAML 中所有显示码，确保每个StatusCard绑定都有条目 ──
+        void EnsureNewCard(string code, string name, string ip = "引擎托管", int port = 0)
+        { if (!newCards.ContainsKey(code)) { newCards[code] = new StationCardViewModel(code, name, ip, port, "引擎托管"); Console.WriteLine($"[HomeViewModel] +预建卡片 {code} {name}"); } }
+        // 1号线前端 (映射DB或纯显示码)
+        EnsureNewCard("ST001", "总上料架");        // → ST007 MC:192.168.2.63
+        EnsureNewCard("ST002", "机械手1");          // → ST002 Modbus:192.168.2.85 (引擎托管)
+        EnsureNewCard("ST011", "货叉1");            // → ST711 MC:192.168.2.88
+        EnsureNewCard("ST401", "一号双头镗");       // → ST401 Syntec:192.168.2.66 (引擎托管)
+        EnsureNewCard("ST501", "一号打号机");       // → ST501 文件:D:\1 (引擎托管)
+        EnsureNewCard("ST901", "1号线天车前");      // → ST901 Modbus:192.168.2.81 (引擎托管)
+        EnsureNewCard("ST031", "中转站1");          // M811 192.168.2.63
+        EnsureNewCard("ST032", "中转站2");          // M812 192.168.2.63
+        EnsureNewCard("ST033", "中转站3");          // M813 192.168.2.63
+        // 下料架 / 动平衡 / 研磨上料架 (MC设备)
+        EnsureNewCard("ST013", "下料架1");          // → ST710 MC:192.168.2.64 M824
+        EnsureNewCard("ST709", "研磨机上料架");     // → ST709 MC:192.168.2.65 M817~M823
+        EnsureNewCard("ST710", "研磨机下料架");     // → ST710 MC:192.168.2.64
+        EnsureNewCard("ST175", "研磨机上料5");      // 192.168.2.65 M823相关
+        EnsureNewCard("ST176", "研磨机上料6");      // 同上
+        EnsureNewCard("ST177", "研磨机上料7");      // 同上
+        // 机械手2/3 (Modbus, 引擎托管)
+        EnsureNewCard("ST005", "机械手2");          // → ST005 Modbus:192.168.2.86
+        EnsureNewCard("ST006", "机械手3");          // → ST006 Modbus:192.168.2.87
+        // 斜床 ST601~ST605 在DB中有记录 → 已包含
+        // 研磨机 ST701~ST704 在DB中有记录 → 已包含
         StationCards = newCards;
 
+        
         // ── 创建研磨机卡片（IP从IpMap缓存取，不启动连接）───────────
         Grinder1 = CreateGrinderCard("ST701", "研磨机1(新代)",   PlcGrinderService.GrinderType.TypeB);
         Grinder2 = CreateGrinderCard("ST702", "研磨机2(新代)",   PlcGrinderService.GrinderType.TypeB);
@@ -331,6 +706,11 @@ public sealed class HomeViewModel : ObservableObject
         OnPropertyChanged(nameof(IpMap));
         Console.WriteLine("[HomeViewModel] 缓存全部就绪，页面已显示。后台开始连接...");
 
+        // ── 一次性探测：MC 设备 / Syntec 双头镗 — 连→读→写卡片→断开 ──
+        _ = ProbeMcDevicesAsync();
+        _ = ProbeSyntecDevicesAsync();
+
+        
         _ = Task.Run(async () =>
         {
             await Task.WhenAll(
@@ -347,11 +727,14 @@ public sealed class HomeViewModel : ObservableObject
                 SafeStartManipulatorAsync(Manipulator3));
             Console.WriteLine("[HomeViewModel] 3台机械手后台连接完成");
         });
+        // 跳过引擎已管理的设备 以及 非ModbusTCP协议设备
+        // ST605=沈阳FANUC FOCAS无法走ModbusTCP探测; ST401/Syntec已单独探测; ST501/文件握手无需TCP
+        var engineManagedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ST007", "ST711", "ST103", "ST107", "ST901", "ST002", "ST401", "ST501", "ST605" };
         _ = Task.Run(async () =>
         {
-            var tasks = newCards.Values.Where(c => c.HasIp).Select(c => SafeStartStationAsync(c)).ToList();
+            var tasks = newCards.Values.Where(c => c.HasIp && !engineManagedCodes.Contains(c.StationCode)).Select(c => SafeStartStationAsync(c)).ToList();
             if (tasks.Count > 0) await Task.WhenAll(tasks);
-            Console.WriteLine($"[HomeViewModel] {tasks.Count} 个站卡后台连接完成");
+            Console.WriteLine($"[HomeViewModel] {tasks.Count} 个站卡后台连接完成（已跳过引擎托管设备）");
         });
         _ = Task.Run(async () =>
         {
@@ -558,36 +941,313 @@ public sealed class HomeViewModel : ObservableObject
         // 设置启动回调：用户点任务行的「启动」→ 分配工件到对应线路
         row.OnStartRequested = taskRow =>
         {
-            // ① 自动分配线路（400-1200→1或2优先1, 1200-1500→只能1）
-            int line = taskRow.Length > 1200 ? 1
-                : (taskRow.Length >= 400 && taskRow.Length <= 1200) ? 1  // 1号线优先
-                : 0;
+            // ① 自动分配线路(1200-1500强制1号线, 400-1200空闲优先否则按缓存数少的分)
+            int line;
+            if (taskRow.Length > 1200 && taskRow.Length <= 1500)
+            {
+                line = 1; // 长版只能1号线
+            }
+            else if (taskRow.Length >= 400 && taskRow.Length <= 1200)
+            {
+                bool l1run = _line1Engine?.IsRunning == true;
+                bool l2run = _line2Engine?.IsRunning == true;
+                int l1cnt = _line1Engine?.CachedCount ?? 999;
+                int l2cnt = _line2Engine?.CachedCount ?? 999;
+
+                if (!l1run && !l2run) line = _defaultRouteLine;           // 都没启动→按选取
+                else if (!l1run)      line = 2;                          // 只有2号线在跑
+                else if (!l2run)      line = 1;                          // 只有1号线在跑
+                else                  line = l1cnt <= l2cnt ? 1 : 2;     // 都在跑→缓存少的优先
+            }
+            else { line = 0; }
+
             taskRow.AssignedLine = line;
-            Console.WriteLine($"[HomeViewModel] 工件分配 版号={taskRow.PlateNo} L={taskRow.Length} → {line}号线");
+            Console.WriteLine($"[HomeViewModel] 工件分配 版号={taskRow.PlateNo} L={taskRow.Length} → {line}号线 (1号线缓存={_line1Engine?.CachedCount} 2号线缓存={_line2Engine?.CachedCount})");
 
             if (line == 0) { Console.WriteLine("[HomeViewModel] ⚠ 版长不在任何线路范围内"); return; }
 
             // ② 构建 WorkpieceCache
+            bool skipBoring = taskRow.ProcessType == "省去双头镗工艺";
             var wp = new Service.WorkpieceCache
             {
-                Diameter = (int)taskRow.Diameter,
+                Diameter = taskRow.Diameter,
                 BoreType = (int)taskRow.PlugHole,  // 70=小孔, 100=大孔
-                Length = (int)taskRow.Length,
+                Length = taskRow.Length,
                 MarkingContent = taskRow.MarkingContent,
                 LeftPlugThickness = taskRow.LeftPlugThickness,
                 RightPlugThickness = taskRow.RightPlugThickness,
                 BoringProcess = taskRow.BoringProcess,
                 SkewBedProcess = taskRow.SkewBedProcess,
+                SkipBoring = skipBoring,
             };
+            if (skipBoring) Console.WriteLine($"[HomeViewModel] ⚡ 工件跳过双头镗工艺");
 
             // ③ 入队对应线路引擎
             if (line == 1) _line1Engine?.EnqueueWorkpiece(wp);
-            // else if (line == 2) _line2Engine?.EnqueueWorkpiece(wp); // TODO: 2号线引擎
+            else if (line == 2) _line2Engine?.EnqueueWorkpiece(wp);
             Console.WriteLine($"[HomeViewModel] 📥 工件入{line}号线缓存 d={wp.Diameter} L={wp.Length}");
         };
 
         TaskRows.Add(row);
         Console.WriteLine($"[HomeViewModel] 新增任务：版号={row.PlateNo} 序号={row.Sequence} 版长={row.Length}mm");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  临时 MC 协议探测：页面加载时连一次，读状态写入卡片，排查通讯
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 开始页面只连接一次
+    /// 一次性连接 MC 设备（总上料架 192.168.2.63:9000 + 货叉 ST711 IP:9000），
+    /// 读 M800/M900 状态写入 StationCards，然后断开。用于排查 MC 协议是否通。
+    /// </summary>
+    private async Task ProbeMcDevicesAsync()
+    {
+        Console.WriteLine("[ProbeMC] ═══════ 开始 MC 设备探测（页面加载时连一次）═══════");
+        var cards = StationCards;
+
+        // ── 1. 探测总上料架+中转架 192.168.2.63:9000 ──────────────────
+        {
+            var rackClient = new MitsubishiMcClient(
+                "192.168.2.63", 9000, MitsubishiMcClient.DeviceM,
+                frameType: MitsubishiMcClient.McFrameType.A1E);
+            try
+            {
+                Console.WriteLine("[ProbeMC] [总上料架] STEP1 尝试TCP连接 192.168.2.63:9000 (timeout=5s)...");
+                using var cts = new CancellationTokenSource(5000);
+                try { await rackClient.ConnectAsync(cts.Token); }
+                catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [总上料架] ✘ TCP连接超时(5s) — PLC离线或IP/端口不对"); throw; }
+                Console.WriteLine($"[ProbeMC] [总上料架] STEP2 TCP连接成功 ✓ IsConnected={rackClient.IsConnected}");
+
+                // 读 M800 起始 2 字 (M800~M831)
+                Console.WriteLine("[ProbeMC] [总上料架] STEP3 发送MC读帧 M800 2字...");
+                ReadResult result;
+                try { result = await rackClient.ReadAsync(800, 2, cts.Token); }
+                catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [总上料架] ✘ MC读超时(5s) — TCP通但PLC无响应(A1E帧被拒?)"); throw; }
+                ushort raw1 = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
+                ushort raw2 = (ushort)(result.IntValues.Length > 1 ? result.IntValues[1] : 0);
+                Console.WriteLine($"[ProbeMC] [总上料架] ✔ 读成功 M800~M815=0x{raw1:X4} M816~M831=0x{raw2:X4}");
+
+                // 读 D100 板长
+                int plateLen = 0;
+                try
+                {
+                    var dResult = await rackClient.ReadAsync(MitsubishiMcClient.DeviceD, 100, 1, cts.Token);
+                    plateLen = dResult.IntValues.Length > 0 ? dResult.IntValues[0] : 0;
+                    Console.WriteLine($"[ProbeMC] [总上料架] ✔ D100 板长={plateLen}mm");
+                }
+                catch (Exception ex) { Console.WriteLine($"[ProbeMC] [总上料架] ⚠ D100 读取失败: {ex.Message}"); }
+
+                // ── 更新卡片 ──
+                bool m800 = (raw1 & (1 << 0)) != 0;   // M800: 请求取料
+                bool m811 = (raw1 & (1 << 11)) != 0;  // M811: 中转1有版
+                bool m812 = (raw1 & (1 << 12)) != 0;  // M812: 中转2有版
+                bool m813 = (raw1 & (1 << 13)) != 0;  // M813: 中转3有版
+
+                if (cards.TryGetValue("ST001", out var c1))
+                { c1.ConnectedBrush = Brushes.LimeGreen; c1.Status1 = m800 ? "请求取料" : "空闲"; c1.Status1Brush = m800 ? Brushes.Orange : Brushes.Green; c1.Status2 = $"板长={plateLen}mm"; c1.IpText = "192.168.2.63:9000"; }
+                if (cards.TryGetValue("ST031", out var c31)) { c31.ConnectedBrush = Brushes.LimeGreen; c31.Status1 = m811 ? "有版" : "空闲"; c31.Status1Brush = m811 ? Brushes.Orange : Brushes.Green; c31.IpText = "M811"; }
+                if (cards.TryGetValue("ST032", out var c32)) { c32.ConnectedBrush = Brushes.LimeGreen; c32.Status1 = m812 ? "有版" : "空闲"; c32.Status1Brush = m812 ? Brushes.Orange : Brushes.Green; c32.IpText = "M812"; }
+                if (cards.TryGetValue("ST033", out var c33)) { c33.ConnectedBrush = Brushes.LimeGreen; c33.Status1 = m813 ? "有版" : "空闲"; c33.Status1Brush = m813 ? Brushes.Orange : Brushes.Green; c33.IpText = "M813"; }
+                Console.WriteLine("[ProbeMC] [总上料架] 卡片已更新: ST001✓ ST031✓ ST032✓ ST033✓");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ProbeMC] [总上料架] ✘ 失败: {ex.GetType().Name} — {ex.Message}");
+                // 标记断开
+                if (cards.TryGetValue("ST001", out var c1)) { c1.ConnectedBrush = Brushes.Red; c1.Status1 = "无法连接"; c1.Status2 = ex.Message.Length > 30 ? ex.Message[..30] : ex.Message; }
+            }
+            finally
+            {
+                try { await rackClient.DisconnectAsync(); Console.WriteLine("[ProbeMC] [总上料架] 已断开 ✓"); }
+                catch (Exception ex) { Console.WriteLine($"[ProbeMC] [总上料架] 断开异常: {ex.Message}"); }
+            }
+        }
+
+        // ── 2. 探测货叉 (从 IpMap 取 ST711 的 IP) ─────────────────────
+        {
+            string? forkIp = null;
+            if (IpMap.TryGetValue("ST711", out var ip) && !string.IsNullOrWhiteSpace(ip) && ip != "未配置IP")
+                forkIp = ip;
+
+            if (string.IsNullOrEmpty(forkIp))
+            {
+                Console.WriteLine("[ProbeMC] [货叉] ⚠ IpMap 中未找到 ST711 的IP，跳过");
+                if (cards.TryGetValue("ST011", out var c)) { c.Status1 = "等待IP"; c.Status2 = "ST711未配置IP"; }
+            }
+            else
+            {
+                var forkClient = new MitsubishiMcClient(
+                    forkIp, 9000, MitsubishiMcClient.DeviceM,
+                    frameType: MitsubishiMcClient.McFrameType.A1E) { UseBitReadForM = true };
+                try
+                {
+                    Console.WriteLine($"[ProbeMC] [货叉] STEP1 尝试TCP连接 {forkIp}:9000 (timeout=5s)...");
+                    using var cts = new CancellationTokenSource(5000);
+                    try { await forkClient.ConnectAsync(cts.Token); }
+                    catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [货叉] ✘ TCP连接超时(5s) — PLC离线或IP/端口不对"); throw; }
+                    Console.WriteLine($"[ProbeMC] [货叉] STEP2 TCP连接成功 ✓ IsConnected={forkClient.IsConnected}");
+
+                    // 读 M900 (nibble编码, UseBitReadForM=true)
+                    ReadResult result;
+                    try { result = await forkClient.ReadAsync(900, 1, cts.Token); }
+                    catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [货叉] ✘ MC读超时(5s)"); throw; }
+                    ushort raw = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
+                    Console.WriteLine($"[ProbeMC] [货叉] ✔ M900~M915=0x{raw:X4}");
+
+                    // ── 更新卡片 ──
+                    bool hasPlate = (raw & (1 << 0)) != 0;
+                    bool atPos1  = (raw & (1 << 2)) != 0;
+                    bool atPos2  = (raw & (1 << 3)) != 0;
+                    bool atPos3  = (raw & (1 << 4)) != 0;
+                    bool atStdby = (raw & (1 << 1)) != 0;
+                    string pos = atStdby ? "待机位" : atPos1 ? "1号位" : atPos2 ? "2号位" : atPos3 ? "3号位" : "待机位";
+
+                    if (cards.TryGetValue("ST011", out var c2))
+                    { c2.ConnectedBrush = Brushes.LimeGreen; c2.Status1 = hasPlate ? "有版" : "无版"; c2.Status1Brush = hasPlate ? Brushes.Orange : Brushes.Green; c2.Status2 = pos; c2.IpText = $"{forkIp}:9000"; }
+                    Console.WriteLine($"[ProbeMC] [货叉] 卡片已更新: ST011✓ 有版={hasPlate} 位置={pos}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ProbeMC] [货叉] ✘ 失败: {ex.GetType().Name} — {ex.Message}");
+                    if (cards.TryGetValue("ST011", out var c)) { c.ConnectedBrush = Brushes.Red; c.Status1 = "无法连接"; c.Status2 = ex.Message.Length > 30 ? ex.Message[..30] : ex.Message; }
+                }
+                finally
+                {
+                    try { await forkClient.DisconnectAsync(); Console.WriteLine("[ProbeMC] [货叉] 已断开 ✓"); }
+                    catch (Exception ex) { Console.WriteLine($"[ProbeMC] [货叉] 断开异常: {ex.Message}"); }
+                }
+            }
+        }
+
+        // ── 3. 探测 192.168.2.64:9000 (下料架 ST710 + 动平衡料架) ─────
+        {
+            var client = new MitsubishiMcClient("192.168.2.64", 9000, MitsubishiMcClient.DeviceM,
+                frameType: MitsubishiMcClient.McFrameType.A1E);
+            try
+            {
+                Console.WriteLine("[ProbeMC] [2.64下料架] 尝试 TCP 连接...");
+                using var cts = new CancellationTokenSource(5000);
+                await client.ConnectAsync(cts.Token);
+                Console.WriteLine("[ProbeMC] [2.64下料架] TCP连接成功 ✓");
+
+                // 读 M800 起始 2 字 (M824=第2字bit0)
+                var result = await client.ReadAsync(800, 2, cts.Token);
+                ushort raw1 = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
+                ushort raw2 = (ushort)(result.IntValues.Length > 1 ? result.IntValues[1] : 0);
+                Console.WriteLine($"[ProbeMC] [2.64下料架] ✔ 读成功 M800~M815=0x{raw1:X4} M816~M831=0x{raw2:X4}");
+
+                // raw1 bits: M800~M815, raw2 bits: M816~M831
+                bool m824 = (raw2 & (1 << 8)) != 0;  // M824=raw2 bit8 研磨机上料架(第一个)
+                // 读 D100
+                int plateLen = 0;
+                try { var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 100, 1, cts.Token); plateLen = d.IntValues.Length > 0 ? d.IntValues[0] : 0; }
+                catch { }
+
+                if (cards.TryGetValue("ST013", out var c13)) { c13.ConnectedBrush = Brushes.LimeGreen; c13.Status1 = m824 ? "有版" : "空闲"; c13.Status1Brush = m824 ? Brushes.Orange : Brushes.Green; c13.Status2 = $"板长={plateLen}mm"; c13.IpText = "192.168.2.64:9000"; }
+                if (cards.TryGetValue("ST710", out var c710)) { c710.ConnectedBrush = Brushes.LimeGreen; c710.Status1 = m824 ? "有版" : "空闲"; c710.Status1Brush = m824 ? Brushes.Orange : Brushes.Green; c710.Status2 = "M824"; c710.IpText = "192.168.2.64:9000"; }
+                Console.WriteLine("[ProbeMC] [2.64下料架] 卡片已更新: ST013✓ ST710✓");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ProbeMC] [2.64下料架] ✘ 失败: {ex.GetType().Name} — {ex.Message}");
+                if (cards.TryGetValue("ST013", out var c)) { c.ConnectedBrush = Brushes.Red; c.Status1 = "无法连接"; }
+                if (cards.TryGetValue("ST710", out var c2)) { c2.ConnectedBrush = Brushes.Red; c2.Status1 = "无法连接"; }
+            }
+            finally { try { await client.DisconnectAsync(); } catch { } }
+        }
+
+        // ── 4. 探测 192.168.2.65:9000 (研磨机上料架 ST709 + 动平衡) ────
+        {
+            var client = new MitsubishiMcClient("192.168.2.65", 9000, MitsubishiMcClient.DeviceM,
+                frameType: MitsubishiMcClient.McFrameType.A1E);
+            try
+            {
+                Console.WriteLine("[ProbeMC] [2.65上料架] 尝试 TCP 连接...");
+                using var cts = new CancellationTokenSource(5000);
+                await client.ConnectAsync(cts.Token);
+                Console.WriteLine("[ProbeMC] [2.65上料架] TCP连接成功 ✓");
+
+                // 读 M800 起始 2 字 (M817~M823 在第1字+第2字)
+                var result = await client.ReadAsync(800, 2, cts.Token);
+                ushort raw1 = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
+                ushort raw2 = (ushort)(result.IntValues.Length > 1 ? result.IntValues[1] : 0);
+                Console.WriteLine($"[ProbeMC] [2.65上料架] ✔ 读成功 M800~M815=0x{raw1:X4} M816~M831=0x{raw2:X4}");
+
+                // raw1 bits: M800~M815, raw2 bits: M816~M831
+                bool m817 = (raw2 & (1 << 1)) != 0;  // M817=raw2 bit1 1号线动平衡上料架1
+                bool m823 = (raw2 & (1 << 7)) != 0;  // M823=raw2 bit7 研磨机上料架6号位
+                // 读 D100
+                int plateLen = 0;
+                try { var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 100, 1, cts.Token); plateLen = d.IntValues.Length > 0 ? d.IntValues[0] : 0; }
+                catch { }
+
+                if (cards.TryGetValue("ST709", out var c709)) { c709.ConnectedBrush = Brushes.LimeGreen; c709.Status1 = m823 ? "有版(6号位)" : (m817 ? "有版(1号位)" : "空闲"); c709.Status1Brush = (m823||m817) ? Brushes.Orange : Brushes.Green; c709.Status2 = $"板长={plateLen}mm"; c709.IpText = "192.168.2.65:9000"; }
+                if (cards.TryGetValue("ST175", out var c175)) { c175.ConnectedBrush = Brushes.LimeGreen; c175.Status1 = "就绪"; c175.Status1Brush = Brushes.Green; c175.IpText = "192.168.2.65:9000"; }
+                if (cards.TryGetValue("ST176", out var c176)) { c176.ConnectedBrush = Brushes.LimeGreen; c176.Status1 = "就绪"; c176.Status1Brush = Brushes.Green; c176.IpText = "192.168.2.65:9000"; }
+                if (cards.TryGetValue("ST177", out var c177)) { c177.ConnectedBrush = Brushes.LimeGreen; c177.Status1 = "就绪"; c177.Status1Brush = Brushes.Green; c177.IpText = "192.168.2.65:9000"; }
+                Console.WriteLine("[ProbeMC] [2.65上料架] 卡片已更新: ST709✓ ST175✓ ST176✓ ST177✓");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ProbeMC] [2.65上料架] ✘ 失败: {ex.GetType().Name} — {ex.Message}");
+                if (cards.TryGetValue("ST709", out var c)) { c.ConnectedBrush = Brushes.Red; c.Status1 = "无法连接"; }
+            }
+            finally { try { await client.DisconnectAsync(); } catch { } }
+        }
+
+        Console.WriteLine("[ProbeMC] ═══════ MC 设备探测结束（4路: 2.63✓ 货叉✓ 2.64✓ 2.65✓）═══════");
+    }
+
+    /// <summary>
+    /// 一次性探测 Syntec 双头镗 (ST401 192.168.2.66)。
+    /// 连→读 R6101 请求数据信号→写 ST401 卡片→断开。
+    /// </summary>
+    private async Task ProbeSyntecDevicesAsync()
+    {
+        Console.WriteLine("[ProbeSyntec] ═══════ Syntec 双头镗探测 ═══════");
+        var cards = StationCards;
+
+        // ST401(XAML显示码)→DB站号ST103 192.168.2.66
+        string? ip = null;
+        if (IpMap.TryGetValue("ST103", out var st103Ip) && !string.IsNullOrWhiteSpace(st103Ip) && st103Ip != "未配置IP")
+            ip = st103Ip;
+
+        if (string.IsNullOrEmpty(ip))
+        {
+            Console.WriteLine("[ProbeSyntec] [双头镗] ⚠ IpMap 中未找到 ST103 IP，跳过");
+            if (cards.TryGetValue("ST401", out var c)) { c.Status1 = "等待IP"; c.Status2 = "ST103未配置IP"; }
+            return;
+        }
+
+        try
+        {
+            Console.WriteLine($"[ProbeSyntec] [双头镗] 尝试连接 {ip}:502...");
+            using var svc = new SyntecBoringService(ip);
+            using var cts = new CancellationTokenSource(5000);
+            await svc.ConnectAsync(cts.Token);
+            Console.WriteLine("[ProbeSyntec] [双头镗] 连接成功 ✓");
+
+            // 读 R6101 请求数据信号
+            bool reqData = await svc.IsRequestDataAsync(cts.Token);
+            Console.WriteLine($"[ProbeSyntec] [双头镗] ✔ R6101 请求数据={reqData}");
+
+            if (cards.TryGetValue("ST401", out var c))
+            {
+                c.ConnectedBrush = Brushes.LimeGreen;
+                c.Status1 = reqData ? "请求数据" : "空闲";
+                c.Status1Brush = reqData ? Brushes.Orange : Brushes.Green;
+                c.Status2 = $"R6101={(reqData?1:0)} {ip}:502";
+                c.IpText = $"{ip}:502";
+            }
+            Console.WriteLine("[ProbeSyntec] [双头镗] 卡片已更新: ST401✓");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ProbeSyntec] [双头镗] ✘ 失败: {ex.GetType().Name} — {ex.Message}");
+            if (cards.TryGetValue("ST401", out var c)) { c.ConnectedBrush = Brushes.Red; c.Status1 = "无法连接"; c.Status2 = "Syntec SDK?"; }
+        }
+        Console.WriteLine("[ProbeSyntec] ═══════ 结束 ═══════");
     }
 }
 

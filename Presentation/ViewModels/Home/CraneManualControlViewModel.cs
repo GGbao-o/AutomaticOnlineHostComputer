@@ -103,10 +103,12 @@ public sealed class CraneManualControlViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 当前是否选中天车（非机械手）。
-    /// 绑定到 X 轴/充退磁/接液盘相关按钮的 IsEnabled，机械手时灰掉。
+    /// 当前是否选中天车或机械手（有磁铁+伺服控制）。绑定到按钮 IsEnabled。
+    /// 机械手和天车共用同一套 PLC 寄存器，充退磁/伺服/急停等均可用。
     /// </summary>
-    public bool IsCraneSelected => _selectedDevice?.DeviceType == ManualDeviceType.Crane;
+    public bool IsCraneSelected => _selectedDevice != null;
+    /// <summary>当前选中设备是否是纯天车（有 X 轴/接液盘）。机械手为 false。</summary>
+    private bool IsCraneOnly => _selectedDevice?.DeviceType == ManualDeviceType.Crane;
 
     // ═══════════════════════════════════════════════════════════════
     //  点动距离
@@ -459,7 +461,6 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task MagnetOnAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无充磁功能"); return; }
         Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【充磁】");
         using var cts = new CancellationTokenSource(ManualCommandTimeout);
         var service = await EnsureConnectedServiceAsync(cts.Token);
@@ -469,7 +470,6 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task MagnetOffAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无退磁功能"); return; }
         Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【退磁】");
         using var cts = new CancellationTokenSource(ManualCommandTimeout);
         var service = await EnsureConnectedServiceAsync(cts.Token);
@@ -483,7 +483,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task DrainOpenAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无接液盘功能"); return; }
+        if (!IsCraneOnly) { Console.WriteLine("[CraneManualVM] 忽略：机械手无接液盘功能"); return; }
         Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【接液盘打开】");
         using var cts = new CancellationTokenSource(ManualCommandTimeout);
         var service = await EnsureConnectedServiceAsync(cts.Token);
@@ -493,7 +493,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task DrainCloseAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无接液盘功能"); return; }
+        if (!IsCraneOnly) { Console.WriteLine("[CraneManualVM] 忽略：机械手无接液盘功能"); return; }
         Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【接液盘关闭】");
         using var cts = new CancellationTokenSource(ManualCommandTimeout);
         var service = await EnsureConnectedServiceAsync(cts.Token);
@@ -507,7 +507,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task HomeXAsync()
     {
-        if (!IsCraneSelected) { Console.WriteLine("[CraneManualVM] 忽略：机械手无 X 轴"); return; }
+        if (!IsCraneOnly) { Console.WriteLine("[CraneManualVM] 忽略：机械手无 X 轴"); return; }
         Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【X轴回原点】");
         using var cts = new CancellationTokenSource(ManualCommandTimeout);
         var service = await EnsureConnectedServiceAsync(cts.Token);
@@ -562,7 +562,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
                 return;
             }
 
-            AbsXTarget = IsCraneSelected ? status.XPos : 0;
+            AbsXTarget = IsCraneOnly ? status.XPos : 0;
             AbsYTarget = status.YPos;
             AbsZTarget = status.ZPos;
 
@@ -597,7 +597,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     private async Task MoveAbsoluteAsync()
     {
-        int xTarget = IsCraneSelected ? AbsXTarget : -1;
+        int xTarget = IsCraneOnly ? AbsXTarget : -1;
         int yTarget = AbsYTarget;
         int zTarget = AbsZTarget;
         Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【绝对移动】 目标 X={xTarget} Y={yTarget} Z={zTarget}");

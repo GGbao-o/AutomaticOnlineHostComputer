@@ -33,6 +33,9 @@ public sealed class AddTaskDialogViewModel : ObservableObject
     public string BoringProcess { get => _boringProcess; set => SetField(ref _boringProcess, value); }
     public string SkewBedProcess { get => _skewBedProcess; set => SetField(ref _skewBedProcess, value); }
 
+    /// <summary>跳过双头镗：工序选择"省去双头镗工艺"时为true</summary>
+    public bool SkipBoring => ProcessType == "省去双头镗工艺";
+
     /// <summary>堵孔选项：70=小孔，100=大孔</summary>
     public List<double> PlugHoleOptions { get; } = new() { 70, 100 };
 

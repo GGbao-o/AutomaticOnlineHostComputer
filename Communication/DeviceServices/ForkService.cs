@@ -25,8 +25,8 @@ public sealed class ForkService : IDisposable
     public ForkService(string name, string ip, int port = 9000)
     {
         _name = name;
-        _client = new MitsubishiMcClient(ip, port, MitsubishiMcClient.DeviceM);
-        Console.WriteLine($"[ForkSvc] [{_name}] 创建实例 IP={ip}:{port}");
+        _client = new MitsubishiMcClient(ip, port, MitsubishiMcClient.DeviceM, frameType: MitsubishiMcClient.McFrameType.A1E) { UseBitReadForM = true };
+        Console.WriteLine($"[ForkSvc] [{_name}] 创建实例 IP={ip}:{port} UseBitReadForM=true");
     }
 
     public async Task ConnectAsync(CancellationToken ct = default)
@@ -86,17 +86,31 @@ public sealed class ForkService : IDisposable
         Console.WriteLine($"[ForkSvc] [{_name}] 写 M{mAddr}={(value ? 1 : 0)} (word 0x{current:X4}→0x{next:X4})");
     }
 
-    /// <summary>货叉回待机位（M911=1）</summary>
-    public Task GoStandbyAsync(CancellationToken ct = default) => WriteMBitAsync(Addr.M_GoStandby, true, ct);
+    /// <summary>货叉回待机位（先清M913/M914, 再写M911=1）</summary>
+    public async Task GoStandbyAsync(CancellationToken ct = default)
+    {
+        await WriteMBitAsync(Addr.M_GoPos2, false, ct);  // 清2号气缸
+        await WriteMBitAsync(Addr.M_GoPos3, false, ct);  // 清3号气缸
+        await WriteMBitAsync(Addr.M_GoStandby, true, ct);
+    }
 
     /// <summary>货叉去1号位（M912=1）</summary>
     public Task GoPos1Async(CancellationToken ct = default) => WriteMBitAsync(Addr.M_GoPos1, true, ct);
 
-    /// <summary>货叉去2号位（M913=1）</summary>
-    public Task GoPos2Async(CancellationToken ct = default) => WriteMBitAsync(Addr.M_GoPos2, true, ct);
+    /// <summary>货叉去2号位（先清M911/M914, 再写M913=1）</summary>
+    public async Task GoPos2Async(CancellationToken ct = default)
+    {
+        await WriteMBitAsync(Addr.M_GoStandby, false, ct);  // 清待机位
+        await WriteMBitAsync(Addr.M_GoPos3, false, ct);     // 清3号气缸
+        await WriteMBitAsync(Addr.M_GoPos2, true, ct);
+    }
 
-    /// <summary>货叉去3号位（M914=1）</summary>
-    public Task GoPos3Async(CancellationToken ct = default) => WriteMBitAsync(Addr.M_GoPos3, true, ct);
+    /// <summary>货叉去3号位（先清M913, 再写M914=1）</summary>
+    public async Task GoPos3Async(CancellationToken ct = default)
+    {
+        await WriteMBitAsync(Addr.M_GoPos2, false, ct);  // 清2号气缸
+        await WriteMBitAsync(Addr.M_GoPos3, true, ct);
+    }
 
     public void Dispose()
     {
@@ -141,5 +155,5 @@ public sealed class ForkStatus
         AtPos1       ? "1号位" :
         AtPos2       ? "2号位" :
         AtPos3       ? "3号位" :
-        "未知/运动中";
+        "待机位";
 }

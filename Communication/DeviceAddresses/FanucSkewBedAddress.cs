@@ -82,6 +82,9 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         /// <summary>#1102 天车上料到位（0=未到位，1=到位，上位机/天车写）</summary>
         public const int CraneLoadInPlace = 1102;
 
+        /// <summary>#1103 天车上料完成（0=未完成，1=完成，上位机写）</summary>
+        public const int CraneLoadDone = 1103;
+
         /// <summary>#1104 天车下料到位（0=未到位，1=到位）</summary>
         public const int CraneUnloadInPlace = 1104;
 

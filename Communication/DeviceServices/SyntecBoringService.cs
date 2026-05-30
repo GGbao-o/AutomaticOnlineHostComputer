@@ -64,24 +64,45 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         // ─── 写 R区信号（上位机→机床握手） ───────────────────────────
 
         public Task SetDataSentDoneAsync(CancellationToken ct = default)
-            => _client.WriteAsync(SyntecBoringAddress.R_DataSentDone, 1, ct);
+            => _client.WriteRAsync(SyntecBoringAddress.R_DataSentDone, 1, ct);
 
         public Task SetForkLoadInPlaceAsync(CancellationToken ct = default)
-            => _client.WriteAsync(SyntecBoringAddress.R_ForkLoadInPlace, 1, ct);
+            => _client.WriteRAsync(SyntecBoringAddress.R_ForkLoadInPlace, 1, ct);
 
         public Task SetForkLoadOutDoneAsync(CancellationToken ct = default)
-            => _client.WriteAsync(SyntecBoringAddress.R_ForkLoadOutDone, 1, ct);
+            => _client.WriteRAsync(SyntecBoringAddress.R_ForkLoadOutDone, 1, ct);
 
         public Task SetForkUnloadInPlaceAsync(CancellationToken ct = default)
-            => _client.WriteAsync(SyntecBoringAddress.R_ForkUnloadInPlace, 1, ct);
+            => _client.WriteRAsync(SyntecBoringAddress.R_ForkUnloadInPlace, 1, ct);
 
         public Task SetForkUnloadOutDoneAsync(CancellationToken ct = default)
-            => _client.WriteAsync(SyntecBoringAddress.R_ForkUnloadOutDone, 1, ct);
+            => _client.WriteRAsync(SyntecBoringAddress.R_ForkUnloadOutDone, 1, ct);
+
+        /// <summary>直接写任意R区寄存器值 (用于清上一步信号)。</summary>
+        public Task WriteRAsync(int addr, int value, CancellationToken ct = default)
+            => _client.WriteRAsync(addr, value, ct);
+
+        /// <summary>双头镗是否空闲: R6101=1(就绪) 且 R6103/6105/6107/6109 全为0。</summary>
+        public async Task<bool> IsIdleAsync(CancellationToken ct = default)
+        {
+            var s = await ReadAllSignalsAsync(ct);
+            return s.r6101 && !s.r6103 && !s.r6105 && !s.r6107 && !s.r6109;
+        }
+
+        /// <summary>一次批量读R6101~R6110，返回5个关键读信号。</summary>
+        public async Task<(bool r6101, bool r6103, bool r6105, bool r6107, bool r6109)> ReadAllSignalsAsync(CancellationToken ct = default)
+        {
+            var vals = await _client.ReadRAsync(6101, 10, ct);
+            return (vals[0] != 0, vals[2] != 0, vals[4] != 0, vals[6] != 0, vals[8] != 0);
+        }
 
         // ─── 私有辅助 ─────────────────────────────────────────────────
 
         private async Task<bool> ReadBoolAsync(int address, CancellationToken ct)
-            => (await _client.ReadIntAsync(address, ct)) != 0;
+        {
+            var vals = await _client.ReadRAsync(address, 1, ct);  // R区寄存器用READ_plc_addr
+            return vals.Length > 0 && vals[0] != 0;
+        }
 
         public void Dispose()
         {

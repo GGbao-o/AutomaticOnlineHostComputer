@@ -221,7 +221,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         // ═══════════════════════════════════════════════════════════════
 
         /// <summary>下发版辊参数（直径 mm、版孔 1大孔/2小孔、长度 mm）。</summary>
-        public async Task SendRollerParamsAsync(int rollerDiameter, int boreType, int rollerLength, CancellationToken ct = default)
+        public async Task SendRollerParamsAsync(double rollerDiameter, int boreType, double rollerLength, CancellationToken ct = default)
         {
             Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 下发加工参数 直径={rollerDiameter}mm 版孔={(boreType == 1 ? "大孔" : "小孔")} 长度={rollerLength}mm");
             if (_type == GrinderType.TypeA)

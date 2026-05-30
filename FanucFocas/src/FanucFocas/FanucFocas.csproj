@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>FanucFocas</AssemblyName>
+    <RootNamespace>FanucFocas</RootNamespace>
+    <Version>1.0.0</Version>
+    <Description>FANUC FOCAS1 CNC Communication SDK</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\dlls\Fwlib32.dll" Link="Fwlib32.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\dlls\fwlibe1.dll" Link="fwlibe1.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -28,12 +29,21 @@
     </None>
     <None Include="bin\Debug\net8.0-windows\Config\motion_settings.json" />
     <None Include="bin\Debug\net8.0-windows\motion_settings.json" />
+    <Content Include="Libs\**\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>%(Filename)%(Extension)</Link>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
     <Compile Update="Views\Process\Dialogs\AddProcessDialog.cs">
       <DependentUpon>AddProcessDialog.xaml</DependentUpon>
     </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Docs\06-sql\" />
+    <Folder Include="Libs\" />
   </ItemGroup>
 
   <!-- 默认包含规则会自动包含项目目录下所有 .cs 和 .xaml 文件，递归子文件夹 -->

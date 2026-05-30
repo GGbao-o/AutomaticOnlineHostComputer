@@ -207,6 +207,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         {
             Console.WriteLine($"[CraneService] [{_name}] ▶ 清除下压急停 D4523=0");
             await WriteRegAsync(Addr.D_PressureEStop, 0, "清除下压急停 D4523", ct);
+            _manualModeSet = false;  // 急停后PLC可能退出手动模式，重置缓存强制下次重写D4001/D4500
         }
 
         /// <summary>
@@ -326,6 +327,49 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             await WriteRegAsync(Addr.D_ManualClearAlarm, 2, "清除报警(触发)", ct);
             await Task.Delay(50, ct); // 50ms 间隔确保 PLC 捕获上升沿
             await WriteRegAsync(Addr.D_ManualClearAlarm, 0, "清除报警(复位)", ct);
+        }
+
+        /// <summary>
+        /// 下压急停后完整恢复：清下压→清报警→伺服通电→强制重设手动模式→复位三轴绝对触发位。
+        /// 调用后可直接执行绝对移动或充退磁。
+        /// </summary>
+        public async Task RecoverFromPressureStopAsync(CancellationToken ct = default)
+        {
+            Console.WriteLine($"[CraneService] [{_name}] ═══ 下压后完整恢复 ═══");
+            // ① 清下压 D4523=0
+            await WriteRegAsync(Addr.D_PressureEStop, 0, "清下压 D4523", ct);
+            // ② 强制重设手动模式 (不依赖缓存)
+            await WriteRegAsync(Addr.D_ModeCmd, 2, "切换手动模式 D4001", ct);
+            await WriteRegAsync(Addr.D_ManualMode, 2, "手动操作使能 D4500", ct);
+            _manualModeSet = true;
+            // ③ 清报警 D4514=2→0
+            await WriteRegAsync(Addr.D_ManualClearAlarm, 2, "清除报警(触发)", ct);
+            await Task.Delay(50, ct);
+            await WriteRegAsync(Addr.D_ManualClearAlarm, 0, "清除报警(复位)", ct);
+            // ④ 伺服通电 D4516=2→0
+            await WriteRegAsync(Addr.D_ManualServoPowerOn, 2, "伺服通电(触发)", ct);
+            await WriteRegAsync(Addr.D_ManualServoPowerOn, 0, "伺服通电(复位)", ct);
+            // ⑤ 复位三轴绝对移动触发位 D4520/D4521/D4522=0
+            await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "复位Z触发 D4520", ct);
+            await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "复位Y触发 D4521", ct);
+            await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "复位X触发 D4522", ct);
+            // ⑥ 验证 D4523 已清零（最多重试3次, 防硬件故障导致无限循环恢复）
+            for (int i = 0; i < 3; i++)
+            {
+                await Task.Delay(500, ct);
+                int d4523 = await _client.ReadIntAsync(Addr.D_PressureEStop, ct);
+                if (d4523 == 0)
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] ✓ D4523=0 已确认清零");
+                    break;
+                }
+                if (i == 2)
+                    throw new InvalidOperationException(
+                        $"[{_name}] D4523 无法清零(当前={d4523})，疑似下压传感器物理故障或卡死！需人工检修");
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ D4523={d4523} 未清零, 重试{i + 1}/3...");
+                await WriteRegAsync(Addr.D_PressureEStop, 0, "清下压 D4523(重试)", ct);
+            }
+            Console.WriteLine($"[CraneService] [{_name}] ═══ 恢复完成，可继续运动 ═══");
         }
 
         // ─── 充磁 / 退磁 ─────────────────────────────────────────────
@@ -668,23 +712,23 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             int tolerance = 5, int timeoutMs = 240_000, CancellationToken ct = default)
         {
             var activeAxes = new List<string>();
-            if (xTarget >= 0) activeAxes.Add("X");
-            if (yTarget >= 0) activeAxes.Add("Y");
-            if (zTarget >= 0) activeAxes.Add("Z");
+            if (xTarget != -1) activeAxes.Add("X");
+            if (yTarget != -1) activeAxes.Add("Y");
+            if (zTarget != -1) activeAxes.Add("Z");
             Console.WriteLine($"[CraneService] [{_name}] ▶ 绝对移动 目标 X={xTarget} Y={yTarget} Z={zTarget} 轴={string.Join(",", activeAxes)}");
 
             await EnsureManualModeAsync(ct);
 
             // ── 1. 写入所有目标坐标 ──────────────────────────────────────
-            if (xTarget >= 0)
+            if (xTarget != -1)
                 await WriteDintAsync(Addr.D_XAbsTarget, xTarget, "X绝对目标 D3102~D3103", ct);
-            if (yTarget >= 0)
+            if (yTarget != -1)
                 await WriteDintAsync(Addr.D_YAbsTarget, yTarget, "Y绝对目标 D3104~D3105", ct);
-            if (zTarget >= 0)
+            if (zTarget != -1)
                 await WriteDintAsync(Addr.D_ZAbsTarget, zTarget, "Z绝对目标 D3106~D3107", ct);
 
             // ── 2. 读取当前 Z，判断升降方向 ──────────────────────────────
-            bool hasZMove = zTarget >= 0;
+            bool hasZMove = zTarget != -1;
             bool zGoingDown = false, zGoingUp = false;
             if (hasZMove)
             {
@@ -718,13 +762,13 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 if (zGoingDown)
                 {
                     Console.WriteLine($"[CraneService] [{_name}] Z下降 → 先脉冲XY再脉冲Z");
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
+                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
+                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
                     await Task.Delay(500, ct);
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
+                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
+                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
                     await PollAxesAsync(xTarget, yTarget, -1, tolerance, timeoutMs / 2, ct);
-                    if (zTarget >= 0)
+                    if (zTarget != -1)
                     {
                         await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
                         await Task.Delay(500, ct);
@@ -734,29 +778,29 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 else if (zGoingUp)
                 {
                     Console.WriteLine($"[CraneService] [{_name}] Z上升 → 先脉冲Z再脉冲XY");
-                    if (zTarget >= 0)
+                    if (zTarget != -1)
                     {
                         await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
                         await Task.Delay(500, ct);
                         await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
                     }
                     await PollAxesAsync(-1, -1, zTarget, tolerance, timeoutMs / 2, ct);
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
+                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
+                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
                     await Task.Delay(500, ct);
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
+                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
+                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
                 }
                 else
                 {
                     Console.WriteLine($"[CraneService] [{_name}] Z不变 → 三轴同时脉冲");
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
-                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
+                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
+                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
+                    if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
                     await Task.Delay(500, ct);
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
-                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
+                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
+                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
+                    if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
                 }
 
                 // ── 4. 轮询等待所有轴到位 ──────────────────────────────────
@@ -770,9 +814,9 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 var resetCt = CancellationToken.None;
 
                 // ── 5. 复位所有触发信号 ──────────────────────────────────
-                if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", resetCt);
-                if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", resetCt);
-                if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", resetCt);
+                if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", resetCt);
+                if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", resetCt);
+                if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", resetCt);
 
                 // ── 接液盘互锁：Z 上升后关闭接液盘 ────────────────────
                 if (zGoingUp)
@@ -836,13 +880,13 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             {
                 ct.ThrowIfCancellationRequested();
                 // Z 轴下降时用 200ms 快轮询，更快响应下压信号；其他情况 500ms
-                int pollDelay = zTarget >= 0 ? 200 : 500;
+                int pollDelay = zTarget != -1 ? 200 : 500;
                 await Task.Delay(pollDelay, ct);
 
                 // ── 磁铁下压限位检测：X2=63490 线圈=1 → 下压急停 ──
                 //    X2（FC01 Read Coil）是磁铁物理下压限位开关，PLC 无法直接停止伺服，
                 //    上位机检测到 X2=1 后主动写 D4523=2→0（下压急停触发）、D4518=2→0（伺服急停）。
-                if (zTarget >= 0)
+                if (zTarget != -1)
                 {
                     bool x2Pressed = await ReadXBitAsync(Addr.D_X2_MagnetLimit, ct);
                     if (x2Pressed)
@@ -869,9 +913,9 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                         await WriteRegAsync(Addr.D_ManualEStop, 0, "伺服急停 D4518(复位)", emergencyCt);
 
                         // ③ 复位绝对移动触发位，防止急停恢复后继续运动
-                        if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X下压停止复位 D4522", emergencyCt);
-                        if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y下压停止复位 D4521", emergencyCt);
-                        if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z下压停止复位 D4520", emergencyCt);
+                        if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X下压停止复位 D4522", emergencyCt);
+                        if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y下压停止复位 D4521", emergencyCt);
+                        if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z下压停止复位 D4520", emergencyCt);
 
                         throw new PressureStopException(_name);
                     }
@@ -880,9 +924,9 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 var status = await ReadStatusAsync(ct);
                 if (status == null) continue;
 
-                bool xOk = xTarget < 0 || Math.Abs(status.XPos - xTarget) <= tolerance;
-                bool yOk = yTarget < 0 || Math.Abs(status.YPos - yTarget) <= tolerance;
-                bool zOk = zTarget < 0 || Math.Abs(status.ZPos - zTarget) <= tolerance;
+                bool xOk = xTarget == -1 || Math.Abs(status.XPos - xTarget) <= tolerance;
+                bool yOk = yTarget == -1 || Math.Abs(status.YPos - yTarget) <= tolerance;
+                bool zOk = zTarget == -1 || Math.Abs(status.ZPos - zTarget) <= tolerance;
 
                 if (xOk && yOk && zOk)
                 {
@@ -899,13 +943,13 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
                     // 补偿重试：2→500ms→0 脉冲，使用 CancellationToken.None
                     var retryCt = CancellationToken.None;
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X补偿重试触发 D4522", retryCt);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y补偿重试触发 D4521", retryCt);
-                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z补偿重试触发 D4520", retryCt);
+                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X补偿重试触发 D4522", retryCt);
+                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y补偿重试触发 D4521", retryCt);
+                    if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z补偿重试触发 D4520", retryCt);
                     await Task.Delay(500, retryCt);
-                    if (xTarget >= 0) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X补偿重试复位 D4522", retryCt);
-                    if (yTarget >= 0) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y补偿重试复位 D4521", retryCt);
-                    if (zTarget >= 0) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z补偿重试复位 D4520", retryCt);
+                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X补偿重试复位 D4522", retryCt);
+                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y补偿重试复位 D4521", retryCt);
+                    if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z补偿重试复位 D4520", retryCt);
 
                     retried = true;
                     goto retry;

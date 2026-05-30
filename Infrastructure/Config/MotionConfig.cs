@@ -11,8 +11,18 @@ namespace AutomaticOnlineHostComputer.Infrastructure.Config;
 /// </summary>
 public sealed class MotionConfig
 {
-    /// <summary>绝对移动参数</summary>
+    /// <summary>默认绝对移动参数（天车/机械手未单独配置时使用）</summary>
     public AbsMoveSection AbsMove { get; set; } = new();
+    /// <summary>各天车独立速度(Key=天车编号1~5), 未配置则用AbsMove</summary>
+    public Dictionary<int, AbsMoveSection> CraneSpeeds { get; set; } = new();
+    /// <summary>各机械手独立速度(Key=机械手编号1~3), 未配置则用AbsMove</summary>
+    public Dictionary<int, AbsMoveSection> ManipulatorSpeeds { get; set; } = new();
+
+    /// <summary>取天车绝对移动参数(有独立配置用独立, 没有用默认)</summary>
+    public AbsMoveSection GetCraneSpeed(int craneNo) => CraneSpeeds.TryGetValue(craneNo, out var s) ? s : AbsMove;
+    /// <summary>取机械手绝对移动参数(有独立配置用独立, 没有用默认)</summary>
+    public AbsMoveSection GetManipulatorSpeed(int manNo) => ManipulatorSpeeds.TryGetValue(manNo, out var s) ? s : AbsMove;
+
     /// <summary>相对移动（点动）参数</summary>
     public RelMoveSection RelMove { get; set; } = new();
     /// <summary>Z 轴安全策略</summary>
@@ -38,9 +48,9 @@ public sealed class MotionConfig
         public int TimeoutMs { get; set; } = 240_000;
         public int PollIntervalMs { get; set; } = 500;
         /// <summary>X轴绝对速度</summary>
-        public AxisSpeed X { get; set; } = new() { Speed = 150, Accel = 80, Decel = 80 };
+        public AxisSpeed X { get; set; } = new() { Speed = 200, Accel = 80, Decel = 80 };
         /// <summary>Y轴绝对速度</summary>
-        public AxisSpeed Y { get; set; } = new() { Speed = 80, Accel = 60, Decel = 60 };
+        public AxisSpeed Y { get; set; } = new() { Speed = 150, Accel = 60, Decel = 60 };
         /// <summary>Z轴绝对速度</summary>
         public AxisSpeed Z { get; set; } = new() { Speed = 50, Accel = 40, Decel = 40 };
     }
@@ -92,13 +102,13 @@ public sealed class MotionConfig
         /// <summary>Z下降公式系数2</summary>
         public double ZFactor2 { get; set; } = 0.866;
         /// <summary>Z轴安全高度(mm)，充磁/退磁后先升到此绝对Z坐标再水平移动（Z变小=向上）</summary>
-        public int SafeZHeight { get; set; } = 400;
+        public int SafeZHeight { get; set; } = 0;
         /// <summary>研磨机天车编号(默认5号)</summary>
         public int CraneNo { get; set; } = 5;
         /// <summary>研磨机状态轮询间隔(ms)</summary>
         public int PollIntervalMs { get; set; } = 500;
         /// <summary>研磨机握手超时(ms)，等待请求上料/锁紧/松开等信号</summary>
-        public int HandshakeTimeoutMs { get; set; } = 60_000;
+        public int HandshakeTimeoutMs { get; set; } = 300_000;
     }
 
     /// <summary>斜床 Y 轴移动公式参数</summary>
@@ -109,22 +119,28 @@ public sealed class MotionConfig
         /// <summary>各斜床顶尖距离 (站号→mm)，默认 1450</summary>
         public Dictionary<string, int> CenterDistances { get; set; } = new()
         {
-            ["ST601"] = 1410, ["ST602"] = 1450, ["ST603"] = 1450, ["ST604"] = 1450, ["ST605"] = 1450,
+            // 1号线斜床1~5 (DB站号: ST108~ST112)
+            ["ST108"] = 1450, ["ST109"] = 1450, ["ST110"] = 1450, ["ST111"] = 1450, ["ST112"] = 1450,
+            // 2号线斜床6~10 (DB站号: ST606~ST610)
             ["ST606"] = 1450, ["ST607"] = 1450, ["ST608"] = 1450, ["ST609"] = 1450, ["ST610"] = 1450,
         };
         /// <summary>大孔(堵孔100) Y轴移动距离，默认 125mm</summary>
         public int LargeBoreOffset { get; set; } = 117;
         /// <summary>小孔(堵孔70) Y轴移动距离，默认 65mm</summary>
         public int SmallBoreOffset { get; set; } = 55;
-        /// <summary>机械手1 安全位置 Y 坐标(mm)，天车进入货叉区域前必须确认机械手在此位置</summary>
-        public int Manipulator1SafeY { get; set; } = 800;
+        /// <summary>机械手1 安全位 Y 坐标(mm)，机械手无X轴, 每次取完料Y回1000</summary>
+        public int Manipulator1SafeY { get; set; } = 1000;
+        /// <summary>机械手2 安全位 Y 坐标(mm)</summary>
+        public int Manipulator2SafeY { get; set; } = 1000;
+        /// <summary>机械手3 安全位 Y 坐标(mm)</summary>
+        public int Manipulator3SafeY { get; set; } = 1000;
 
         /// <summary>根据站号和版孔类型计算 Y 轴目标偏移：Y = (顶尖距离-长度)/2 + 孔偏移</summary>
-        public int ComputeYOffset(string stationCode, int workpieceLength, int plugHole)
+        public int ComputeYOffset(string stationCode, double workpieceLength, int plugHole)
         {
             int centerDist = CenterDistances.TryGetValue(stationCode, out var d) ? d : 1450;
-            int boreOffset = plugHole == 100 ? LargeBoreOffset : SmallBoreOffset; // 100=大孔, 70=小孔
-            return (centerDist - workpieceLength) / 2 + boreOffset;
+            int boreOffset = plugHole == 100 ? LargeBoreOffset : SmallBoreOffset; // 117=大孔, 55=小孔
+            return (int)((centerDist - workpieceLength) / 2 + boreOffset);
         }
     }
 

@@ -81,6 +81,32 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public Task<double> GetMachiningTimeAsync(CancellationToken ct = default)
             => ReadFloatAsync(ModbusSkewBedAddress.MachiningTime, ct);
 
+        /// <summary>一次读5个关键信号: 请求数据/请求上料/夹紧/请求下料/张开。</summary>
+        public async Task<(bool rqData, bool rqLoad, bool clamped, bool rqUnload, bool opened)> ReadSignalsAsync(CancellationToken ct = default)
+        {
+            var t = new Task<bool>[5];
+            t[0] = ReadBoolAsync(ModbusSkewBedAddress.RequestData, ct);
+            t[1] = ReadBoolAsync(ModbusSkewBedAddress.RequestLoad, ct);
+            t[2] = ReadBoolAsync(ModbusSkewBedAddress.TailstockClamped, ct);
+            t[3] = ReadBoolAsync(ModbusSkewBedAddress.RequestUnload, ct);
+            t[4] = ReadBoolAsync(ModbusSkewBedAddress.TailstockOpened, ct);
+            await Task.WhenAll(t);
+            return (t[0].Result, t[1].Result, t[2].Result, t[3].Result, t[4].Result);
+        }
+
+        // ─── 写入加工参数 ────────────────────────────────────────────
+
+        /// <summary>下发加工参数（版长、堵孔、成活直径 float；模式 int）。</summary>
+        public async Task SendMachiningParamsAsync(
+            double rollerLength, double borePlugSize, double rollerDiameter,
+            int mode, CancellationToken ct = default)
+        {
+            await _client.WriteAsync(ModbusSkewBedAddress.RollerLength, rollerLength, ct);      // 10300~10301 FLOAT
+            await _client.WriteAsync(ModbusSkewBedAddress.BorePlugSize, borePlugSize, ct);       // 10302~10303 FLOAT
+            await _client.WriteAsync(ModbusSkewBedAddress.RollerDiameter, rollerDiameter, ct);   // 10304~10305 FLOAT
+            await _client.WriteAsync(ModbusSkewBedAddress.MachiningMode, mode, ct);              // 10370 INT
+        }
+
         // ─── 写入控制命令（INT16） ────────────────────────────────────
 
         /// <summary>
@@ -104,6 +130,24 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <summary>天车异常时停止尾座（写1）</summary>
         public Task StopTailstockAsync(CancellationToken ct = default)
             => _client.WriteAsync(ModbusSkewBedAddress.TailstockStopCmd, 1, ct);
+
+        // ─── 级联清零（写0清除上一步信号, 与FANUC级联规则对应） ─────
+
+        /// <summary>清10370=0（加工模式复位, 写10371前必须先清）</summary>
+        public Task ClearMachiningModeAsync(CancellationToken ct = default)
+            => _client.WriteAsync(ModbusSkewBedAddress.MachiningMode, 0, ct);
+
+        /// <summary>清10371=0（尾座顶紧复位, 写10372前必须先清）</summary>
+        public Task ClearTailstockClampAsync(CancellationToken ct = default)
+            => _client.WriteAsync(ModbusSkewBedAddress.TailstockClampCmd, 0, ct);
+
+        /// <summary>清10372=0（远程启动复位, 下料写10373前必须先清）</summary>
+        public Task ClearRemoteStartAsync(CancellationToken ct = default)
+            => _client.WriteAsync(ModbusSkewBedAddress.RemoteStart, 0, ct);
+
+        /// <summary>清10373=0（尾座张开复位, 写10374前必须先清）</summary>
+        public Task ClearTailstockOpenAsync(CancellationToken ct = default)
+            => _client.WriteAsync(ModbusSkewBedAddress.TailstockOpenCmd, 0, ct);
 
         // ─── 私有辅助 ─────────────────────────────────────────────────
 

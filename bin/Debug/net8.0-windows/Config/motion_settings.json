@@ -2,11 +2,23 @@
 {
   "absMove": {
     "tolerance": 5,
-    "timeoutMs": 300000,
+    "timeoutMs": 240000,
     "pollIntervalMs": 500,
-    "x": { "speed": 300, "accel": 80, "decel": 80 },
-    "y": { "speed": 80, "accel": 60, "decel": 60 },
-    "z": { "speed": 50, "accel": 40,  "decel": 40 }
+    "x": { "speed": 200, "accel": 80, "decel": 80 },
+    "y": { "speed": 300, "accel": 60, "decel": 60 },
+    "z": { "speed": 70, "accel": 40,  "decel": 40 }
+  },
+  "craneSpeeds": {
+    "1": { "x": { "speed": 300, "accel": 80, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 70, "accel": 40, "decel": 40 } },
+    "2": { "x": { "speed": 300, "accel": 80, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 70, "accel": 40, "decel": 40 } },
+    "3": { "x": { "speed": 300, "accel": 80, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 70, "accel": 40, "decel": 40 } },
+    "4": { "x": { "speed": 300, "accel": 80, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 70, "accel": 40, "decel": 40 } },
+    "5": { "x": { "speed": 300, "accel": 80, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 70, "accel": 40, "decel": 40 } }
+  },
+  "manipulatorSpeeds": {
+    "1": { "x": { "speed": 200, "accel": 80, "decel": 80 }, "y": { "speed": 400, "accel": 40, "decel": 40 }, "z": { "speed": 50, "accel": 40, "decel": 40 } },
+    "2": { "x": { "speed": 200, "accel": 80, "decel": 80 }, "y": { "speed": 400, "accel": 40, "decel": 40 }, "z": { "speed": 50, "accel": 40, "decel": 40 } },
+    "3": { "x": { "speed": 200, "accel": 80, "decel": 80 }, "y": { "speed": 400, "accel": 40, "decel": 40 }, "z": { "speed": 50, "accel": 40, "decel": 40 } }
   },
   "relMove": {
     "defaultSpeed": 300,
@@ -38,9 +50,20 @@
   "grinding": {
     "zFactor1": 0.9537,
     "zFactor2": 0.866,
-    "safeZHeight": 250,
+    "safeZHeight": 0,
     "craneNo": 5,
     "pollIntervalMs": 500,
-    "handshakeTimeoutMs": 60000
+    "handshakeTimeoutMs": 120000
+  },
+  "skewBed": {
+    "centerDistances": {
+      "ST606": 1450, "ST607": 1450, "ST608": 1450, "ST609": 1450, "ST610": 1450,
+      "ST108": 1424, "ST109": 1450, "ST111": 1450, "ST110": 1450, "ST112": 1240
+    },
+    "largeBoreOffset": 122,
+    "smallBoreOffset": 55,
+    "manipulator1SafeY": 11500,
+    "manipulator2SafeY": 12500,
+    "manipulator3SafeY": 12500
   }
 }

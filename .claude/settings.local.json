@@ -19,7 +19,23 @@
       "Bash(\"D:\\\\python3.12.7\\\\python.exe\" -m pip install xlrd pandas -q)",
       "Bash('D:\\\\python3.12.7\\\\python.exe' -c ' *)",
       "Bash(python -c \"import xlrd; print\\('xlrd ok'\\)\")",
-      "Bash(C:\\\\Users\\\\30935\\\\Miniconda3\\\\python.exe *)"
+      "Bash(C:\\\\Users\\\\30935\\\\Miniconda3\\\\python.exe *)",
+      "Bash(find bin/Debug/net8.0-windows -name \"*.dll\" -path \"*/Syntec/*\" -o -name \"*.dll\" -path \"*/FANUC/*\")",
+      "Bash(find bin/Debug/net8.0-windows -name \"OCApi.dll\" -o -name \"Fwlib32.dll\")",
+      "Bash(git check-ignore *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(sed -i 's/if \\(codeAddr >= 1100\\) { pmcType = 0; pmcAddr = \\(ushort\\)\\(codeAddr - 1100\\); }   \\\\/\\\\/ G寄存器/if \\(codeAddr >= 1100\\) { pmcType = 1; pmcAddr = \\(ushort\\)\\(codeAddr - 1100\\); }   \\\\/\\\\/ G寄存器\\(adrType=1\\)/' Communication/DeviceServices/FanucSkewBedService.cs)",
+      "Bash(sed -i 's/else { pmcType = 1; pmcAddr = \\(ushort\\)\\(codeAddr - 1000\\); }                     \\\\/\\\\/ F寄存器/else { pmcType = 0; pmcAddr = \\(ushort\\)\\(codeAddr - 1000\\); }                     \\\\/\\\\/ F寄存器\\(adrType=0\\)/' Communication/DeviceServices/FanucSkewBedService.cs)",
+      "Bash(dotnet sln *)",
+      "Bash(grep -v \"^[0-9]*:.*//\")",
+      "Bash(awk NR>=112 && NR<=120 *)",
+      "Bash(awk NR>=505 && NR<=520 *)",
+      "Bash(sed -i 's/Console.WriteLine\\(\"│   ✓ ST019放料完成,退磁\"\\);/Console.WriteLine\\(\"│   ✓ ST019放料完成,退磁\"\\); OnBalancingRackPlaced?.Invoke\\(\"M817\", wp\\);/' Line1RearFlowEngine.cs)",
+      "Bash(sed -i 's/Console.WriteLine\\(\"│   ✓ ST010放料完成,退磁\"\\);/Console.WriteLine\\(\"│   ✓ ST010放料完成,退磁\"\\); OnBalancingRackPlaced?.Invoke\\(\"M822\", wp\\);/' Line1RearFlowEngine.cs)",
+      "Bash(cat)",
+      "Bash(python3 /tmp/fix_while.py)",
+      "Bash(perl -i -pe ' *)",
+      "Bash(awk 'NR>=806 && NR<=830' Line1RearFlowEngine.cs)"
     ]
   }
 }

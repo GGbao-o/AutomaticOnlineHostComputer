@@ -181,9 +181,8 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         /// <param name="value">32 位有符号整数值</param>
         public async Task WriteInt32Async(int startAddr, int value, CancellationToken ct = default)
         {
-            ushort lo = (ushort)(value & 0xFFFF);          // bits 0~15
-            ushort hi = (ushort)((value >> 16) & 0xFFFF);  // bits 16~31
-            // 小端：低字在前 @ startAddr，高字在后 @ startAddr+1
+            ushort lo = (ushort)(value & 0xFFFF);
+            ushort hi = (ushort)((value >> 16) & 0xFFFF);
             await WriteMultipleRegistersAsync((ushort)startAddr, new[] { lo, hi }, ct);
         }
 

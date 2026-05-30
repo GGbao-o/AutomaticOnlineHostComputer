@@ -3,13 +3,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Media;
 using AutomaticOnlineHostComputer.Communication.Clients;
-using AutomaticOnlineHostComputer.Communication.DeviceServices;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
 /// <summary>
 /// 全厂状态总览中单个站位的卡片 ViewModel。
-/// 封装站位的连接状态、设备状态、IP 显示，支持 5 秒轮询。
+/// 页面加载时连接一次、读状态、断开。线路启动后由引擎持续刷新。
 /// </summary>
 public sealed class StationCardViewModel : ObservableObject, IDisposable
 {
@@ -18,27 +17,23 @@ public sealed class StationCardViewModel : ObservableObject, IDisposable
     private readonly string _ip;
     private readonly int _port;
     private readonly string _protocol;
+    private readonly int _mcRegister; // MC协议设备探测的M寄存器地址,0=默认M800
 
     private ModbusTcpClient? _modbusClient;
-    private CancellationTokenSource? _pollCts;
     private bool _disposed;
 
     // ═══════════════════════════════════════════════════════════════
     //  构造
     // ═══════════════════════════════════════════════════════════════
 
-    /// <param name="stationCode">站号（如 ST401）</param>
-    /// <param name="stationName">站名（如"一号双头镗"）</param>
-    /// <param name="ip">IP 地址，空字符串或"未配置IP"表示暂无连接</param>
-    /// <param name="port">端口</param>
-    /// <param name="protocol">协议名（ModbusTCP/FOCAS/Syntec/三菱MC/文件握手）</param>
-    public StationCardViewModel(string stationCode, string stationName, string ip, int port, string protocol)
+    public StationCardViewModel(string stationCode, string stationName, string ip, int port, string protocol, int mcRegister = 0)
     {
         _stationCode = stationCode;
         _stationName = stationName;
         _ip = ip;
         _port = port;
         _protocol = protocol;
+        _mcRegister = mcRegister;
 
         Title = stationName;
         UpdateIpDisplay();
@@ -48,162 +43,206 @@ public sealed class StationCardViewModel : ObservableObject, IDisposable
     //  绑定属性
     // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>卡片标题（站名）</summary>
     private string _title = string.Empty;
     public string Title { get => _title; private set => SetField(ref _title, value); }
 
-    /// <summary>第 1 行：连接/设备状态文本</summary>
-    private string _status1 = "等待配置";
+    private string _status1 = "等待探测";
     public string Status1 { get => _status1; set => SetField(ref _status1, value); }
 
-    /// <summary>第 2 行：设备状态补充信息</summary>
     private string _status2 = "—";
     public string Status2 { get => _status2; set => SetField(ref _status2, value); }
 
-    /// <summary>IP 地址显示文本</summary>
     private string _ipText = "未配置IP";
     public string IpText { get => _ipText; set => SetField(ref _ipText, value); }
 
-    /// <summary>连接指示灯颜色</summary>
     private Brush _connectedBrush = Brushes.Gray;
     public Brush ConnectedBrush { get => _connectedBrush; set => SetField(ref _connectedBrush, value); }
 
-    /// <summary>Status1 文字颜色</summary>
     private Brush _status1Brush = Brushes.Black;
     public Brush Status1Brush { get => _status1Brush; set => SetField(ref _status1Brush, value); }
 
-    /// <summary>Status2 文字颜色</summary>
     private Brush _status2Brush = Brushes.Black;
     public Brush Status2Brush { get => _status2Brush; set => SetField(ref _status2Brush, value); }
 
     // ═══════════════════════════════════════════════════════════════
-    //  公共方法
+    //  公共
     // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>是否有有效 IP（可以尝试连接）</summary>
+    public string StationCode => _stationCode;
     public bool HasIp => !string.IsNullOrWhiteSpace(_ip) && _ip != "未配置IP";
 
     /// <summary>
-    /// 启动轮询：Modbus TCP 设备尝试连接并 5s 轮询状态。
-    /// 无 IP 则显示"等待配置"。
+    /// 页面加载时调用：连一次 → 读 D5006~D5010 → 更新属性 → 断开。
+    /// 不重试不轮询。线路启动后由引擎接管刷新。
     /// </summary>
     public async Task StartPollingAsync()
     {
+        // FANUC FOCAS 设备(端口8193) — 用FOCAS协议探测
+        if (_port == 8193 || _protocol.Contains("FANUC", StringComparison.OrdinalIgnoreCase))
+        {
+            await ProbeFanucAsync();
+            return;
+        }
+
+        // MC 协议设备(端口9000) — 不单独探测, 引擎接管(避免多连接抢PLC)
+        if (_port == 9000)
+        {
+            Status1 = "引擎托管";
+            Status2 = $"{_ip}:9000";
+            ConnectedBrush = Brushes.Gray;
+            Status1Brush = Brushes.Gray;
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} MC设备({_ip}:9000)，跳过探测，由引擎托管");
+            return;
+        }
+
         if (!HasIp)
         {
-            Status1 = "等待IP";
+            Status1 = "无IP";
             Status2 = "—";
             ConnectedBrush = Brushes.Gray;
             Status1Brush = Brushes.Gray;
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} 无IP，跳过探测");
             return;
         }
 
         try
         {
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} 一次性探测 {_ip}:{_port}...");
             _modbusClient = new ModbusTcpClient(_ip, _port);
-            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} 连接中 IP={_ip}:{_port}...");
-            await _modbusClient.ConnectAsync();
-            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} 连接成功");
+            using var cts = new CancellationTokenSource(4000);
+            await _modbusClient.ConnectAsync(cts.Token);
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} TCP连接成功 ✓");
 
-            ConnectedBrush = Brushes.LimeGreen;
-            Status1 = "已连接";
-            Status1Brush = Brushes.Green;
-            Status2 = $"{_protocol} :{_port}";
+            // 读 D5006~D5010: [Busy][Step][Mode][Fault][Cond]
+            var result = await _modbusClient.ReadAsync(5006, 5, cts.Token);
+            if (result != null && result.IntValues.Length >= 5)
+            {
+                int busy  = result.IntValues[0];
+                int fault = result.IntValues[3];
+                int cond  = result.IntValues[4];
 
-            _pollCts = new CancellationTokenSource();
-            _ = PollLoopAsync(_pollCts.Token);
+                bool hasFault = fault != 0;
+                ConnectedBrush = hasFault ? Brushes.Red : Brushes.LimeGreen;
+                Status1Brush = hasFault ? Brushes.Red : Brushes.Green;
+                Status1 = hasFault ? "故障" : (busy == 1 ? "运行中" : "空闲");
+                Status2 = hasFault ? $"报警 D5009={fault}" : $"就绪 条件={cond}";
+                Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} ✔ 读成功 busy={busy} fault={fault}");
+            }
+            else
+            {
+                SetFailed("无响应");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} 连接超时(4s)");
+            SetFailed("连接超时");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} 连接失败：{ex.Message}");
-            Status1 = "连接失败";
-            Status2 = "检查网络/IP";
-            ConnectedBrush = Brushes.Red;
-            Status1Brush = Brushes.Red;
-
-            // 即使首次连接失败也启动轮询（带退避重连）
-            _pollCts = new CancellationTokenSource();
-            _ = PollLoopAsync(_pollCts.Token);
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} 探测失败: {ex.GetType().Name} — {ex.Message}");
+            SetFailed(ex.Message.Length > 25 ? ex.Message[..25] : ex.Message);
         }
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  轮询循环
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// 5 秒间隔轮询：尝试重连 → 读取设备状态 → 更新 UI。
-    /// 连接失败时指数退避（5s→10s→20s→30s max），成功后重置为 5s。
-    /// </summary>
-    private async Task PollLoopAsync(CancellationToken ct)
-    {
-        int reconnectDelay = 5000;
-        const int delayInit = 5000;
-        const int delayMax = 30000;
-
-        while (!ct.IsCancellationRequested)
+        finally
         {
-            try
+            // 断开连接
+            if (_modbusClient != null)
             {
-                if (_modbusClient == null || !_modbusClient.IsConnected)
-                {
-                    if (!HasIp) { await Task.Delay(5000, ct); continue; }
-
-                    Console.WriteLine($"[StationCard] [{_stationCode}] 未连接，尝试重连...");
-                    // 断开旧连接释放 TCP 资源，避免泄漏累积耗尽 PLC 连接数
-                    if (_modbusClient != null)
-                    {
-                        try { await _modbusClient.DisposeAsync(); }
-                        catch (Exception ex) { Console.WriteLine($"[StationCard] [{_stationCode}] 释放旧连接异常：{ex.Message}"); }
-                    }
-                    _modbusClient = new ModbusTcpClient(_ip, _port);
-                    await _modbusClient.ConnectAsync(ct);
-                    Console.WriteLine($"[StationCard] [{_stationCode}] 重连成功");
-                    reconnectDelay = delayInit;
-                }
-
-                // 读取设备状态：D5006（忙闲）~D5010（条件缺失），共 5 个寄存器
-                // IntValues: [0]=D5006(Busy),[1]=D5007(步骤),[2]=D5008(模式),[3]=D5009(故障),[4]=D5010(条件)
-                var result = await _modbusClient.ReadAsync(5006, 5, ct);
-                if (result != null && result.IntValues.Length >= 5)
-                {
-                    int busy  = result.IntValues[0];  // D5006: 忙碌=1, 空闲=0
-                    int fault = result.IntValues[3];  // D5009: 故障=1, 正常=0
-                    int cond  = result.IntValues[4];  // D5010: 运行条件缺失
-
-                    bool hasFault = fault != 0;
-                    ConnectedBrush = hasFault ? Brushes.Red : Brushes.LimeGreen;
-                    Status1Brush = hasFault ? Brushes.Red : Brushes.Green;
-                    Status1 = hasFault ? "故障" : (busy == 1 ? "运行中" : "空闲");
-                    Status2 = hasFault ? $"报警 D5009={fault}" : (busy == 1 ? "加工中" : $"条件={cond}");
-                }
-
-                await Task.Delay(delayInit, ct);
+                try { await _modbusClient.DisposeAsync(); }
+                catch (Exception ex) { Console.WriteLine($"[StationCard] [{_stationCode}] 断开异常: {ex.Message}"); }
+                _modbusClient = null;
             }
-            catch (TimeoutException ex)
-            {
-                Console.WriteLine($"[StationCard] [{_stationCode}] 连接超时：{ex.Message}");
-                SetDisconnected();
-                await Task.Delay(reconnectDelay, ct);
-                reconnectDelay = Math.Min(reconnectDelay * 2, delayMax);
-            }
-            catch (OperationCanceledException) { break; }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[StationCard] [{_stationCode}] 通信异常：{ex.Message}");
-                SetDisconnected();
-                await Task.Delay(reconnectDelay, ct);
-                reconnectDelay = Math.Min(reconnectDelay * 2, delayMax);
-            }
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} 探测结束，已断开 ✓");
         }
     }
 
-    private void SetDisconnected()
+    /// <summary>FANUC FOCAS 设备一次性探测: 连接→读CNC状态(statinfo)→断开。</summary>
+    private async Task ProbeFanucAsync()
     {
-        ConnectedBrush = Brushes.Gray;
-        Status1 = "断开";
-        Status1Brush = Brushes.Gray;
-        Status2 = "等待重连...";
+        if (!HasIp) { SetFailed("无IP"); return; }
+        FanucFocasClient? focas = null;
+        try
+        {
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} FANUC探测 {_ip}:{_port}...");
+            focas = new FanucFocasClient(_ip, (ushort)_port, 5);
+            using var cts = new CancellationTokenSource(5000);
+            var (ok, status) = await focas.ProbeAsync(cts.Token);
+            if (ok)
+            {
+                ConnectedBrush = Brushes.LimeGreen;
+                Status1 = "就绪";
+                Status1Brush = Brushes.Green;
+                Status2 = status;
+                Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} ✔ FANUC探测成功: {status}");
+            }
+            else
+            {
+                SetFailed(status);
+                Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} FANUC探测失败: {status}");
+            }
+        }
+        catch (OperationCanceledException) { SetFailed("FANUC连接超时"); }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} FANUC探测异常: {ex.GetType().Name} — {ex.Message}");
+            SetFailed(ex.Message.Length > 25 ? ex.Message[..25] : ex.Message);
+        }
+        finally
+        {
+            if (focas != null) { try { await focas.DisposeAsync(); } catch { } }
+        }
+    }
+
+    /// <summary>MC 协议设备一次性探测: 连→读指定M寄存器→断。</summary>
+    private async Task ProbeMcAsync()
+    {
+        if (!HasIp) { SetFailed("无IP"); return; }
+        MitsubishiMcClient? mc = null;
+        try
+        {
+            int mAddr = _mcRegister > 0 ? _mcRegister : 800;
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} MC探测 {_ip}:{_port} M{mAddr}...");
+            mc = new MitsubishiMcClient(_ip, _port, MitsubishiMcClient.DeviceM,
+                frameType: MitsubishiMcClient.McFrameType.A1E) { UseBitReadForM = false };
+            using var cts = new CancellationTokenSource(4000);
+            await mc.ConnectAsync(cts.Token);
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} MC连接成功 ✓");
+
+            // 读指定M地址: M816+从M800读2字取bit, M900+用位读, 其他直接读
+            int val;
+            if (mAddr >= 816 && mAddr <= 831)
+            {
+                var result = await mc.ReadAsync(800, 2, cts.Token); // M800起2字=32bit
+                int word2 = result.IntValues.Length > 1 ? result.IntValues[1] : 0;
+                val = (word2 & (1 << (mAddr - 816))) != 0 ? 1 : 0;
+            }
+            else if (mAddr >= 900) { mc.UseBitReadForM = true; var r = await mc.ReadAsync(mAddr, 1, cts.Token); val = r.IntValues.Length > 0 ? r.IntValues[0] : 0; }
+            else { var r = await mc.ReadAsync(mAddr, 1, cts.Token); val = r.IntValues.Length > 0 ? r.IntValues[0] : 0; }
+            bool hasPlate = val != 0;
+            ConnectedBrush = Brushes.LimeGreen;
+            Status1 = hasPlate ? "有版" : "空闲";
+            Status1Brush = hasPlate ? Brushes.Orange : Brushes.Green;
+            Status2 = $"M{mAddr}={val}";
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} ✔ MC探测成功 M{mAddr}={val}");
+        }
+        catch (OperationCanceledException) { SetFailed("MC连接超时"); }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} MC探测失败: {ex.GetType().Name} — {ex.Message}");
+            SetFailed(ex.Message.Length > 25 ? ex.Message[..25] : ex.Message);
+        }
+        finally
+        {
+            if (mc != null) { try { await mc.DisconnectAsync(); await mc.DisposeAsync(); } catch { } }
+        }
+    }
+
+    private void SetFailed(string reason)
+    {
+        ConnectedBrush = Brushes.Red;
+        Status1 = "无法连接";
+        Status1Brush = Brushes.Red;
+        Status2 = reason;
     }
 
     private void UpdateIpDisplay()
@@ -215,13 +254,10 @@ public sealed class StationCardViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _pollCts?.Cancel();
-        _pollCts?.Dispose();
-        // DisposeAsync 断开 TCP + 释放 SemaphoreSlim 内核对象
         if (_modbusClient != null)
         {
             _ = _modbusClient.DisposeAsync();
-            Console.WriteLine($"[StationCard] [{_stationCode}] 已释放 TCP + 锁");
+            Console.WriteLine($"[StationCard] [{_stationCode}] 已释放");
         }
     }
 }

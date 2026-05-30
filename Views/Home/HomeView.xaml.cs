@@ -47,10 +47,10 @@ public partial class HomeView : UserControl
     /// <param name="e"></param>
     private void RouteSelect_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new RouteSelectDialog
+        var dialog = new RouteSelectDialog { Owner = Window.GetWindow(this) };
+        if (dialog.ShowDialog() == true && DataContext is HomeViewModel vm)
         {
-            Owner = Window.GetWindow(this)
-        };
-        dialog.ShowDialog();
+            vm.DefaultRouteLine = dialog.SelectedLine;
+        }
     }
 }

@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.Contracts;
@@ -210,72 +213,69 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
 
         private static class SyntecApi
         {
-            // ── 如果 Syntec.OpenCNC.dll 是托管程序集，取消下方注释并直接调用 ──
-            // private static Syntec.Remote.SyntecRemoteCNC GetCnc(string ip) => new(ip);
+            // ── 缓存：每个 IP 对应一个 SyntecRemoteCNC 实例, 避免重复创建 ──
+            private static readonly Dictionary<string, object> _instances = new();
+            private static Type? _cncType;
+            private static readonly object _initLock = new();
 
-            /// <summary>读取单个宏变量。返回 0=成功，非0=错误码。</summary>
-            public static short READ_macro_single(string ip, int index, out double data)
+            /// <summary>获取或创建指定 IP 的 CNC 实例 (延迟加载+缓存)</summary>
+            private static object GetInstance(string ip)
             {
-                // TODO: 将下方替换为真实 SDK 调用
-                // var cnc = new Syntec.Remote.SyntecRemoteCNC(ip);
-                // return cnc.READ_macro_single(index, out data);
-                data = 0;
-                return InvokeManaged<short>(ip, "READ_macro_single", new object[] { index, null! });
+                if (_instances.TryGetValue(ip, out var inst)) return inst;
+                lock (_initLock)
+                {
+                    if (_instances.TryGetValue(ip, out inst)) return inst;
+                    if (_cncType == null)
+                    {
+                        var asm = System.Reflection.Assembly.LoadFrom("Syntec.OpenCNC.dll");
+                        _cncType = asm.GetType("Syntec.Remote.SyntecRemoteCNC")
+                                   ?? throw new DllNotFoundException("未找到 Syntec.Remote.SyntecRemoteCNC 类型");
+                    }
+                    inst = Activator.CreateInstance(_cncType, ip)!;
+                    _instances[ip] = inst;
+                    return inst;
+                }
             }
 
-            /// <summary>写入单个宏变量。</summary>
-            public static short WRITE_macro_single(string ip, int index, double data)
-            {
-                return InvokeManaged<short>(ip, "WRITE_macro_single", new object[] { index, data });
-            }
-
-            /// <summary>批量写入宏变量。</summary>
-            public static short WRITE_macro_all(string ip, int[] indexArray, double[] dataArray)
-            {
-                return InvokeManaged<short>(ip, "WRITE_macro_all", new object[] { indexArray, dataArray });
-            }
-
-            /// <summary>读取 R 区寄存器（Int 类型，dataType=2）。</summary>
-            public static short READ_plc_r(string ip, int startAddr, int endAddr, out int[] values)
-            {
-                // TODO: 将下方替换为真实 SDK 调用
-                // var cnc = new Syntec.Remote.SyntecRemoteCNC(ip);
-                // short type; byte[] b=null; short[] s=null; int[] iv=null;
-                // short ret = cnc.READ_plc_addr("R", startAddr, endAddr, out type, out b, out s, out iv);
-                // values = iv; return ret;
-                values = Array.Empty<int>();
-                return InvokeManaged<short>(ip, "READ_plc_r", new object[] { startAddr, endAddr, null! });
-            }
-
-            /// <summary>写入 R 区寄存器（Int 类型，dataType=2）。</summary>
-            public static short WRITE_plc_r(string ip, int startAddr, int endAddr, int[] values)
-            {
-                return InvokeManaged<short>(ip, "WRITE_plc_r", new object[] { startAddr, endAddr, values });
-            }
-
-            /// <summary>
-            /// 通过反射动态调用 Syntec.OpenCNC.dll 中的方法。
-            /// 避免项目强依赖 SDK，使 CI 环境也能编译通过。
-            /// </summary>
-            private static T InvokeManaged<T>(string ip, string methodName, object[] args)
+            private static object Invoke(string ip, string methodName, object[] args)
             {
                 try
                 {
-                    // 加载 Syntec.OpenCNC.dll（程序集需在输出目录）
-                    var asm   = System.Reflection.Assembly.LoadFrom("Syntec.OpenCNC.dll");
-                    var type  = asm.GetType("Syntec.Remote.SyntecRemoteCNC")
-                                ?? throw new DllNotFoundException("未找到 Syntec.Remote.SyntecRemoteCNC 类型");
-                    var inst  = Activator.CreateInstance(type, ip)!;
-                    var mi    = type.GetMethod(methodName)
-                                ?? throw new MissingMethodException(type.Name, methodName);
-                    var result = mi.Invoke(inst, args);
-                    return result is T t ? t : default!;
+                    var inst = GetInstance(ip);
+                    var mi = _cncType!.GetMethod(methodName)
+                              ?? throw new MissingMethodException(_cncType.Name, methodName);
+                    return mi.Invoke(inst, args);
                 }
-                catch (Exception ex)
-                {
-                    throw new InvalidOperationException($"Syntec SDK 调用 {methodName} 失败：{ex.Message}", ex);
-                }
+                catch (TargetInvocationException ex) { throw ex.InnerException ?? ex; }
             }
+
+            // ═══════════════ 宏变量 ────────────────────────────
+            public static short READ_macro_single(string ip, int index, out double data)
+            {
+                var args = new object[] { index, 0.0 };
+                var ret = Convert.ToInt16(Invoke(ip, "READ_macro_single", args));
+                data = (double)args[1];
+                return ret;
+            }
+            public static short WRITE_macro_single(string ip, int index, double data)
+                => Convert.ToInt16(Invoke(ip, "WRITE_macro_single", new object[] { index, data }));
+            public static short WRITE_macro_all(string ip, int[] indexArray, double[] dataArray)
+                => Convert.ToInt16(Invoke(ip, "WRITE_macro_all", new object[] { indexArray, dataArray }));
+
+            // ═══════════════ R 区寄存器 (READ_plc_addr / WRITE_plc_addr) ──
+            // SDK签名: READ_plc_addr(string dev, int start, int end, out short type, out byte[] b, out short[] s, out int[] iv)
+            public static short READ_plc_r(string ip, int startAddr, int endAddr, out int[] values)
+            {
+                var args = new object[] { "R", startAddr, endAddr, (short)0, null!, null!, null! };
+                var ret = Convert.ToInt16(Invoke(ip, "READ_plc_addr", args));
+                values = (int[])args[6];
+                return ret;
+            }
+            // R区写: WRITE_plc_addr(string dev, int start, int end, short type, byte[]B, short[]S, int[]I)
+            // R区类型为Int(type=2), 所以填I数组
+            public static short WRITE_plc_r(string ip, int startAddr, int endAddr, int[] values)
+                => Convert.ToInt16(Invoke(ip, "WRITE_plc_addr",
+                    new object[] { "R", startAddr, endAddr, (short)2, null!, null!, values }));
         }
     }
 }

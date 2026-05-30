@@ -27,16 +27,38 @@
             Background="#FFF7ED"
             BorderBrush="#F59E0B"
             BorderThickness="1">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Left" Text="" />
+            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
                 <Button
                     Width="96"
                     Height="28"
                     Margin="0,0,2,0"
                     Click="RouteSelect_Click"
-                    Content="线路选取"
-                    DockPanel.Dock="Right" />
-            </DockPanel>
+                    Content="线路选取" />
+                <Button
+                    Width="90"
+                    Height="28"
+                    Margin="2"
+                    Command="{Binding Line1ToggleCommand}"
+                    Content="{Binding Line1ToggleText}" />
+                <Button
+                    Width="90"
+                    Height="28"
+                    Margin="2"
+                    Command="{Binding Line2ToggleCommand}"
+                    Content="{Binding Line2ToggleText}" />
+                <Button
+                    Width="84"
+                    Height="28"
+                    Margin="2"
+                    Command="{Binding GrindingToggleCommand}"
+                    Content="{Binding GrindingToggleText}" />
+                <Button
+                    Width="84"
+                    Height="28"
+                    Margin="2"
+                    Command="{Binding BalancingToggleCommand}"
+                    Content="{Binding BalancingToggleText}" />
+            </StackPanel>
         </Border>
         <!--  第一部分  -->
         <Border
@@ -59,22 +81,14 @@
                         Margin="2"
                         Click="AddTask_Click"
                         Content="添加任务" />
+
                     <Button
-                        Width="90"
+                        Width="110"
                         Height="30"
                         Margin="2"
-                        Command="{Binding Line1ToggleCommand}"
-                        Content="{Binding Line1ToggleText}" />
-                    <Button
-                        Width="90"
-                        Height="30"
-                        Margin="2"
-                        Content="启动二号线" />
-                    <Button
-                        Width="84"
-                        Height="30"
-                        Margin="2"
-                        Content="启动研磨" />
+                        Command="{Binding TestRearPickupCommand}"
+                        Content="测试后天车取料" />
+
                 </StackPanel>
                 <DataGrid
                     Grid.Row="1"
@@ -191,37 +205,183 @@
                         VerticalAlignment="Center"
                         Text="手动控制模式" />
 
-                    <!--  相对运动 速度/加减速设置（每轴独立）  -->
-                    <TextBlock Grid.Row="2" Margin="4" VerticalAlignment="Center" Text="相对速X" />
-                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
-                        <TextBox Width="45" Margin="0,4,2,4" Text="{Binding ManualControl.RelSpeedX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelAccelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelDecelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Margin="6,4,2,4" VerticalAlignment="Center" Text="Y" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelSpeedY, Mode=TwoWay}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelAccelY, Mode=TwoWay}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelDecelY, Mode=TwoWay}" />
-                        <TextBlock Margin="6,4,2,4" VerticalAlignment="Center" Text="Z" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelSpeedZ, Mode=TwoWay}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelAccelZ, Mode=TwoWay}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.RelDecelZ, Mode=TwoWay}" />
-                    </StackPanel>
-                    <Button Grid.Row="2" Grid.Column="2" Width="70" Height="26" Margin="4,0"
-                            VerticalAlignment="Center" Command="{Binding ManualControl.SetRelSpeedCommand}" Content="应用速度" />
+                    <!--  ~1~  相对运动 速度/加减速设置（每轴独立）  @1@  -->
+                    <!--  <TextBlock  -->
+                    <!--  Grid.Row="2"  -->
+                    <!--  Margin="4"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Text="相对速X" />  -->
+                    <!--  <StackPanel  -->
+                    <!--  Grid.Row="2"  -->
+                    <!--  Grid.Column="1"  -->
+                    <!--  Orientation="Horizontal">  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="45"  -->
+                    <!--  Margin="0,4,2,4"  -->
+                    <!--  Text="{Binding ManualControl.RelSpeedX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Text="加" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="45"  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  Text="{Binding ManualControl.RelAccelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Text="减" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="45"  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  Text="{Binding ManualControl.RelDecelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="6,4,2,4"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Text="Y" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="45"  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  Text="{Binding ManualControl.RelSpeedY, Mode=TwoWay}" />  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Text="加" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="45"  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  Text="{Binding ManualControl.RelAccelY, Mode=TwoWay}" />  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Text="减" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="45"  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  Text="{Binding ManualControl.RelDecelY, Mode=TwoWay}" />  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="6,4,2,4"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Text="Z" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="45"  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  Text="{Binding ManualControl.RelSpeedZ, Mode=TwoWay}" />  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Text="加" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="45"  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  Text="{Binding ManualControl.RelAccelZ, Mode=TwoWay}" />  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Text="减" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="45"  -->
+                    <!--  Margin="2,4"  -->
+                    <!--  Text="{Binding ManualControl.RelDecelZ, Mode=TwoWay}" />  -->
+                    <!-- </StackPanel> -->
+                    <!--  <Button  -->
+                    <!--  Grid.Row="2"  -->
+                    <!--  Grid.Column="2"  -->
+                    <!--  Width="70"  -->
+                    <!--  Height="26"  -->
+                    <!--  Margin="4,0"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Command="{Binding ManualControl.SetRelSpeedCommand}"  -->
+                    <!--  Content="应用速度" />  -->
 
                     <!--  绝对运动 速度设置(绝对移动用，每轴独立)  -->
-                    <TextBlock Grid.Row="3" Margin="4" VerticalAlignment="Center" Text="绝对速X" />
-                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
-                        <TextBox Width="45" Margin="0,4,2,4" Text="{Binding ManualControl.AbsSpeedX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsAccelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsDecelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Margin="6,4,2,4" VerticalAlignment="Center" Text="Y" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsSpeedY, Mode=TwoWay}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsAccelY, Mode=TwoWay}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsDecelY, Mode=TwoWay}" />
-                        <TextBlock Margin="6,4,2,4" VerticalAlignment="Center" Text="Z" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsSpeedZ, Mode=TwoWay}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="加" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsAccelZ, Mode=TwoWay}" />
-                        <TextBlock Margin="2,4" VerticalAlignment="Center" Text="减" /><TextBox Width="45" Margin="2,4" Text="{Binding ManualControl.AbsDecelZ, Mode=TwoWay}" />
+                    <TextBlock
+                        Grid.Row="3"
+                        Margin="4"
+                        VerticalAlignment="Center"
+                        Text="绝对速X" />
+                    <StackPanel
+                        Grid.Row="3"
+                        Grid.Column="1"
+                        Orientation="Horizontal">
+                        <TextBox
+                            Width="45"
+                            Margin="0,4,2,4"
+                            Text="{Binding ManualControl.AbsSpeedX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock
+                            Margin="2,4"
+                            VerticalAlignment="Center"
+                            Text="加" />
+                        <TextBox
+                            Width="45"
+                            Margin="2,4"
+                            Text="{Binding ManualControl.AbsAccelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock
+                            Margin="2,4"
+                            VerticalAlignment="Center"
+                            Text="减" />
+                        <TextBox
+                            Width="45"
+                            Margin="2,4"
+                            Text="{Binding ManualControl.AbsDecelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock
+                            Margin="6,4,2,4"
+                            VerticalAlignment="Center"
+                            Text="Y" />
+                        <TextBox
+                            Width="45"
+                            Margin="2,4"
+                            Text="{Binding ManualControl.AbsSpeedY, Mode=TwoWay}" />
+                        <TextBlock
+                            Margin="2,4"
+                            VerticalAlignment="Center"
+                            Text="加" />
+                        <TextBox
+                            Width="45"
+                            Margin="2,4"
+                            Text="{Binding ManualControl.AbsAccelY, Mode=TwoWay}" />
+                        <TextBlock
+                            Margin="2,4"
+                            VerticalAlignment="Center"
+                            Text="减" />
+                        <TextBox
+                            Width="45"
+                            Margin="2,4"
+                            Text="{Binding ManualControl.AbsDecelY, Mode=TwoWay}" />
+                        <TextBlock
+                            Margin="6,4,2,4"
+                            VerticalAlignment="Center"
+                            Text="Z" />
+                        <TextBox
+                            Width="45"
+                            Margin="2,4"
+                            Text="{Binding ManualControl.AbsSpeedZ, Mode=TwoWay}" />
+                        <TextBlock
+                            Margin="2,4"
+                            VerticalAlignment="Center"
+                            Text="加" />
+                        <TextBox
+                            Width="45"
+                            Margin="2,4"
+                            Text="{Binding ManualControl.AbsAccelZ, Mode=TwoWay}" />
+                        <TextBlock
+                            Margin="2,4"
+                            VerticalAlignment="Center"
+                            Text="减" />
+                        <TextBox
+                            Width="45"
+                            Margin="2,4"
+                            Text="{Binding ManualControl.AbsDecelZ, Mode=TwoWay}" />
                     </StackPanel>
-                    <Button Grid.Row="3" Grid.Column="2" Width="70" Height="26" Margin="4,0"
-                            VerticalAlignment="Center" Command="{Binding ManualControl.SetAbsSpeedCommand}" Content="应用速度" />
+                    <Button
+                        Grid.Row="3"
+                        Grid.Column="2"
+                        Width="70"
+                        Height="26"
+                        Margin="4,0"
+                        VerticalAlignment="Center"
+                        Command="{Binding ManualControl.SetAbsSpeedCommand}"
+                        Content="应用速度" />
 
                     <!--  绝对位移 目标坐标 + 移动按钮  -->
                     <TextBlock
@@ -670,50 +830,114 @@
                     </UniformGrid>
 
                     <!--  研磨自动流程控制栏  -->
-                    <Border Margin="0,6,0,0" Padding="6" CornerRadius="4"
-                            Background="#1A3A5C" BorderBrush="#2C86C8" BorderThickness="1">
+                    <Border
+                        Margin="0,6,0,0"
+                        Padding="6"
+                        Background="#1A3A5C"
+                        BorderBrush="#2C86C8"
+                        BorderThickness="1"
+                        CornerRadius="4">
                         <UniformGrid Columns="10" Rows="1">
-                            <!-- 启动/暂停 -->
-                            <Button Width="100" Height="30"
-                                    Command="{Binding GrindingToggleCommand}"
-                                    Background="#2C86C8"
-                                    Foreground="White" FontWeight="Bold" FontSize="13"
-                                    Content="{Binding GrindingToggleText}" />
-                            <TextBlock Text="│" VerticalAlignment="Center" HorizontalAlignment="Center"
-                                       Foreground="#4A6A8A" FontSize="20" />
-                            <!-- 工件缓存输入 -->
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-                                <TextBlock Text="直径:" VerticalAlignment="Center" Foreground="White" Margin="0,0,3,0" />
-                                <TextBox Width="50" Height="24" FontSize="12"
-                                         Text="{Binding CachedDiameter, UpdateSourceTrigger=PropertyChanged}" />
+                            <!--  启动/暂停  -->
+                            <Button
+                                Width="100"
+                                Height="30"
+                                Background="#2C86C8"
+                                Command="{Binding GrindingToggleCommand}"
+                                Content="{Binding GrindingToggleText}"
+                                FontSize="13"
+                                FontWeight="Bold"
+                                Foreground="White" />
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="#4A6A8A"
+                                Text="│" />
+                            <!--  工件缓存输入  -->
+                            <StackPanel
+                                Margin="4,0"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal">
+                                <TextBlock
+                                    Margin="0,0,3,0"
+                                    VerticalAlignment="Center"
+                                    Foreground="White"
+                                    Text="直径:" />
+                                <TextBox
+                                    Width="50"
+                                    Height="24"
+                                    FontSize="12"
+                                    Text="{Binding CachedDiameter, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-                                <TextBlock Text="版孔(1大2小):" VerticalAlignment="Center" Foreground="White" Margin="0,0,3,0" />
-                                <TextBox Width="36" Height="24" FontSize="12"
-                                         Text="{Binding CachedBoreType, UpdateSourceTrigger=PropertyChanged}" />
+                            <StackPanel
+                                Margin="4,0"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal">
+                                <TextBlock
+                                    Margin="0,0,3,0"
+                                    VerticalAlignment="Center"
+                                    Foreground="White"
+                                    Text="版孔(1大2小):" />
+                                <TextBox
+                                    Width="36"
+                                    Height="24"
+                                    FontSize="12"
+                                    Text="{Binding CachedBoreType, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-                                <TextBlock Text="长度:" VerticalAlignment="Center" Foreground="White" Margin="0,0,3,0" />
-                                <TextBox Width="50" Height="24" FontSize="12"
-                                         Text="{Binding CachedLength, UpdateSourceTrigger=PropertyChanged}" />
+                            <StackPanel
+                                Margin="4,0"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal">
+                                <TextBlock
+                                    Margin="0,0,3,0"
+                                    VerticalAlignment="Center"
+                                    Foreground="White"
+                                    Text="长度:" />
+                                <TextBox
+                                    Width="50"
+                                    Height="24"
+                                    FontSize="12"
+                                    Text="{Binding CachedLength, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
-                            <!-- 写入/清空缓存 -->
-                            <Button Width="80" Height="28"
-                                    Command="{Binding WriteCacheCommand}"
-                                    Background="#FF8C00" Foreground="White" FontWeight="Bold"
-                                    Content="写入缓存" />
-                            <Button Width="80" Height="28"
-                                    Command="{Binding ClearCacheCommand}"
-                                    Background="#8B0000" Foreground="White" FontWeight="Bold"
-                                    Content="清空缓存" />
-                            <!-- 已缓存数量 -->
-                            <Border Width="36" Height="28" CornerRadius="4" Background="#333"
-                                    HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding CachedWorkpieceCount}" FontSize="18"
-                                           FontWeight="Bold" Foreground="#FFD700"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <!--  写入/清空缓存  -->
+                            <Button
+                                Width="80"
+                                Height="28"
+                                Background="#FF8C00"
+                                Command="{Binding WriteCacheCommand}"
+                                Content="写入缓存"
+                                FontWeight="Bold"
+                                Foreground="White" />
+                            <Button
+                                Width="80"
+                                Height="28"
+                                Background="#8B0000"
+                                Command="{Binding ClearCacheCommand}"
+                                Content="清空缓存"
+                                FontWeight="Bold"
+                                Foreground="White" />
+                            <!--  已缓存数量  -->
+                            <Border
+                                Width="36"
+                                Height="28"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="#333"
+                                CornerRadius="4">
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="18"
+                                    FontWeight="Bold"
+                                    Foreground="#FFD700"
+                                    Text="{Binding CachedWorkpieceCount}" />
                             </Border>
-                            <TextBlock Text="个待处理" VerticalAlignment="Center" Foreground="#AAA" Margin="4,0,0,0" />
+                            <TextBlock
+                                Margin="4,0,0,0"
+                                VerticalAlignment="Center"
+                                Foreground="#AAA"
+                                Text="个待处理" />
                             <Border />
                         </UniformGrid>
                     </Border>
@@ -832,48 +1056,100 @@
                     </UniformGrid>
 
                     <!--  研磨参数写入面板（测试用）  -->
-                    <Border Margin="0,6,0,0" Padding="6" CornerRadius="4"
-                            Background="#1A3A5C" BorderBrush="#2C86C8" BorderThickness="1">
+                    <Border
+                        Margin="0,6,0,0"
+                        Padding="6"
+                        Background="#1A3A5C"
+                        BorderBrush="#2C86C8"
+                        BorderThickness="1"
+                        CornerRadius="4">
                         <StackPanel>
-                            <TextBlock Margin="0,0,0,6" FontSize="13" FontWeight="Bold"
-                                       Foreground="#FFD700"
-                                       Text="研磨参数写入（测试） — 写入版辊直径/版孔/长度到 PLC Word 寄存器" />
+                            <TextBlock
+                                Margin="0,0,0,6"
+                                FontSize="13"
+                                FontWeight="Bold"
+                                Foreground="#FFD700"
+                                Text="研磨参数写入（测试） — 写入版辊直径/版孔/长度到 PLC Word 寄存器" />
                             <UniformGrid Columns="7" Rows="1">
-                                <!-- 研磨机选择 -->
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-                                    <TextBlock Text="目标：" VerticalAlignment="Center" Foreground="White" Margin="0,0,4,0" />
-                                    <ComboBox Width="120" Height="26" FontSize="12"
-                                              SelectedIndex="{Binding GrinderParamIndex}">
+                                <!--  研磨机选择  -->
+                                <StackPanel
+                                    Margin="4,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <TextBlock
+                                        Margin="0,0,4,0"
+                                        VerticalAlignment="Center"
+                                        Foreground="White"
+                                        Text="目标：" />
+                                    <ComboBox
+                                        Width="120"
+                                        Height="26"
+                                        FontSize="12"
+                                        SelectedIndex="{Binding GrinderParamIndex}">
                                         <ComboBoxItem Content="研磨机1(新代)" />
                                         <ComboBoxItem Content="研磨机2(新代)" />
                                         <ComboBoxItem Content="研磨机3(西门子)" />
                                         <ComboBoxItem Content="研磨机4(西门子)" />
                                     </ComboBox>
                                 </StackPanel>
-                                <!-- 直径 -->
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-                                    <TextBlock Text="直径(mm):" VerticalAlignment="Center" Foreground="White" Margin="0,0,4,0" />
-                                    <TextBox Width="65" Height="24" FontSize="12"
-                                             Text="{Binding GrinderDiameter, UpdateSourceTrigger=PropertyChanged}" />
+                                <!--  直径  -->
+                                <StackPanel
+                                    Margin="4,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <TextBlock
+                                        Margin="0,0,4,0"
+                                        VerticalAlignment="Center"
+                                        Foreground="White"
+                                        Text="直径(mm):" />
+                                    <TextBox
+                                        Width="65"
+                                        Height="24"
+                                        FontSize="12"
+                                        Text="{Binding GrinderDiameter, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
-                                <!-- 版孔 -->
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-                                    <TextBlock Text="版孔(1大2小):" VerticalAlignment="Center" Foreground="White" Margin="0,0,4,0" />
-                                    <TextBox Width="40" Height="24" FontSize="12"
-                                             Text="{Binding GrinderBoreType, UpdateSourceTrigger=PropertyChanged}" />
+                                <!--  版孔  -->
+                                <StackPanel
+                                    Margin="4,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <TextBlock
+                                        Margin="0,0,4,0"
+                                        VerticalAlignment="Center"
+                                        Foreground="White"
+                                        Text="版孔(1大2小):" />
+                                    <TextBox
+                                        Width="40"
+                                        Height="24"
+                                        FontSize="12"
+                                        Text="{Binding GrinderBoreType, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
-                                <!-- 长度 -->
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-                                    <TextBlock Text="长度(mm):" VerticalAlignment="Center" Foreground="White" Margin="0,0,4,0" />
-                                    <TextBox Width="65" Height="24" FontSize="12"
-                                             Text="{Binding GrinderLength, UpdateSourceTrigger=PropertyChanged}" />
+                                <!--  长度  -->
+                                <StackPanel
+                                    Margin="4,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <TextBlock
+                                        Margin="0,0,4,0"
+                                        VerticalAlignment="Center"
+                                        Foreground="White"
+                                        Text="长度(mm):" />
+                                    <TextBox
+                                        Width="65"
+                                        Height="24"
+                                        FontSize="12"
+                                        Text="{Binding GrinderLength, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
-                                <!-- 写入按钮 -->
-                                <Button Width="90" Height="28"
-                                        Command="{Binding WriteGrinderParamsCommand}"
-                                        Background="#FF8C00" Foreground="White" FontWeight="Bold"
-                                        Content="写入参数" />
-                                <!-- 占位 -->
+                                <!--  写入按钮  -->
+                                <Button
+                                    Width="90"
+                                    Height="28"
+                                    Background="#FF8C00"
+                                    Command="{Binding WriteGrinderParamsCommand}"
+                                    Content="写入参数"
+                                    FontWeight="Bold"
+                                    Foreground="White" />
+                                <!--  占位  -->
                                 <Border />
                                 <Border />
                             </UniformGrid>
@@ -1024,62 +1300,62 @@
                         Grid.Row="1"
                         Grid.Column="9"
                         CardTitle="20一号斜床"
-                        ConnectedBrush="{Binding StationCards[ST601].ConnectedBrush, FallbackValue=Gray}"
-                        IpText="{Binding StationCards[ST601].IpText, FallbackValue=未配置IP}"
-                        Status1="{Binding StationCards[ST601].Status1, FallbackValue=未知}"
-                        Status1Brush="{Binding StationCards[ST601].Status1Brush, FallbackValue=Black}"
-                        Status2="{Binding StationCards[ST601].Status2, FallbackValue=无}"
-                        Status2Brush="{Binding StationCards[ST601].Status2Brush, FallbackValue=Black}" />
+                        ConnectedBrush="{Binding StationCards[ST108].ConnectedBrush, FallbackValue=Gray}"
+                        IpText="{Binding StationCards[ST108].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST108].Status1, FallbackValue=未知}"
+                        Status1Brush="{Binding StationCards[ST108].Status1Brush, FallbackValue=Black}"
+                        Status2="{Binding StationCards[ST108].Status2, FallbackValue=无}"
+                        Status2Brush="{Binding StationCards[ST108].Status2Brush, FallbackValue=Black}" />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="10"
                         CardTitle="21二号斜床"
-                        ConnectedBrush="{Binding StationCards[ST602].ConnectedBrush, FallbackValue=Gray}"
-                        IpText="{Binding StationCards[ST602].IpText, FallbackValue=未配置IP}"
-                        Status1="{Binding StationCards[ST602].Status1, FallbackValue=未知}"
-                        Status1Brush="{Binding StationCards[ST602].Status1Brush, FallbackValue=Black}"
-                        Status2="{Binding StationCards[ST602].Status2, FallbackValue=无}"
-                        Status2Brush="{Binding StationCards[ST602].Status2Brush, FallbackValue=Black}" />
+                        ConnectedBrush="{Binding StationCards[ST109].ConnectedBrush, FallbackValue=Gray}"
+                        IpText="{Binding StationCards[ST109].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST109].Status1, FallbackValue=未知}"
+                        Status1Brush="{Binding StationCards[ST109].Status1Brush, FallbackValue=Black}"
+                        Status2="{Binding StationCards[ST109].Status2, FallbackValue=无}"
+                        Status2Brush="{Binding StationCards[ST109].Status2Brush, FallbackValue=Black}" />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="11"
                         CardTitle="22三号斜床"
-                        ConnectedBrush="{Binding StationCards[ST603].ConnectedBrush, FallbackValue=Gray}"
-                        IpText="{Binding StationCards[ST603].IpText, FallbackValue=未配置IP}"
-                        Status1="{Binding StationCards[ST603].Status1, FallbackValue=未知}"
-                        Status1Brush="{Binding StationCards[ST603].Status1Brush, FallbackValue=Black}"
-                        Status2="{Binding StationCards[ST603].Status2, FallbackValue=无}"
-                        Status2Brush="{Binding StationCards[ST603].Status2Brush, FallbackValue=Black}" />
+                        ConnectedBrush="{Binding StationCards[ST111].ConnectedBrush, FallbackValue=Gray}"
+                        IpText="{Binding StationCards[ST111].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST111].Status1, FallbackValue=未知}"
+                        Status1Brush="{Binding StationCards[ST111].Status1Brush, FallbackValue=Black}"
+                        Status2="{Binding StationCards[ST111].Status2, FallbackValue=无}"
+                        Status2Brush="{Binding StationCards[ST111].Status2Brush, FallbackValue=Black}" />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="12"
                         CardTitle="23四号斜床"
-                        ConnectedBrush="{Binding StationCards[ST604].ConnectedBrush, FallbackValue=Gray}"
-                        IpText="{Binding StationCards[ST604].IpText, FallbackValue=未配置IP}"
-                        Status1="{Binding StationCards[ST604].Status1, FallbackValue=未知}"
-                        Status1Brush="{Binding StationCards[ST604].Status1Brush, FallbackValue=Black}"
-                        Status2="{Binding StationCards[ST604].Status2, FallbackValue=无}"
-                        Status2Brush="{Binding StationCards[ST604].Status2Brush, FallbackValue=Black}" />
+                        ConnectedBrush="{Binding StationCards[ST110].ConnectedBrush, FallbackValue=Gray}"
+                        IpText="{Binding StationCards[ST110].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST110].Status1, FallbackValue=未知}"
+                        Status1Brush="{Binding StationCards[ST110].Status1Brush, FallbackValue=Black}"
+                        Status2="{Binding StationCards[ST110].Status2, FallbackValue=无}"
+                        Status2Brush="{Binding StationCards[ST110].Status2Brush, FallbackValue=Black}" />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="13"
                         CardTitle="24五号斜床"
-                        ConnectedBrush="{Binding StationCards[ST605].ConnectedBrush, FallbackValue=Gray}"
-                        IpText="{Binding StationCards[ST605].IpText, FallbackValue=未配置IP}"
-                        Status1="{Binding StationCards[ST605].Status1, FallbackValue=未知}"
-                        Status1Brush="{Binding StationCards[ST605].Status1Brush, FallbackValue=Black}"
-                        Status2="{Binding StationCards[ST605].Status2, FallbackValue=无}"
-                        Status2Brush="{Binding StationCards[ST605].Status2Brush, FallbackValue=Black}" />
+                        ConnectedBrush="{Binding StationCards[ST112].ConnectedBrush, FallbackValue=Gray}"
+                        IpText="{Binding StationCards[ST112].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST112].Status1, FallbackValue=未知}"
+                        Status1Brush="{Binding StationCards[ST112].Status1Brush, FallbackValue=Black}"
+                        Status2="{Binding StationCards[ST112].Status2, FallbackValue=无}"
+                        Status2Brush="{Binding StationCards[ST112].Status2Brush, FallbackValue=Black}" />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="14"
                         CardTitle="13下料架1"
-                        ConnectedBrush="{Binding StationCards[ST013].ConnectedBrush, FallbackValue=Gray}"
-                        IpText="{Binding StationCards[ST013].IpText, FallbackValue=未配置IP}"
-                        Status1="{Binding StationCards[ST013].Status1, FallbackValue=未知}"
-                        Status1Brush="{Binding StationCards[ST013].Status1Brush, FallbackValue=Black}"
-                        Status2="{Binding StationCards[ST013].Status2, FallbackValue=无}"
-                        Status2Brush="{Binding StationCards[ST013].Status2Brush, FallbackValue=Black}" />
+                        ConnectedBrush="{Binding StationCards[ST019].ConnectedBrush, FallbackValue=Gray}"
+                        IpText="{Binding StationCards[ST019].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST019].Status1, FallbackValue=未知}"
+                        Status1Brush="{Binding StationCards[ST019].Status1Brush, FallbackValue=Black}"
+                        Status2="{Binding StationCards[ST019].Status2, FallbackValue=无}"
+                        Status2Brush="{Binding StationCards[ST019].Status2Brush, FallbackValue=Black}" />
                     <controls:StatusCard
                         Grid.Row="1"
                         Grid.Column="15"
@@ -1305,22 +1581,22 @@
                         Grid.Row="2"
                         Grid.Column="14"
                         CardTitle="14下料架3"
-                        ConnectedBrush="{Binding StationCards[ST014].ConnectedBrush, FallbackValue=Gray}"
-                        IpText="{Binding StationCards[ST014].IpText, FallbackValue=未配置IP}"
-                        Status1="{Binding StationCards[ST014].Status1, FallbackValue=未知}"
-                        Status1Brush="{Binding StationCards[ST014].Status1Brush, FallbackValue=Black}"
-                        Status2="{Binding StationCards[ST014].Status2, FallbackValue=无}"
-                        Status2Brush="{Binding StationCards[ST014].Status2Brush, FallbackValue=Black}" />
+                        ConnectedBrush="{Binding StationCards[ST020].ConnectedBrush, FallbackValue=Gray}"
+                        IpText="{Binding StationCards[ST020].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST020].Status1, FallbackValue=未知}"
+                        Status1Brush="{Binding StationCards[ST020].Status1Brush, FallbackValue=Black}"
+                        Status2="{Binding StationCards[ST020].Status2, FallbackValue=无}"
+                        Status2Brush="{Binding StationCards[ST020].Status2Brush, FallbackValue=Black}" />
                     <controls:StatusCard
                         Grid.Row="2"
                         Grid.Column="17"
                         CardTitle="16下料架4"
-                        ConnectedBrush="{Binding StationCards[ST016].ConnectedBrush, FallbackValue=Gray}"
-                        IpText="{Binding StationCards[ST016].IpText, FallbackValue=未配置IP}"
-                        Status1="{Binding StationCards[ST016].Status1, FallbackValue=未知}"
-                        Status1Brush="{Binding StationCards[ST016].Status1Brush, FallbackValue=Black}"
-                        Status2="{Binding StationCards[ST016].Status2, FallbackValue=无}"
-                        Status2Brush="{Binding StationCards[ST016].Status2Brush, FallbackValue=Black}" />
+                        ConnectedBrush="{Binding StationCards[ST021].ConnectedBrush, FallbackValue=Gray}"
+                        IpText="{Binding StationCards[ST021].IpText, FallbackValue=未配置IP}"
+                        Status1="{Binding StationCards[ST021].Status1, FallbackValue=未知}"
+                        Status1Brush="{Binding StationCards[ST021].Status1Brush, FallbackValue=Black}"
+                        Status2="{Binding StationCards[ST021].Status2, FallbackValue=无}"
+                        Status2Brush="{Binding StationCards[ST021].Status2Brush, FallbackValue=Black}" />
 
                     <controls:StatusCard
                         Grid.Row="3"
