@@ -76,11 +76,11 @@ public sealed class HomeViewModel : ObservableObject
         await Task.CompletedTask;
     }
 
-    /// <summary>测试: 手动给中转架1注入工件缓存</summary>
+    /// <summary>测试: 手动给1号线中转架1注入工件缓存</summary>
     private async Task TestRearPickupAsync()
     {
-        Console.WriteLine("[HomeViewModel] ▶ 点击【测试后天车取料】");
-        if (_line1RearEngine == null) { Console.WriteLine("[HomeViewModel] ⚠ 后端引擎未创建"); return; }
+        Console.WriteLine("[HomeViewModel] ▶ 点击【测试1号线后天车取料】");
+        if (_line1RearEngine == null) { Console.WriteLine("[HomeViewModel] ⚠ 1号线后端引擎未创建"); return; }
         var wp = new WorkpieceCache
         {
             Diameter = 147, Length = 700, BoreType = 100,
@@ -88,7 +88,45 @@ public sealed class HomeViewModel : ObservableObject
             SkipBoring = false, BoringProcess = "粗镗"
         };
         _line1RearEngine.EnqueueWorkpiece("ST105", wp);
-        Console.WriteLine($"[HomeViewModel] 已注入测试工件到中转架1 d=200 L=1000");
+        Console.WriteLine($"[HomeViewModel] 已注入测试工件到1号线中转架1(ST105) d=147 L=700");
+        await Task.CompletedTask;
+    }
+
+    /// <summary>测试: 手动给2号线中转架4注入工件缓存</summary>
+    private async Task TestRearPickup2Async()
+    {
+        Console.WriteLine("[HomeViewModel] ▶ 点击【测试2号线后天车取料】");
+        if (_line2RearEngine == null) { Console.WriteLine("[HomeViewModel] ⚠ 2号线后端引擎未创建"); return; }
+        var wp = new WorkpieceCache
+        {
+            Diameter = 150, Length = 795, BoreType = 100,
+            MarkingContent = "TEST2", LeftPlugThickness = 14, RightPlugThickness = 14,
+            SkipBoring = false, BoringProcess = "粗镗"
+        };
+        _line2RearEngine.EnqueueWorkpiece("ST016", wp);
+        Console.WriteLine($"[HomeViewModel] 已注入测试工件到2号线中转架4(ST016) d=147 L=700");
+        await Task.CompletedTask;
+    }
+
+    /// <summary>测试: 手动写入动平衡工件缓存(M817/M818/M821), 模拟后天车放料</summary>
+    private async Task TestBalancingRackPlacedAsync()
+    {
+        Console.WriteLine($"[HomeViewModel] ▶ 点击【测试动平衡】 位置={SelectedBalancingPosition} d={BalancingTestDiameter} L={BalancingTestLength}");
+        if (_line1BalancingEngine == null)
+        {
+            Console.WriteLine("[HomeViewModel] ⚠ 动平衡引擎未创建"); return;
+        }
+
+        if (string.IsNullOrEmpty(SelectedBalancingPosition))
+        {
+            Console.WriteLine("[HomeViewModel] ⚠ 未选择位置"); return;
+        }
+        var wp = new WorkpieceCache
+        {
+            Diameter = BalancingTestDiameter, Length = BalancingTestLength, BoreType = 100
+        };
+        _line1BalancingEngine.SetBalancingWp(SelectedBalancingPosition, wp);
+        Console.WriteLine($"[HomeViewModel] 已注入测试工件 → {SelectedBalancingPosition} d={BalancingTestDiameter} L={BalancingTestLength}");
         await Task.CompletedTask;
     }
 
@@ -148,6 +186,13 @@ public sealed class HomeViewModel : ObservableObject
         WriteCacheCommand = new AsyncRelayCommand(WriteCacheAsync, nameof(WriteCacheCommand));
         ClearCacheCommand = new AsyncRelayCommand(ClearCacheAsync, nameof(ClearCacheCommand));
         TestRearPickupCommand = new AsyncRelayCommand(TestRearPickupAsync, nameof(TestRearPickupCommand));
+        TestRearPickup2Command = new AsyncRelayCommand(TestRearPickup2Async, nameof(TestRearPickup2Command));
+        TestBalancingRackPlacedCommand = new AsyncRelayCommand(TestBalancingRackPlacedAsync, nameof(TestBalancingRackPlacedCommand));
+
+        // 测试动平衡默认值
+        BalancingTestDiameter = 147;
+        BalancingTestLength = 700;
+        SelectedBalancingPosition = "M817";
 
         Console.WriteLine("[HomeViewModel] 初始化完成：天车+机械手+研磨机+手动控制+流程引擎 VM已创建。");
     }
@@ -448,6 +493,21 @@ public sealed class HomeViewModel : ObservableObject
     private int _cachedLength = 650;
     public int CachedLength { get => _cachedLength; set => SetField(ref _cachedLength, value); }
 
+    /// <summary>测试动平衡: 直径(mm)</summary>
+    private int _balancingTestDiameter = 147;
+    public int BalancingTestDiameter { get => _balancingTestDiameter; set { if (SetField(ref _balancingTestDiameter, value)) OnPropertyChanged(); } }
+
+    /// <summary>测试动平衡: 版长(mm)</summary>
+    private int _balancingTestLength = 700;
+    public int BalancingTestLength { get => _balancingTestLength; set { if (SetField(ref _balancingTestLength, value)) OnPropertyChanged(); } }
+
+    /// <summary>测试动平衡: 可选位置列表</summary>
+    public List<string> BalancingPositions { get; } = new() { "M817", "M818", "M821" };
+
+    /// <summary>测试动平衡: 当前选中的位置</summary>
+    private string _selectedBalancingPosition = "M817";
+    public string SelectedBalancingPosition { get => _selectedBalancingPosition; set => SetField(ref _selectedBalancingPosition, value!); }
+
     /// <summary>启动/暂停研磨流程</summary>
     public ICommand GrindingToggleCommand { get; }
 
@@ -526,6 +586,9 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>清空工件缓存</summary>
     public ICommand ClearCacheCommand { get; }
     public ICommand TestRearPickupCommand { get; }
+    public ICommand TestRearPickup2Command { get; }
+    /// <summary>测试动平衡: 手动注入工件到M817/M818/M821缓存</summary>
+    public ICommand TestBalancingRackPlacedCommand { get; }
 
     /// <summary>
     /// 主页面任务表数据源（左侧DataGrid绑定）。
@@ -571,6 +634,14 @@ public sealed class HomeViewModel : ObservableObject
         _sharedTransferRackLock = new SemaphoreSlim(1, 1);
         var sharedSafety = new SafetyFlags();
 
+        // ── 平衡料架位置锁(4把): 保护天车和机械手同时操作同一位置, 防止碰撞 ──
+        //    每把锁只保护一个信号地址: M817/M818/M821/M822
+        //    持锁范围: 进入位置→放料/取料完成→离开位置后释放
+        var lockM817 = new SemaphoreSlim(1, 1);
+        var lockM818 = new SemaphoreSlim(1, 1);
+        var lockM821 = new SemaphoreSlim(1, 1);
+        var lockM822 = new SemaphoreSlim(1, 1);
+
         // ── 创建共享MC连接给前端引擎(避免和平衡引擎重复连63) ──
         //     加5s超时, 避免UI线程死锁(ConfigureAwait(false)已在McConnectionCache层处理)
         MitsubishiMcClient? sharedMc63 = null;
@@ -592,11 +663,16 @@ public sealed class HomeViewModel : ObservableObject
         Console.WriteLine("[HomeViewModel] 1号线前端流程引擎已创建" + (sharedMc63 != null ? "(共享MC63连接)" : "(MC63未连,自行连接)"));
 
         // ── 创建1号线后端流程引擎 (中转架状态从前端DeviceStatus读取) ──
-        _line1RearEngine = new Line1RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords, _sharedTransferRackLock, sharedSafety, _line1Engine.DeviceStatus);
+        // M817+M822 锁传给1号线后端: DoUnload长工件→M817, 短工件→M822
+        _line1RearEngine = new Line1RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords,
+            _sharedTransferRackLock, sharedSafety, _line1Engine.DeviceStatus,
+            lockM817: lockM817, lockM822: lockM822);
         Console.WriteLine("[HomeViewModel] 1号线后端流程引擎已创建");
 
         // ── 创建机械手2动平衡流转引擎 ──
-        _line1BalancingEngine = new BalancingFlowEngine(_manipulatorCache, _mcCache, _cfg, grindingCoords);
+        // 4把锁全传: M2Flow用M817或M818, M3Flow用M821+M822
+        _line1BalancingEngine = new BalancingFlowEngine(_manipulatorCache, _craneCache, _mcCache, _cfg, grindingCoords,
+            lockM817, lockM818, lockM821, lockM822);
         Console.WriteLine("[HomeViewModel] 机械手2动平衡流转引擎已创建(两条线共用)");
 
         // ── 创建2号线流程引擎 ──────────────────────────────────────
@@ -609,8 +685,10 @@ public sealed class HomeViewModel : ObservableObject
             rackSvc: frontRackSvc, manipulatorLock: _sharedManipulatorLock);
         Console.WriteLine("[HomeViewModel] 2号线前端流程引擎已创建(共享机械手锁)");
 
+        // M818+M821 锁传给2号线后端: DoUnload长工件→M818, 短工件→M821
         _line2RearEngine = new Line2RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords,
-            _sharedTransferRackLock2, sharedSafety2, _line2Engine.DeviceStatus);
+            _sharedTransferRackLock2, sharedSafety2, _line2Engine.DeviceStatus,
+            lockM818: lockM818, lockM821: lockM821);
         Console.WriteLine("[HomeViewModel] 2号线后端流程引擎已创建");
 
         // 1号线+2号线共用机械手锁
@@ -631,7 +709,11 @@ public sealed class HomeViewModel : ObservableObject
         // ── 下料联动: 后天车放动平衡/下料架→通知平衡引擎(只有一台, 两条线共用) ──
         _line1RearEngine!.OnBalancingRackPlaced = (reg, wp) => _line1BalancingEngine?.SetBalancingWp(reg, wp);
         _line2RearEngine!.OnBalancingRackPlaced = (reg, wp) => _line1BalancingEngine?.SetBalancingWp(reg, wp);
-        Console.WriteLine("[HomeViewModel] 机械手2动平衡流转引擎已创建");
+
+        // ── 研磨联动: 后天车/M3Flow放研磨上料架ST010→通知研磨引擎入FIFO缓存 ──
+        _line1RearEngine!.OnGrindingRackPlaced = (d, bore, L) => _grindingEngine?.EnqueueWorkpiece(d, bore, L);
+        _line1BalancingEngine!.OnGrindingRackPlaced = (d, bore, L) => _grindingEngine?.EnqueueWorkpiece(d, bore, L);
+        Console.WriteLine("[HomeViewModel] 研磨上料联动已绑定(1号线后天车+M3Flow→研磨缓存)");
 
         // ── 前后端联动: 前端放中转架 → 通知后端工件数据 ──
         _line1Engine.OnRackPlaced = (code, wp) => _line1RearEngine?.SetRackWorkpiece(code, wp);

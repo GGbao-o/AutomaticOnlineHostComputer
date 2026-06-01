@@ -29,12 +29,12 @@ public static class DbSettingsProvider
         return $"Server={settings.Host};Port={settings.Port};Database={settings.Database};Uid={settings.User};Pwd={settings.Password};CharSet=utf8mb4;";
     }
 
-    private sealed class DbSettings
-    {
-        public string Host { get; set; } = "172.31.59.203";
-        public int Port { get; set; } = 3307;
-        public string Database { get; set; } = "automatic_online_host";
-        public string User { get; set; } = "root";
-        public string Password { get; set; } = string.Empty;
-    }
+   private sealed class DbSettings
+   {
+       public string Host { get; set; } = "172.31.59.203";
+       public int Port { get; set; } = 3307;
+       public string Database { get; set; } = "automatic_online_host";
+       public string User { get; set; } = "root";
+       public string Password { get; set; } = string.Empty;
+   }
 }

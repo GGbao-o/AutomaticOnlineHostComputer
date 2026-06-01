@@ -109,7 +109,40 @@ public sealed class MotionConfig
         public int PollIntervalMs { get; set; } = 500;
         /// <summary>研磨机握手超时(ms)，等待请求上料/锁紧/松开等信号</summary>
         public int HandshakeTimeoutMs { get; set; } = 300_000;
+        /// <summary>X11有版检测稳定延时(ms)，充磁后等待磁铁吸稳再读取</summary>
+        public int X11StableDelayMs { get; set; } = 3000;
+        /// <summary>PLC/CNC信号等待轮询间隔(ms)，降低延迟更快发现信号变化</summary>
+        public int SignalPollIntervalMs { get; set; } = 50;
+        /// <summary>研磨机状态卡死超时(ms)。Loading/Unloading/WaitingForUnload超过此值强制回Idle</summary>
+        public int GrindingStuckTimeoutMs { get; set; } = 60_000;
     }
+
+    /// <summary>平衡引擎安全参数</summary>
+    public BalancingSection Balancing { get; set; } = new();
+
+    public sealed class BalancingSection
+    {
+        /// <summary>后天车X坐标小于等于此值=已离开动平衡/研磨上料架区域, 机械手可安全进入</summary>
+        public int RearCraneSafeX { get; set; } = -4000;
+        /// <summary>机械手自定义YZ坐标(Key=M817/M818/M819/M820/M821/M822, 非0时覆盖数据库坐标)</summary>
+        public Dictionary<string, BalancingArmCoord> ArmCoords { get; set; } = new();
+    }
+
+    /// <summary>机械手单位置自定义YZ(0=用数据库坐标)</summary>
+    public sealed class BalancingArmCoord
+    {
+        public int Y { get; set; }
+        public int Z { get; set; }
+    }
+
+    /// <summary>各天车归位X坐标(Key=天车编号1~5)。后天车同时作为机械手安全阈值。</summary>
+    public Dictionary<int, int> CraneHomeX { get; set; } = new()
+    {
+        [1] = 1000, [2] = -4000, [3] = 1000, [4] = -4000, [5] = 0,
+    };
+
+    /// <summary>取天车归位X(有配置用配置, 没有用默认)</summary>
+    public int GetCraneHomeX(int craneNo) => CraneHomeX.TryGetValue(craneNo, out var x) ? x : 1000;
 
     /// <summary>斜床 Y 轴移动公式参数</summary>
     public SkewBedSection SkewBed { get; set; } = new();
@@ -122,10 +155,10 @@ public sealed class MotionConfig
             // 1号线斜床1~5 (DB站号: ST108~ST112)
             ["ST108"] = 1450, ["ST109"] = 1450, ["ST110"] = 1450, ["ST111"] = 1450, ["ST112"] = 1450,
             // 2号线斜床6~10 (DB站号: ST606~ST610)
-            ["ST606"] = 1450, ["ST607"] = 1450, ["ST608"] = 1450, ["ST609"] = 1450, ["ST610"] = 1450,
+            ["ST606"] = 1315, ["ST607"] = 1450, ["ST608"] = 1450, ["ST609"] = 1450, ["ST610"] = 1450,
         };
         /// <summary>大孔(堵孔100) Y轴移动距离，默认 125mm</summary>
-        public int LargeBoreOffset { get; set; } = 117;
+        public int LargeBoreOffset { get; set; } = 122;
         /// <summary>小孔(堵孔70) Y轴移动距离，默认 65mm</summary>
         public int SmallBoreOffset { get; set; } = 55;
         /// <summary>机械手1 安全位 Y 坐标(mm)，机械手无X轴, 每次取完料Y回1000</summary>
@@ -139,7 +172,7 @@ public sealed class MotionConfig
         public int ComputeYOffset(string stationCode, double workpieceLength, int plugHole)
         {
             int centerDist = CenterDistances.TryGetValue(stationCode, out var d) ? d : 1450;
-            int boreOffset = plugHole == 100 ? LargeBoreOffset : SmallBoreOffset; // 117=大孔, 55=小孔
+            int boreOffset = plugHole == 100 ? LargeBoreOffset : SmallBoreOffset; // 122=大孔, 55=小孔
             return (int)((centerDist - workpieceLength) / 2 + boreOffset);
         }
     }

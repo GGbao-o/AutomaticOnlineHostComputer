@@ -74,63 +74,117 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <StackPanel Margin="6" Orientation="Horizontal">
-                    <Button
-                        Width="84"
-                        Height="30"
-                        Margin="2"
-                        Click="AddTask_Click"
-                        Content="添加任务" />
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="6" Orientation="Horizontal">
+                        <Button
+                            Width="84"
+                            Height="30"
+                            Margin="2"
+                            Click="AddTask_Click"
+                            Content="添加任务" />
 
-                    <Button
-                        Width="110"
-                        Height="30"
-                        Margin="2"
-                        Command="{Binding TestRearPickupCommand}"
-                        Content="测试后天车取料" />
-
-                </StackPanel>
-                <DataGrid
-                    Grid.Row="1"
-                    Margin="6"
-                    AutoGenerateColumns="False"
-                    CanUserAddRows="False"
-                    HeadersVisibility="Column"
-                    ItemsSource="{Binding TaskRows}">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn
-                            Width="120"
-                            Binding="{Binding PlateNo}"
-                            Header="版号" />
-                        <DataGridTextColumn
+                        <Button
                             Width="70"
-                            Binding="{Binding Sequence}"
-                            Header="序号" />
-                        <DataGridTextColumn
-                            Width="100"
-                            Binding="{Binding Step}"
-                            Header="当前工序" />
-                        <DataGridTextColumn
-                            Width="120"
-                            Binding="{Binding ProcessType}"
-                            Header="工序" />
-                        <DataGridTextColumn
-                            Width="100"
-                            Binding="{Binding State}"
-                            Header="工件状态" />
-                        <DataGridTemplateColumn Width="90" Header="交互">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <Button
-                                        Height="26"
-                                        Margin="2"
-                                        Command="{Binding ToggleRunCommand}"
-                                        Content="{Binding ActionText}" />
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                    </DataGrid.Columns>
-                </DataGrid>
+                            Height="30"
+                            Margin="2"
+                            Command="{Binding TestRearPickupCommand}"
+                            Content="测试1号线后天车取料" />
+
+                        <Button
+                            Width="70"
+                            Height="30"
+                            Margin="2"
+                            Command="{Binding TestRearPickup2Command}"
+                            Content="测试2号线后天车取料" />
+
+                        <Separator Width="8" />
+
+                        <TextBlock
+                            Margin="2,0"
+                            VerticalAlignment="Center"
+                            Text="直径:" />
+                        <TextBox
+                            Width="50"
+                            Height="28"
+                            Margin="2"
+                            Text="{Binding BalancingTestDiameter}" />
+
+                        <TextBlock
+                            Margin="2,0"
+                            VerticalAlignment="Center"
+                            Text="版长:" />
+                        <TextBox
+                            Width="50"
+                            Height="28"
+                            Margin="2"
+                            Text="{Binding BalancingTestLength}" />
+
+                        <TextBlock
+                            Margin="2,0"
+                            VerticalAlignment="Center"
+                            Text="位置:" />
+                        <ComboBox
+                            Width="70"
+                            Height="28"
+                            Margin="2"
+                            ItemsSource="{Binding BalancingPositions}"
+                            SelectedItem="{Binding SelectedBalancingPosition}" />
+
+                        <Button
+                            Width="80"
+                            Height="30"
+                            Margin="2"
+                            Command="{Binding TestBalancingRackPlacedCommand}"
+                            Content="测试动平衡" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!--  添加任务数据位置  -->
+                <ScrollViewer
+                    Grid.Row="1"
+                    HorizontalScrollBarVisibility="Auto"
+                    VerticalScrollBarVisibility="Auto">
+                    <DataGrid
+                        Margin="6"
+                        AutoGenerateColumns="False"
+                        CanUserAddRows="False"
+                        HeadersVisibility="Column"
+                        ItemsSource="{Binding TaskRows}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn
+                                Width="120"
+                                Binding="{Binding PlateNo}"
+                                Header="版号" />
+                            <DataGridTextColumn
+                                Width="70"
+                                Binding="{Binding Sequence}"
+                                Header="序号" />
+                            <DataGridTextColumn
+                                Width="100"
+                                Binding="{Binding Step}"
+                                Header="当前工序" />
+                            <DataGridTextColumn
+                                Width="120"
+                                Binding="{Binding ProcessType}"
+                                Header="工序" />
+                            <DataGridTextColumn
+                                Width="100"
+                                Binding="{Binding State}"
+                                Header="工件状态" />
+                            <DataGridTemplateColumn Width="90" Header="交互">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button
+                                            Height="26"
+                                            Margin="2"
+                                            Command="{Binding ToggleRunCommand}"
+                                            Content="{Binding ActionText}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </ScrollViewer>
             </Grid>
         </Border>
         <!--  下拉框 第二部分  -->
@@ -143,7 +197,7 @@
             BorderThickness="1">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                 <Grid
-                    MinWidth="320"
+                    MinWidth="300"
                     MinHeight="560"
                     Margin="6">
                     <Grid.RowDefinitions>
@@ -187,112 +241,112 @@
                         VerticalAlignment="Center"
                         Text="{Binding ManualControl.SelectedDeviceDisplay}"
                         TextWrapping="Wrap" />
-                    <!--  单次运动距离  -->
+                    <!--单次运动距离
                     <TextBlock
-                        Grid.Row="1"
-                        Margin="4"
-                        VerticalAlignment="Center"
-                        Text="单次距离(mm)" />
+                    Grid.Row="1"
+                    Margin="4"
+                    VerticalAlignment="Center"
+                    Text="单次距离(mm)" />
                     <TextBox
-                        Grid.Row="1"
-                        Grid.Column="1"
-                        Margin="4"
-                        Text="{Binding ManualControl.StepDistance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    Grid.Row="1"
+                    Grid.Column="1"
+                    Margin="4"
+                    Text="{Binding ManualControl.StepDistance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     <TextBlock
-                        Grid.Row="1"
-                        Grid.Column="2"
-                        Margin="4"
-                        VerticalAlignment="Center"
-                        Text="手动控制模式" />
+                    Grid.Row="1"
+                    Grid.Column="2"
+                    Margin="4"
+                    VerticalAlignment="Center"
+                    Text="手动控制模式" />-->
 
-                    <!--  ~1~  相对运动 速度/加减速设置（每轴独立）  @1@  -->
-                    <!--  <TextBlock  -->
-                    <!--  Grid.Row="2"  -->
-                    <!--  Margin="4"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Text="相对速X" />  -->
-                    <!--  <StackPanel  -->
-                    <!--  Grid.Row="2"  -->
-                    <!--  Grid.Column="1"  -->
-                    <!--  Orientation="Horizontal">  -->
-                    <!--  <TextBox  -->
-                    <!--  Width="45"  -->
-                    <!--  Margin="0,4,2,4"  -->
-                    <!--  Text="{Binding ManualControl.RelSpeedX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />  -->
-                    <!--  <TextBlock  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Text="加" />  -->
-                    <!--  <TextBox  -->
-                    <!--  Width="45"  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  Text="{Binding ManualControl.RelAccelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />  -->
-                    <!--  <TextBlock  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Text="减" />  -->
-                    <!--  <TextBox  -->
-                    <!--  Width="45"  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  Text="{Binding ManualControl.RelDecelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />  -->
-                    <!--  <TextBlock  -->
-                    <!--  Margin="6,4,2,4"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Text="Y" />  -->
-                    <!--  <TextBox  -->
-                    <!--  Width="45"  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  Text="{Binding ManualControl.RelSpeedY, Mode=TwoWay}" />  -->
-                    <!--  <TextBlock  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Text="加" />  -->
-                    <!--  <TextBox  -->
-                    <!--  Width="45"  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  Text="{Binding ManualControl.RelAccelY, Mode=TwoWay}" />  -->
-                    <!--  <TextBlock  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Text="减" />  -->
-                    <!--  <TextBox  -->
-                    <!--  Width="45"  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  Text="{Binding ManualControl.RelDecelY, Mode=TwoWay}" />  -->
-                    <!--  <TextBlock  -->
-                    <!--  Margin="6,4,2,4"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Text="Z" />  -->
-                    <!--  <TextBox  -->
-                    <!--  Width="45"  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  Text="{Binding ManualControl.RelSpeedZ, Mode=TwoWay}" />  -->
-                    <!--  <TextBlock  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Text="加" />  -->
-                    <!--  <TextBox  -->
-                    <!--  Width="45"  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  Text="{Binding ManualControl.RelAccelZ, Mode=TwoWay}" />  -->
-                    <!--  <TextBlock  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Text="减" />  -->
-                    <!--  <TextBox  -->
-                    <!--  Width="45"  -->
-                    <!--  Margin="2,4"  -->
-                    <!--  Text="{Binding ManualControl.RelDecelZ, Mode=TwoWay}" />  -->
-                    <!-- </StackPanel> -->
-                    <!--  <Button  -->
-                    <!--  Grid.Row="2"  -->
-                    <!--  Grid.Column="2"  -->
-                    <!--  Width="70"  -->
-                    <!--  Height="26"  -->
-                    <!--  Margin="4,0"  -->
-                    <!--  VerticalAlignment="Center"  -->
-                    <!--  Command="{Binding ManualControl.SetRelSpeedCommand}"  -->
-                    <!--  Content="应用速度" />  -->
+                    <!--~1~  相对运动 速度/加减速设置（每轴独立）  @1@
+                     <TextBlock
+                     Grid.Row="2"
+                     Margin="4"
+                     VerticalAlignment="Center"
+                     Text="相对速X" />
+                     <StackPanel
+                     Grid.Row="2"
+                     Grid.Column="1"
+                     Orientation="Horizontal">
+                     <TextBox
+                     Width="45"
+                     Margin="0,4,2,4"
+                     Text="{Binding ManualControl.RelSpeedX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                     <TextBlock
+                     Margin="2,4"
+                     VerticalAlignment="Center"
+                     Text="加" />
+                     <TextBox
+                     Width="45"
+                     Margin="2,4"
+                     Text="{Binding ManualControl.RelAccelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                     <TextBlock
+                     Margin="2,4"
+                     VerticalAlignment="Center"
+                     Text="减" />
+                     <TextBox
+                     Width="45"
+                     Margin="2,4"
+                     Text="{Binding ManualControl.RelDecelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                     <TextBlock
+                     Margin="6,4,2,4"
+                     VerticalAlignment="Center"
+                     Text="Y" />
+                     <TextBox
+                     Width="45"
+                     Margin="2,4"
+                     Text="{Binding ManualControl.RelSpeedY, Mode=TwoWay}" />
+                     <TextBlock
+                     Margin="2,4"
+                     VerticalAlignment="Center"
+                     Text="加" />
+                     <TextBox
+                     Width="45"
+                     Margin="2,4"
+                     Text="{Binding ManualControl.RelAccelY, Mode=TwoWay}" />
+                     <TextBlock
+                     Margin="2,4"
+                     VerticalAlignment="Center"
+                     Text="减" />
+                     <TextBox
+                     Width="45"
+                     Margin="2,4"
+                     Text="{Binding ManualControl.RelDecelY, Mode=TwoWay}" />
+                     <TextBlock
+                     Margin="6,4,2,4"
+                     VerticalAlignment="Center"
+                     Text="Z" />
+                     <TextBox
+                     Width="45"
+                     Margin="2,4"
+                     Text="{Binding ManualControl.RelSpeedZ, Mode=TwoWay}" />
+                     <TextBlock
+                     Margin="2,4"
+                     VerticalAlignment="Center"
+                     Text="加" />
+                     <TextBox
+                     Width="45"
+                     Margin="2,4"
+                     Text="{Binding ManualControl.RelAccelZ, Mode=TwoWay}" />
+                     <TextBlock
+                     Margin="2,4"
+                     VerticalAlignment="Center"
+                     Text="减" />
+                     <TextBox
+                     Width="45"
+                     Margin="2,4"
+                     Text="{Binding ManualControl.RelDecelZ, Mode=TwoWay}" />
+                    </StackPanel>
+                     <Button
+                     Grid.Row="2"
+                     Grid.Column="2"
+                     Width="70"
+                     Height="26"
+                     Margin="4,0"
+                     VerticalAlignment="Center"
+                     Command="{Binding ManualControl.SetRelSpeedCommand}"
+                     Content="应用速度" />-->
 
                     <!--  绝对运动 速度设置(绝对移动用，每轴独立)  -->
                     <TextBlock
@@ -420,8 +474,8 @@
                             Text="{Binding ManualControl.AbsZTarget, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>
                     <StackPanel
-                        Grid.Row="4"
-                        Grid.Column="2"
+                        Grid.Row="5"
+                        Grid.Column="0"
                         Orientation="Horizontal">
                         <Button
                             Width="32"
@@ -440,23 +494,23 @@
                             Content="绝对移动" />
                     </StackPanel>
 
+                    <!--<TextBlock
+                    Grid.Row="6"
+                    Margin="4"
+                    VerticalAlignment="Center"
+                    Text="手动动作" />
                     <TextBlock
-                        Grid.Row="5"
-                        Margin="4"
-                        VerticalAlignment="Center"
-                        Text="手动动作" />
-                    <TextBlock
-                        Grid.Row="5"
-                        Grid.Column="1"
-                        Margin="4"
-                        Foreground="#B45309"
-                        Text="所有动作均输出控制台日志" />
+                    Grid.Row="6"
+                    Grid.Column="1"
+                    Margin="4"
+                    Foreground="#B45309"
+                    Text="所有动作均输出控制台日志" />-->
                     <UniformGrid
                         Grid.Row="6"
-                        Grid.ColumnSpan="3"
+                        Grid.ColumnSpan="2"
                         Margin="2"
-                        Columns="4">
-                        <Button
+                        Columns="2">
+                        <!--<Button
                             Height="32"
                             Margin="2"
                             Command="{Binding ManualControl.XPlusCommand}"
@@ -467,7 +521,7 @@
                             Margin="2"
                             Command="{Binding ManualControl.XMinusCommand}"
                             Content="X-"
-                            IsEnabled="{Binding ManualControl.IsCraneSelected}" />
+                            IsEnabled="{Binding ManualControl.IsCraneSelected}" />-->
                         <Button
                             Height="32"
                             Margin="2"
@@ -478,7 +532,7 @@
                             Margin="2"
                             Command="{Binding ManualControl.EStopCommand}"
                             Content="急停" />
-                        <Button
+                        <!--<Button
                             Height="32"
                             Margin="2"
                             Command="{Binding ManualControl.YPlusCommand}"
@@ -487,7 +541,7 @@
                             Height="32"
                             Margin="2"
                             Command="{Binding ManualControl.YMinusCommand}"
-                            Content="Y-" />
+                            Content="Y-" />-->
                         <Button
                             Height="32"
                             Margin="2"
@@ -499,7 +553,7 @@
                             Margin="2"
                             Command="{Binding ManualControl.HomeYCommand}"
                             Content="Y回原点" />
-                        <Button
+                        <!--<Button
                             Height="32"
                             Margin="2"
                             Command="{Binding ManualControl.ZPlusCommand}"
@@ -508,7 +562,7 @@
                             Height="32"
                             Margin="2"
                             Command="{Binding ManualControl.ZMinusCommand}"
-                            Content="Z-" />
+                            Content="Z-" />-->
                         <Button
                             Height="32"
                             Margin="2"

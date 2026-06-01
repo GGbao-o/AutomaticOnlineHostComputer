@@ -32,6 +32,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         private readonly int    _timeoutMs;
         private readonly byte   _deviceType;
         private readonly McFrameType _frameType;
+        private readonly bool   _enableConsoleLog; // 默认false, 避免hex dump刷屏
 
         /// <summary>M区使用位命令(0x00/0x02)+nibble编码。默认false(字读写)。货叉PLC需设true。</summary>
         public bool UseBitReadForM { get; set; }
@@ -40,8 +41,8 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         private NetworkStream? _stream;
         private readonly SemaphoreSlim _lock = new(1, 1);
 
-        public MitsubishiMcClient(string ip, int port = 3000, byte deviceType = DeviceD, int timeoutMs = 3000, McFrameType frameType = McFrameType.E3)
-        { _ip = ip; _port = port; _deviceType = deviceType; _timeoutMs = timeoutMs; _frameType = frameType; }
+        public MitsubishiMcClient(string ip, int port = 3000, byte deviceType = DeviceD, int timeoutMs = 3000, McFrameType frameType = McFrameType.E3, bool enableConsoleLog = false)
+        { _ip = ip; _port = port; _deviceType = deviceType; _timeoutMs = timeoutMs; _frameType = frameType; _enableConsoleLog = enableConsoleLog; }
 
         public bool IsConnected => _tcp?.Connected == true;
 
@@ -155,7 +156,8 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             await _lock.WaitAsync(ct);
             try
             {
-                Console.WriteLine($"[MC] TX {_frameType} dev=0x{deviceType:X2} addr={startAddr} cnt={count} useBit={useBit} → {BitConverter.ToString(request)}");
+                if (_enableConsoleLog)
+                    Console.WriteLine($"[MC] TX {_frameType} dev=0x{deviceType:X2} addr={startAddr} cnt={count} useBit={useBit} → {BitConverter.ToString(request)}");
                 await _stream!.WriteAsync(request, ct);
 
                 ushort[] result;
@@ -168,9 +170,9 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                     await ReadExactAsync(_stream, hdr, 2, ct);
                     byte endCode;
                     if (hdr[0] is 0x80 or 0x81 or 0x82 or 0x83)  // 格式A
-                    { endCode = hdr[1]; Console.WriteLine($"[MC] RX A1E fmt=A sub=0x{hdr[0]:X2} endCode=0x{endCode:X2}"); }
+                    { endCode = hdr[1]; if (_enableConsoleLog) Console.WriteLine($"[MC] RX A1E fmt=A sub=0x{hdr[0]:X2} endCode=0x{endCode:X2}"); }
                     else  // 格式B: [EndCode 2B LE]
-                    { endCode = hdr[0]; Console.WriteLine($"[MC] RX A1E fmt=B endCode=0x{hdr[0]:X2}{hdr[1]:X2}"); }
+                    { endCode = hdr[0]; if (_enableConsoleLog) Console.WriteLine($"[MC] RX A1E fmt=B endCode=0x{hdr[0]:X2}{hdr[1]:X2}"); }
 
                     if (endCode != 0)
                         throw new IOException($"A-1E读错误: endCode=0x{endCode:X2}");
@@ -184,7 +186,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                         int byteCount = (nibbleCount + 1) / 2;  // 16 nibble → 8 字节
                         var nibbleBytes = new byte[byteCount];
                         await ReadExactAsync(_stream, nibbleBytes, byteCount, ct);
-                        Console.WriteLine($"[MC] RX A1E nibbles[{nibbleCount}]={BitConverter.ToString(nibbleBytes)}");
+                        if (_enableConsoleLog) Console.WriteLine($"[MC] RX A1E nibbles[{nibbleCount}]={BitConverter.ToString(nibbleBytes)}");
 
                         result = new ushort[count];
                         for (int w = 0; w < count; w++)
@@ -206,7 +208,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                         // ── 字数据 ──
                         var dataBytes = new byte[count * 2];
                         await ReadExactAsync(_stream, dataBytes, dataBytes.Length, ct);
-                        Console.WriteLine($"[MC] RX A1E data[{count}]={BitConverter.ToString(dataBytes)}");
+                        if (_enableConsoleLog) Console.WriteLine($"[MC] RX A1E data[{count}]={BitConverter.ToString(dataBytes)}");
                         result = new ushort[count];
                         for (int i = 0; i < count; i++)
                             result[i] = (ushort)(dataBytes[i * 2] | (dataBytes[i * 2 + 1] << 8));
@@ -291,7 +293,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             await _lock.WaitAsync(ct);
             try
             {
-                Console.WriteLine($"[MC] TX WRITE {_frameType} dev=0x{deviceType:X2} addr={startAddr} cnt={n} useBit={useBit} → {BitConverter.ToString(request)}");
+                if (_enableConsoleLog) Console.WriteLine($"[MC] TX WRITE {_frameType} dev=0x{deviceType:X2} addr={startAddr} cnt={n} useBit={useBit} → {BitConverter.ToString(request)}");
                 await _stream!.WriteAsync(request, ct);
 
                 if (_frameType == McFrameType.A1E)
@@ -300,9 +302,9 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                     await ReadExactAsync(_stream, ack, 2, ct);
                     byte endCode;
                     if (ack[0] is 0x80 or 0x81 or 0x82 or 0x83)  // 格式A
-                    { endCode = ack[1]; Console.WriteLine($"[MC] RX WRITE A1E fmt=A sub=0x{ack[0]:X2} endCode=0x{endCode:X2}"); }
+                    { endCode = ack[1]; if (_enableConsoleLog) Console.WriteLine($"[MC] RX WRITE A1E fmt=A sub=0x{ack[0]:X2} endCode=0x{endCode:X2}"); }
                     else  // 格式B
-                    { endCode = ack[0]; Console.WriteLine($"[MC] RX WRITE A1E fmt=B endCode=0x{ack[0]:X2}{ack[1]:X2}"); }
+                    { endCode = ack[0]; if (_enableConsoleLog) Console.WriteLine($"[MC] RX WRITE A1E fmt=B endCode=0x{ack[0]:X2}{ack[1]:X2}"); }
 
                     if (endCode != 0)
                         throw new IOException($"A-1E写错误: endCode=0x{endCode:X2}");
