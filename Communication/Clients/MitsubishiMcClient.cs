@@ -45,6 +45,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         { _ip = ip; _port = port; _deviceType = deviceType; _timeoutMs = timeoutMs; _frameType = frameType; _enableConsoleLog = enableConsoleLog; }
 
         public bool IsConnected => _tcp?.Connected == true;
+        private int OperationTimeoutMs => Math.Max(_timeoutMs, 5000);
 
         public async Task ConnectAsync(CancellationToken ct = default)
         {
@@ -52,10 +53,20 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             try
             {
                 if (IsConnected) return;
+                // 旧 TcpClient 可能处于半断线状态但 Connected 已失真；重连前先清掉旧句柄。
+                CloseSocketNoThrow();
                 _tcp = new TcpClient { SendTimeout = _timeoutMs, ReceiveTimeout = _timeoutMs, NoDelay = true };
-                await _tcp.ConnectAsync(_ip, _port, ct).ConfigureAwait(false);
-                _stream = _tcp.GetStream();
-                await Task.Delay(100, ct).ConfigureAwait(false);
+                try
+                {
+                    await _tcp.ConnectAsync(_ip, _port, ct).ConfigureAwait(false);
+                    _stream = _tcp.GetStream();
+                    await Task.Delay(100, ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    CloseSocketNoThrow();
+                    throw;
+                }
             }
             finally { _lock.Release(); }
         }
@@ -63,7 +74,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         public async Task DisconnectAsync()
         {
             await _lock.WaitAsync().ConfigureAwait(false);
-            try { _stream?.Close(); _tcp?.Close(); _stream = null; _tcp = null; }
+            try { CloseSocketNoThrow(); }
             finally { _lock.Release(); }
         }
 
@@ -154,11 +165,15 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
 
             var request = ms.ToArray();
             await _lock.WaitAsync(ct);
+            int opTimeoutMs = OperationTimeoutMs;
+            using var opTimeoutCts = new CancellationTokenSource(opTimeoutMs);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, opTimeoutCts.Token);
+            var ioCt = linkedCts.Token;
             try
             {
                 if (_enableConsoleLog)
                     Console.WriteLine($"[MC] TX {_frameType} dev=0x{deviceType:X2} addr={startAddr} cnt={count} useBit={useBit} → {BitConverter.ToString(request)}");
-                await _stream!.WriteAsync(request, ct);
+                await _stream!.WriteAsync(request, ioCt);
 
                 ushort[] result;
                 if (_frameType == McFrameType.A1E)
@@ -167,7 +182,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                     // 格式A(位操作): [Sub=cmd|0x80 1B][EndCode 1B]
                     // 格式B(字操作): [EndCode 2B LE]
                     var hdr = new byte[2];
-                    await ReadExactAsync(_stream, hdr, 2, ct);
+                    await ReadExactAsync(_stream, hdr, 2, ioCt);
                     byte endCode;
                     if (hdr[0] is 0x80 or 0x81 or 0x82 or 0x83)  // 格式A
                     { endCode = hdr[1]; if (_enableConsoleLog) Console.WriteLine($"[MC] RX A1E fmt=A sub=0x{hdr[0]:X2} endCode=0x{endCode:X2}"); }
@@ -185,7 +200,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                         int nibbleCount = count * 16;
                         int byteCount = (nibbleCount + 1) / 2;  // 16 nibble → 8 字节
                         var nibbleBytes = new byte[byteCount];
-                        await ReadExactAsync(_stream, nibbleBytes, byteCount, ct);
+                        await ReadExactAsync(_stream, nibbleBytes, byteCount, ioCt);
                         if (_enableConsoleLog) Console.WriteLine($"[MC] RX A1E nibbles[{nibbleCount}]={BitConverter.ToString(nibbleBytes)}");
 
                         result = new ushort[count];
@@ -207,7 +222,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                     {
                         // ── 字数据 ──
                         var dataBytes = new byte[count * 2];
-                        await ReadExactAsync(_stream, dataBytes, dataBytes.Length, ct);
+                        await ReadExactAsync(_stream, dataBytes, dataBytes.Length, ioCt);
                         if (_enableConsoleLog) Console.WriteLine($"[MC] RX A1E data[{count}]={BitConverter.ToString(dataBytes)}");
                         result = new ushort[count];
                         for (int i = 0; i < count; i++)
@@ -217,18 +232,30 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                 else
                 {
                     var header = new byte[11];
-                    await ReadExactAsync(_stream, header, 11, ct);
+                    await ReadExactAsync(_stream, header, 11, ioCt);
                     ushort dataLength = (ushort)(header[7] | (header[8] << 8));
                     ushort completeCode = (ushort)(header[9] | (header[10] << 8));
                     if (completeCode != 0) throw new IOException($"三菱MC读错误 完成代码:0x{completeCode:X4}");
                     int wordCount = (dataLength - 2) / 2;
                     var dataBytes = new byte[wordCount * 2];
-                    await ReadExactAsync(_stream, dataBytes, dataBytes.Length, ct);
+                    await ReadExactAsync(_stream, dataBytes, dataBytes.Length, ioCt);
                     result = new ushort[wordCount];
                     for (int i = 0; i < wordCount; i++)
                         result[i] = (ushort)(dataBytes[i * 2] | (dataBytes[i * 2 + 1] << 8));
                 }
                 return result;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested && opTimeoutCts.IsCancellationRequested)
+            {
+                // 单次MC报文读写必须有硬超时；否则PLC半开不回包会卡住主循环/动作任务并导致锁无法释放。
+                CloseSocketNoThrow();
+                throw new TimeoutException($"三菱MC读超时({opTimeoutMs}ms): {_ip}:{_port} dev=0x{deviceType:X2} addr={startAddr} cnt={count}");
+            }
+            catch
+            {
+                // 读写异常后不能继续相信 TcpClient.Connected；立即置断开，下一轮才会真正重连。
+                CloseSocketNoThrow();
+                throw;
             }
             finally { _lock.Release(); }
         }
@@ -291,15 +318,19 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
 
             var request = ms.ToArray();
             await _lock.WaitAsync(ct);
+            int opTimeoutMs = OperationTimeoutMs;
+            using var opTimeoutCts = new CancellationTokenSource(opTimeoutMs);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, opTimeoutCts.Token);
+            var ioCt = linkedCts.Token;
             try
             {
                 if (_enableConsoleLog) Console.WriteLine($"[MC] TX WRITE {_frameType} dev=0x{deviceType:X2} addr={startAddr} cnt={n} useBit={useBit} → {BitConverter.ToString(request)}");
-                await _stream!.WriteAsync(request, ct);
+                await _stream!.WriteAsync(request, ioCt);
 
                 if (_frameType == McFrameType.A1E)
                 {
                     var ack = new byte[2];
-                    await ReadExactAsync(_stream, ack, 2, ct);
+                    await ReadExactAsync(_stream, ack, 2, ioCt);
                     byte endCode;
                     if (ack[0] is 0x80 or 0x81 or 0x82 or 0x83)  // 格式A
                     { endCode = ack[1]; if (_enableConsoleLog) Console.WriteLine($"[MC] RX WRITE A1E fmt=A sub=0x{ack[0]:X2} endCode=0x{endCode:X2}"); }
@@ -312,11 +343,23 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                 else
                 {
                     var header = new byte[11];
-                    await ReadExactAsync(_stream, header, 11, ct);
+                    await ReadExactAsync(_stream, header, 11, ioCt);
                     ushort completeCode = (ushort)(header[9] | (header[10] << 8));
                     if (completeCode != 0)
                         throw new IOException($"三菱MC写错误 完成代码:0x{completeCode:X4}");
                 }
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested && opTimeoutCts.IsCancellationRequested)
+            {
+                // 写入也必须限时；如果等待ACK卡死, 上层无法进入catch/finally释放安全锁。
+                CloseSocketNoThrow();
+                throw new TimeoutException($"三菱MC写超时({opTimeoutMs}ms): {_ip}:{_port} dev=0x{deviceType:X2} addr={startAddr} cnt={n}");
+            }
+            catch
+            {
+                // 写入失败后关闭当前 socket，避免缓存层继续复用半断开的 MC 连接。
+                CloseSocketNoThrow();
+                throw;
             }
             finally { _lock.Release(); }
         }
@@ -333,6 +376,14 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                 if (n == 0) throw new IOException("三菱MC连接已断开（远端关闭）。");
                 received += n;
             }
+        }
+
+        private void CloseSocketNoThrow()
+        {
+            try { _stream?.Close(); } catch { }
+            try { _tcp?.Close(); } catch { }
+            _stream = null;
+            _tcp = null;
         }
     }
 }

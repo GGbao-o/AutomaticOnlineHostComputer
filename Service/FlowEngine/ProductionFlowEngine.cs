@@ -181,11 +181,7 @@ public sealed class ProductionFlowEngine : IDisposable
         _posSvc = positionService;
         _cfg = MotionConfig.Load();
 
-        // 用配置文件覆盖默认值
-        DefaultAbsSpeedX = _cfg.AbsMove.X.Speed; DefaultAbsAccelX = _cfg.AbsMove.X.Accel; DefaultAbsDecelX = _cfg.AbsMove.X.Decel;
-        DefaultAbsSpeedY = _cfg.AbsMove.Y.Speed; DefaultAbsAccelY = _cfg.AbsMove.Y.Accel; DefaultAbsDecelY = _cfg.AbsMove.Y.Decel;
-        DefaultAbsSpeedZ = _cfg.AbsMove.Z.Speed; DefaultAbsAccelZ = _cfg.AbsMove.Z.Accel; DefaultAbsDecelZ = _cfg.AbsMove.Z.Decel;
-        Console.WriteLine($"[FlowEngine] 引擎实例已创建（AbsSpeed X={DefaultAbsSpeedX} Y={DefaultAbsSpeedY} Z={DefaultAbsSpeedZ}）");
+        Console.WriteLine($"[FlowEngine] 引擎实例已创建（速度走GetCraneSpeed/GetManipulatorSpeed, 未配置设备用AbsMove默认值）");
     }
 
     /// <summary>
@@ -268,7 +264,8 @@ public sealed class ProductionFlowEngine : IDisposable
             }
 
             // 2. 设置绝对速度
-            await craneSvc.SetAbsSpeedAsync(DefaultAbsSpeedX, DefaultAbsAccelX, DefaultAbsDecelX, DefaultAbsSpeedY, DefaultAbsAccelY, DefaultAbsDecelY, DefaultAbsSpeedZ, DefaultAbsAccelZ, DefaultAbsDecelZ, ct);
+            var crSpd = _cfg.GetCraneSpeed(craneNo);
+            await craneSvc.SetAbsSpeedAsync(crSpd.X.Speed, crSpd.X.Accel, crSpd.X.Decel, crSpd.Y.Speed, crSpd.Y.Accel, crSpd.Y.Decel, crSpd.Z.Speed, crSpd.Z.Accel, crSpd.Z.Decel, ct);
 
             // 3. 读取天车当前坐标（日志用）
             var before = await craneSvc.ReadStatusAsync(ct);
@@ -358,7 +355,8 @@ public sealed class ProductionFlowEngine : IDisposable
                 return false;
             }
 
-            await svc.SetAbsSpeedAsync(DefaultAbsSpeedX, DefaultAbsAccelX, DefaultAbsDecelX, DefaultAbsSpeedY, DefaultAbsAccelY, DefaultAbsDecelY, DefaultAbsSpeedZ, DefaultAbsAccelZ, DefaultAbsDecelZ, ct);
+            var mnSpd = _cfg.GetManipulatorSpeed(manipulatorNo);
+            await svc.SetAbsSpeedAsync(mnSpd.X.Speed, mnSpd.X.Accel, mnSpd.X.Decel, mnSpd.Y.Speed, mnSpd.Y.Accel, mnSpd.Y.Decel, mnSpd.Z.Speed, mnSpd.Z.Accel, mnSpd.Z.Decel, ct);
             // 机械手 X 传 -1 跳过 X 轴
             await svc.MoveAbsoluteAsync(-1, yTarget, zTarget, ct: ct);
 

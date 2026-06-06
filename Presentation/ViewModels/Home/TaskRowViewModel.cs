@@ -24,6 +24,10 @@ public sealed class TaskRowViewModel : ObservableObject
     public string ProcessType { get; set; } = "总工艺";
     public string BoringProcess { get; set; } = string.Empty;
     public string SkewBedProcess { get; set; } = string.Empty;
+    public bool StartFromTransferRack { get; set; }
+    public int TransferRackLine { get; set; }
+    public string TransferRackCode { get; set; } = string.Empty;
+    public string TransferRackDisplayName { get; set; } = string.Empty;
 
     /// <summary>分配的线路（1或2，由 HomeViewModel 在启动时自动判断）</summary>
     public int AssignedLine { get; set; }
@@ -62,6 +66,15 @@ public sealed class TaskRowViewModel : ObservableObject
             OnPropertyChanged(nameof(ActionText));
             Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 已暂停");
         }
+    }
+
+    public void RejectStart(string reason)
+    {
+        _isRunning = false;
+        State = "待执行";
+        Step = reason;
+        OnPropertyChanged(nameof(ActionText));
+        Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 启动被拒绝: {reason}");
     }
 }
 

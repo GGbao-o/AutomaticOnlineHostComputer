@@ -45,6 +45,8 @@ D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Controls\OverviewDeviceCard.baml
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Controls\StatusCard.baml
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\AddTaskDialog.baml
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\ClearMachineStatusDialog.baml
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\CraneMoveDialog.baml
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\RouteSelectDialog.baml
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Machine\Dialogs\AddMachineDialog.baml
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Machine\MachineManagementView.baml
@@ -59,6 +61,8 @@ D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Controls\OverviewDeviceCard.g.cs
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Controls\StatusCard.g.cs
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\AddTaskDialog.g.cs
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\ClearMachineStatusDialog.g.cs
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\CraneMoveDialog.g.cs
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\RouteSelectDialog.g.cs
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\HomeView.g.cs
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Machine\Dialogs\AddMachineDialog.g.cs

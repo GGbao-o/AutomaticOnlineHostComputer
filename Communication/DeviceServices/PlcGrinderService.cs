@@ -278,6 +278,35 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             await LongSignalAsync(Addr.Bit_UnloadDone, Addr.R_UnloadDone, ct);
         }
 
+        /// <summary>
+        /// 清空所有输出信号（上位机→PLC），用于急停后恢复。
+        /// TypeA: 40011 全部bit写0。TypeB: R7311~R7315 → 0。
+        /// 注意：不经过3s长信号，直接写0。
+        /// </summary>
+        public async Task ClearAllOutputsAsync(CancellationToken ct = default)
+        {
+            if (_type == GrinderType.TypeA)
+            {
+                // 西门子: 40011 写0 清所有bit (读-改-写保护其他寄存器)
+                await _client.WriteAsync(_doRegAddr, 0, ct);
+                Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 清空输出 40011→0");
+            }
+            else
+            {
+                // 新代: R7311~R7315 写0
+                var addrs = new[] {
+                    Addr.RToModbus(Addr.R_DataSentDone),     // R7311 → 14623
+                    Addr.RToModbus(Addr.R_LoadInPlace),      // R7312 → 14625
+                    Addr.RToModbus(Addr.R_LoadDone),         // R7313 → 14627
+                    Addr.RToModbus(Addr.R_UnloadInPlace),    // R7314 → 14629
+                    Addr.RToModbus(Addr.R_UnloadDone),       // R7315 → 14631
+                };
+                foreach (var addr in addrs)
+                    await _client.WriteAsync(addr, 0, ct);
+                Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 清空输出 R7311~R7315→0");
+            }
+        }
+
         // ═══════════════════════════════════════════════════════════════
         //  私有辅助
         // ═══════════════════════════════════════════════════════════════

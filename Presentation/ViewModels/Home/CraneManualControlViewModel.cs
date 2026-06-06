@@ -111,7 +111,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
     private bool IsCraneOnly => _selectedDevice?.DeviceType == ManualDeviceType.Crane;
 
     // ═══════════════════════════════════════════════════════════════
-    //  点动距离
+    //  点动距离 / 相对移动距离
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>单次点动距离（mm），默认 1000，用户可修改。</summary>
@@ -120,6 +120,84 @@ public sealed class CraneManualControlViewModel : ObservableObject
     {
         get => _stepDistance;
         set => SetField(ref _stepDistance, value);
+    }
+
+    /// <summary>相对移动距离（mm），默认100。读当前坐标±此值=绝对移动目标。</summary>
+    private int _relativeMoveDistance = 100;
+    public int RelativeMoveDistance
+    {
+        get => _relativeMoveDistance;
+        set => SetField(ref _relativeMoveDistance, value);
+    }
+
+    /// <summary>X+ 相对移动: 当前X + 距离 → 绝对移动</summary>
+    private async Task RelativeMoveXPlusAsync()
+    {
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击【相对移动 X+】 距离={RelativeMoveDistance}mm");
+        await RelativeMoveAsync('X', true);
+    }
+    private async Task RelativeMoveXMinusAsync()
+    {
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击【相对移动 X-】 距离={RelativeMoveDistance}mm");
+        await RelativeMoveAsync('X', false);
+    }
+    private async Task RelativeMoveYPlusAsync()
+    {
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击【相对移动 Y+】 距离={RelativeMoveDistance}mm");
+        await RelativeMoveAsync('Y', true);
+    }
+    private async Task RelativeMoveYMinusAsync()
+    {
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击【相对移动 Y-】 距离={RelativeMoveDistance}mm");
+        await RelativeMoveAsync('Y', false);
+    }
+    private async Task RelativeMoveZPlusAsync()
+    {
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击【相对移动 Z+】 距离={RelativeMoveDistance}mm");
+        await RelativeMoveAsync('Z', true);
+    }
+    private async Task RelativeMoveZMinusAsync()
+    {
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击【相对移动 Z-】 距离={RelativeMoveDistance}mm");
+        await RelativeMoveAsync('Z', false);
+    }
+
+    /// <summary>相对移动核心: 读当前坐标 → ±距离 → 调用绝对移动</summary>
+    private async Task RelativeMoveAsync(char axis, bool positive)
+    {
+        if (RelativeMoveDistance == 0)
+        {
+            Console.WriteLine("[CraneManualVM] 相对移动距离为0, 无需移动");
+            return;
+        }
+        using var cts = new CancellationTokenSource(ManualCommandTimeout);
+        var service = await EnsureConnectedServiceAsync(cts.Token);
+        int d = positive ? RelativeMoveDistance : -RelativeMoveDistance;
+        int x = -1, y = -1, z = -1;
+        if (axis == 'X')
+        {
+            var s = await service.ReadStatusAsync(cts.Token);
+            if (s == null) { Console.WriteLine("[CraneManualVM] 读当前X坐标失败"); return; }
+            x = s.XPos + d;
+        }
+        else if (axis == 'Y')
+        {
+            var s = await service.ReadStatusAsync(cts.Token);
+            if (s == null) { Console.WriteLine("[CraneManualVM] 读当前Y坐标失败"); return; }
+            y = s.YPos + d;
+        }
+        else
+        {
+            var s = await service.ReadStatusAsync(cts.Token);
+            if (s == null) { Console.WriteLine("[CraneManualVM] 读当前Z坐标失败"); return; }
+            z = s.ZPos + d;
+        }
+        var name = CurrentDeviceName;
+        Console.WriteLine($"[CraneManualVM] [{name}] 相对移动 {axis}{(positive?"+":"-")}{RelativeMoveDistance}mm → 目标({x},{y},{z})");
+        await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ, cts.Token);
+        await service.MoveAbsoluteAsync(x, y, z, ct: cts.Token);
+        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 相对移动完成 {axis}→{d}mm");
+        await LogCurrentPositionAsync(service, name, $"相对{axis}{(positive?"+":"-")}{RelativeMoveDistance}");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -220,6 +298,12 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     /// <summary>读取当前位置填入目标输入框</summary>
     public ICommand RefreshTargetCommand { get; }
+    public ICommand RelativeMoveXPlusCommand { get; }
+    public ICommand RelativeMoveXMinusCommand { get; }
+    public ICommand RelativeMoveYPlusCommand { get; }
+    public ICommand RelativeMoveYMinusCommand { get; }
+    public ICommand RelativeMoveZPlusCommand { get; }
+    public ICommand RelativeMoveZMinusCommand { get; }
 
     // ═══════════════════════════════════════════════════════════════
     //  构造
@@ -274,6 +358,12 @@ public sealed class CraneManualControlViewModel : ObservableObject
         SetAbsSpeedCommand  = new AsyncRelayCommand(SetAbsSpeedAsync,  nameof(SetAbsSpeedCommand));
         MoveAbsoluteCommand = new AsyncRelayCommand(MoveAbsoluteAsync, nameof(MoveAbsoluteCommand));
         RefreshTargetCommand = new AsyncRelayCommand(RefreshTargetsFromCurrentAsync, nameof(RefreshTargetCommand));
+        RelativeMoveXPlusCommand  = new AsyncRelayCommand(RelativeMoveXPlusAsync,  nameof(RelativeMoveXPlusCommand));
+        RelativeMoveXMinusCommand = new AsyncRelayCommand(RelativeMoveXMinusAsync, nameof(RelativeMoveXMinusCommand));
+        RelativeMoveYPlusCommand  = new AsyncRelayCommand(RelativeMoveYPlusAsync,  nameof(RelativeMoveYPlusCommand));
+        RelativeMoveYMinusCommand = new AsyncRelayCommand(RelativeMoveYMinusAsync, nameof(RelativeMoveYMinusCommand));
+        RelativeMoveZPlusCommand  = new AsyncRelayCommand(RelativeMoveZPlusAsync,  nameof(RelativeMoveZPlusCommand));
+        RelativeMoveZMinusCommand = new AsyncRelayCommand(RelativeMoveZMinusAsync, nameof(RelativeMoveZMinusCommand));
 
         Console.WriteLine("[CraneManualVM] 手动控制VM已创建（8设备：5天车+3机械手）。");
     }

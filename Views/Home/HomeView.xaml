@@ -35,6 +35,18 @@
                     Click="RouteSelect_Click"
                     Content="线路选取" />
                 <Button
+                    Width="84"
+                    Height="28"
+                    Margin="2"
+                    Click="ClearMachineStatus_Click"
+                    Content="清空状态" />
+                <Button
+                    Width="96"
+                    Height="28"
+                    Margin="2"
+                    Click="CraneMove_Click"
+                    Content="天车移动" />
+                <Button
                     Width="90"
                     Height="28"
                     Margin="2"
@@ -83,7 +95,7 @@
                             Click="AddTask_Click"
                             Content="添加任务" />
 
-                        <Button
+                        <!--<Button
                             Width="70"
                             Height="30"
                             Margin="2"
@@ -95,7 +107,7 @@
                             Height="30"
                             Margin="2"
                             Command="{Binding TestRearPickup2Command}"
-                            Content="测试2号线后天车取料" />
+                            Content="测试2号线后天车取料" />-->
 
                         <Separator Width="8" />
 
@@ -196,31 +208,31 @@
             BorderBrush="#BFC8D6"
             BorderThickness="1">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                <Grid
+                <!--<Grid
                     MinWidth="300"
                     MinHeight="560"
                     Margin="6">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <!--  0: 选择设备  -->
+                        ~1~  0: 选择设备  @1@
                         <RowDefinition Height="Auto" />
-                        <!--  1: 单次距离  -->
+                        ~1~  1: 单次距离  @1@
                         <RowDefinition Height="Auto" />
-                        <!--  2: 相对速度(点动用)  -->
+                        ~1~  2: 相对速度(点动用)  @1@
                         <RowDefinition Height="Auto" />
-                        <!--  3: 绝对速度 + [应用]  -->
+                        ~1~  3: 绝对速度 + [应用]  @1@
                         <RowDefinition Height="Auto" />
-                        <!--  4: 目标坐标 + [绝对移动]  -->
+                        ~1~  4: 目标坐标 + [绝对移动]  @1@
                         <RowDefinition Height="Auto" />
-                        <!--  5: 手动动作  -->
+                        ~1~  5: 手动动作  @1@
                         <RowDefinition Height="Auto" />
-                        <!--  6: 按钮区  -->
+                        ~1~  6: 按钮区  @1@
                         <RowDefinition Height="*" />
-                        <!--  7: 日志关键字  -->
+                        ~1~  7: 日志关键字  @1@
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
@@ -229,126 +241,82 @@
                         Text="选择设备" />
                     <ComboBox
                         Grid.Column="1"
-                        MinWidth="160"
+                        MinWidth="200"
+                        MaxWidth="400"
                         Margin="4"
+                        HorizontalAlignment="Left"
                         DisplayMemberPath="DisplayName"
                         ItemsSource="{Binding ManualControl.DeviceItems}"
                         SelectedItem="{Binding ManualControl.SelectedDevice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                     <TextBlock
                         Grid.Column="2"
-                        Margin="4"
+                        Margin="4,4,0,4"
+                        HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Text="{Binding ManualControl.SelectedDeviceDisplay}"
                         TextWrapping="Wrap" />
-                    <!--单次运动距离
+
+                    ~1~  1: 相对移动距离(所有轴共用)  @1@
                     <TextBlock
-                    Grid.Row="1"
-                    Margin="4"
-                    VerticalAlignment="Center"
-                    Text="单次距离(mm)" />
+                        Grid.Row="1"
+                        Margin="4"
+                        VerticalAlignment="Center"
+                        Text="距离(mm)" />
                     <TextBox
-                    Grid.Row="1"
-                    Grid.Column="1"
-                    Margin="4"
-                    Text="{Binding ManualControl.StepDistance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                    <TextBlock
-                    Grid.Row="1"
-                    Grid.Column="2"
-                    Margin="4"
-                    VerticalAlignment="Center"
-                    Text="手动控制模式" />-->
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Width="80"
+                        Margin="4"
+                        HorizontalAlignment="Left"
+                        Text="{Binding ManualControl.RelativeMoveDistance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
-                    <!--~1~  相对运动 速度/加减速设置（每轴独立）  @1@
-                     <TextBlock
-                     Grid.Row="2"
-                     Margin="4"
-                     VerticalAlignment="Center"
-                     Text="相对速X" />
-                     <StackPanel
-                     Grid.Row="2"
-                     Grid.Column="1"
-                     Orientation="Horizontal">
-                     <TextBox
-                     Width="45"
-                     Margin="0,4,2,4"
-                     Text="{Binding ManualControl.RelSpeedX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                     <TextBlock
-                     Margin="2,4"
-                     VerticalAlignment="Center"
-                     Text="加" />
-                     <TextBox
-                     Width="45"
-                     Margin="2,4"
-                     Text="{Binding ManualControl.RelAccelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                     <TextBlock
-                     Margin="2,4"
-                     VerticalAlignment="Center"
-                     Text="减" />
-                     <TextBox
-                     Width="45"
-                     Margin="2,4"
-                     Text="{Binding ManualControl.RelDecelX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                     <TextBlock
-                     Margin="6,4,2,4"
-                     VerticalAlignment="Center"
-                     Text="Y" />
-                     <TextBox
-                     Width="45"
-                     Margin="2,4"
-                     Text="{Binding ManualControl.RelSpeedY, Mode=TwoWay}" />
-                     <TextBlock
-                     Margin="2,4"
-                     VerticalAlignment="Center"
-                     Text="加" />
-                     <TextBox
-                     Width="45"
-                     Margin="2,4"
-                     Text="{Binding ManualControl.RelAccelY, Mode=TwoWay}" />
-                     <TextBlock
-                     Margin="2,4"
-                     VerticalAlignment="Center"
-                     Text="减" />
-                     <TextBox
-                     Width="45"
-                     Margin="2,4"
-                     Text="{Binding ManualControl.RelDecelY, Mode=TwoWay}" />
-                     <TextBlock
-                     Margin="6,4,2,4"
-                     VerticalAlignment="Center"
-                     Text="Z" />
-                     <TextBox
-                     Width="45"
-                     Margin="2,4"
-                     Text="{Binding ManualControl.RelSpeedZ, Mode=TwoWay}" />
-                     <TextBlock
-                     Margin="2,4"
-                     VerticalAlignment="Center"
-                     Text="加" />
-                     <TextBox
-                     Width="45"
-                     Margin="2,4"
-                     Text="{Binding ManualControl.RelAccelZ, Mode=TwoWay}" />
-                     <TextBlock
-                     Margin="2,4"
-                     VerticalAlignment="Center"
-                     Text="减" />
-                     <TextBox
-                     Width="45"
-                     Margin="2,4"
-                     Text="{Binding ManualControl.RelDecelZ, Mode=TwoWay}" />
+                    ~1~  2: 相对移动方向按钮(基于当前坐标±距离 → 绝对移动)  @1@
+                    <StackPanel
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        Margin="4,4,4,0"
+                        HorizontalAlignment="Left"
+                        Orientation="Horizontal">
+                        <Button
+                            Width="36"
+                            Height="26"
+                            Margin="1"
+                            Command="{Binding ManualControl.RelativeMoveXMinusCommand}"
+                            Content="X-" />
+                        <Button
+                            Width="36"
+                            Height="26"
+                            Margin="1"
+                            Command="{Binding ManualControl.RelativeMoveXPlusCommand}"
+                            Content="X+" />
+                        <Button
+                            Width="36"
+                            Height="26"
+                            Margin="6,1,1,1"
+                            Command="{Binding ManualControl.RelativeMoveYMinusCommand}"
+                            Content="Y-" />
+                        <Button
+                            Width="36"
+                            Height="26"
+                            Margin="1"
+                            Command="{Binding ManualControl.RelativeMoveYPlusCommand}"
+                            Content="Y+" />
+                        <Button
+                            Width="36"
+                            Height="26"
+                            Margin="6,1,1,1"
+                            Command="{Binding ManualControl.RelativeMoveZMinusCommand}"
+                            Content="Z-" />
+                        <Button
+                            Width="36"
+                            Height="26"
+                            Margin="1"
+                            Command="{Binding ManualControl.RelativeMoveZPlusCommand}"
+                            Content="Z+" />
                     </StackPanel>
-                     <Button
-                     Grid.Row="2"
-                     Grid.Column="2"
-                     Width="70"
-                     Height="26"
-                     Margin="4,0"
-                     VerticalAlignment="Center"
-                     Command="{Binding ManualControl.SetRelSpeedCommand}"
-                     Content="应用速度" />-->
 
-                    <!--  绝对运动 速度设置(绝对移动用，每轴独立)  -->
+                    ~1~  绝对运动 速度设置(绝对移动用，每轴独立)  @1@
                     <TextBlock
                         Grid.Row="3"
                         Margin="4"
@@ -437,7 +405,7 @@
                         Command="{Binding ManualControl.SetAbsSpeedCommand}"
                         Content="应用速度" />
 
-                    <!--  绝对位移 目标坐标 + 移动按钮  -->
+                    ~1~  绝对位移 目标坐标 + 移动按钮  @1@
                     <TextBlock
                         Grid.Row="4"
                         Margin="4"
@@ -494,34 +462,14 @@
                             Content="绝对移动" />
                     </StackPanel>
 
-                    <!--<TextBlock
-                    Grid.Row="6"
-                    Margin="4"
-                    VerticalAlignment="Center"
-                    Text="手动动作" />
-                    <TextBlock
-                    Grid.Row="6"
-                    Grid.Column="1"
-                    Margin="4"
-                    Foreground="#B45309"
-                    Text="所有动作均输出控制台日志" />-->
+
                     <UniformGrid
                         Grid.Row="6"
                         Grid.ColumnSpan="2"
+                        Width="300"
                         Margin="2"
+                        HorizontalAlignment="Left"
                         Columns="2">
-                        <!--<Button
-                            Height="32"
-                            Margin="2"
-                            Command="{Binding ManualControl.XPlusCommand}"
-                            Content="X+"
-                            IsEnabled="{Binding ManualControl.IsCraneSelected}" />
-                        <Button
-                            Height="32"
-                            Margin="2"
-                            Command="{Binding ManualControl.XMinusCommand}"
-                            Content="X-"
-                            IsEnabled="{Binding ManualControl.IsCraneSelected}" />-->
                         <Button
                             Height="32"
                             Margin="2"
@@ -532,16 +480,6 @@
                             Margin="2"
                             Command="{Binding ManualControl.EStopCommand}"
                             Content="急停" />
-                        <!--<Button
-                            Height="32"
-                            Margin="2"
-                            Command="{Binding ManualControl.YPlusCommand}"
-                            Content="Y+" />
-                        <Button
-                            Height="32"
-                            Margin="2"
-                            Command="{Binding ManualControl.YMinusCommand}"
-                            Content="Y-" />-->
                         <Button
                             Height="32"
                             Margin="2"
@@ -553,16 +491,7 @@
                             Margin="2"
                             Command="{Binding ManualControl.HomeYCommand}"
                             Content="Y回原点" />
-                        <!--<Button
-                            Height="32"
-                            Margin="2"
-                            Command="{Binding ManualControl.ZPlusCommand}"
-                            Content="Z+" />
-                        <Button
-                            Height="32"
-                            Margin="2"
-                            Command="{Binding ManualControl.ZMinusCommand}"
-                            Content="Z-" />-->
+
                         <Button
                             Height="32"
                             Margin="2"
@@ -616,7 +545,251 @@
                         Margin="6,10,6,0"
                         FontWeight="Bold"
                         Text="日志关键字：[CraneManualVM] / [CraneService] / [ModbusTcpClient]" />
-                </Grid>
+                </Grid>-->
+                <StackPanel Margin="8">
+                    <!--  设备  -->
+                    <GroupBox Margin="0,0,0,8" Header="设备选择">
+                        <Grid Margin="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox
+                                Width="150"
+                                Height="20"
+                                HorizontalAlignment="Left"
+                                DisplayMemberPath="DisplayName"
+                                ItemsSource="{Binding ManualControl.DeviceItems}"
+                                SelectedItem="{Binding ManualControl.SelectedDevice}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                Margin="10,0,0,0"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Text="{Binding ManualControl.SelectedDeviceDisplay}" />
+                        </Grid>
+                    </GroupBox>
+
+                    <!--  点动  -->
+                    <GroupBox Margin="0,0,0,8" Header="相对移动">
+                        <StackPanel Margin="6">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock
+                                    Width="80"
+                                    VerticalAlignment="Center"
+                                    Text="距离(mm)" />
+                                <TextBox Width="100" Text="{Binding ManualControl.RelativeMoveDistance}" />
+                            </StackPanel>
+
+                            <UniformGrid
+                                Margin="0,10,0,0"
+                                HorizontalAlignment="Left"
+                                Columns="6">
+
+                                <Button
+                                    Width="50"
+                                    Height="30"
+                                    Command="{Binding ManualControl.RelativeMoveXMinusCommand}"
+                                    Content="X-" />
+                                <Button
+                                    Width="50"
+                                    Height="30"
+                                    Command="{Binding ManualControl.RelativeMoveXPlusCommand}"
+                                    Content="X+" />
+                                <Button
+                                    Width="50"
+                                    Height="30"
+                                    Command="{Binding ManualControl.RelativeMoveYMinusCommand}"
+                                    Content="Y-" />
+                                <Button
+                                    Width="50"
+                                    Height="30"
+                                    Command="{Binding ManualControl.RelativeMoveYPlusCommand}"
+                                    Content="Y+" />
+                                <Button
+                                    Width="50"
+                                    Height="30"
+                                    Command="{Binding ManualControl.RelativeMoveZMinusCommand}"
+                                    Content="Z-" />
+                                <Button
+                                    Width="50"
+                                    Height="30"
+                                    Command="{Binding ManualControl.RelativeMoveZPlusCommand}"
+                                    Content="Z+" />
+                            </UniformGrid>
+                        </StackPanel>
+                    </GroupBox>
+
+
+                    <!--  速度  -->
+                    <GroupBox Margin="0,0,0,8" Header="绝对运动参数">
+
+                        <Grid Margin="6">
+
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="50" />
+                                <ColumnDefinition Width="70" />
+                                <ColumnDefinition Width="70" />
+                                <ColumnDefinition Width="70" />
+                                <ColumnDefinition Width="100" />
+                            </Grid.ColumnDefinitions>
+
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <!--  X  -->
+                            <TextBlock
+                                Grid.Row="0"
+                                VerticalAlignment="Center"
+                                Text="X" />
+
+                            <TextBox
+                                Grid.Row="0"
+                                Grid.Column="1"
+                                Text="{Binding ManualControl.AbsSpeedX}" />
+
+                            <TextBox
+                                Grid.Row="0"
+                                Grid.Column="2"
+                                Text="{Binding ManualControl.AbsAccelX}" />
+
+                            <TextBox
+                                Grid.Row="0"
+                                Grid.Column="3"
+                                Text="{Binding ManualControl.AbsDecelX}" />
+
+                            <!--  Y  -->
+                            <TextBlock
+                                Grid.Row="1"
+                                VerticalAlignment="Center"
+                                Text="Y" />
+
+                            <TextBox
+                                Grid.Row="1"
+                                Grid.Column="1"
+                                Text="{Binding ManualControl.AbsSpeedY}" />
+
+                            <TextBox
+                                Grid.Row="1"
+                                Grid.Column="2"
+                                Text="{Binding ManualControl.AbsAccelY}" />
+
+                            <TextBox
+                                Grid.Row="1"
+                                Grid.Column="3"
+                                Text="{Binding ManualControl.AbsDecelY}" />
+
+                            <!--  Z  -->
+                            <TextBlock
+                                Grid.Row="2"
+                                VerticalAlignment="Center"
+                                Text="Z" />
+
+                            <TextBox
+                                Grid.Row="2"
+                                Grid.Column="1"
+                                Text="{Binding ManualControl.AbsSpeedZ}" />
+
+                            <TextBox
+                                Grid.Row="2"
+                                Grid.Column="2"
+                                Text="{Binding ManualControl.AbsAccelZ}" />
+
+                            <TextBox
+                                Grid.Row="2"
+                                Grid.Column="3"
+                                Text="{Binding ManualControl.AbsDecelZ}" />
+
+                            <Button
+                                Grid.RowSpan="3"
+                                Grid.Column="4"
+                                Margin="8,0,0,0"
+                                Command="{Binding ManualControl.SetAbsSpeedCommand}"
+                                Content="应用速度" />
+                        </Grid>
+
+                    </GroupBox>
+                    <!--  目标位置  -->
+                    <GroupBox Margin="0,0,0,8" Header="目标位置">
+
+                        <StackPanel Margin="6">
+
+                            <StackPanel Orientation="Horizontal">
+
+                                <TextBlock VerticalAlignment="Center" Text="X" />
+                                <TextBox
+                                    Width="80"
+                                    Margin="4,0"
+                                    Text="{Binding ManualControl.AbsXTarget}" />
+
+                                <TextBlock VerticalAlignment="Center" Text="Y" />
+                                <TextBox
+                                    Width="80"
+                                    Margin="4,0"
+                                    Text="{Binding ManualControl.AbsYTarget}" />
+
+                                <TextBlock VerticalAlignment="Center" Text="Z" />
+                                <TextBox
+                                    Width="80"
+                                    Margin="4,0"
+                                    Text="{Binding ManualControl.AbsZTarget}" />
+
+                            </StackPanel>
+
+                            <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+
+                                <Button
+                                    Width="120"
+                                    Command="{Binding ManualControl.RefreshTargetCommand}"
+                                    Content="读取当前位置" />
+
+                                <Button
+                                    Width="120"
+                                    Margin="8,0,0,0"
+                                    Command="{Binding ManualControl.MoveAbsoluteCommand}"
+                                    Content="绝对移动" />
+                            </StackPanel>
+
+                        </StackPanel>
+
+                    </GroupBox>
+                    <!--  动作  -->
+                    <GroupBox Header="设备操作">
+
+                        <UniformGrid Columns="2">
+
+                            <Button Command="{Binding ManualControl.StopCommand}" Content="减速停止" />
+
+                            <Button Command="{Binding ManualControl.EStopCommand}" Content="急停" />
+
+                            <Button Command="{Binding ManualControl.HomeXCommand}" Content="X回原点" />
+
+                            <Button Command="{Binding ManualControl.HomeYCommand}" Content="Y回原点" />
+
+                            <Button Command="{Binding ManualControl.HomeZCommand}" Content="Z回原点" />
+
+                            <Button Command="{Binding ManualControl.ClearFaultCommand}" Content="清除报警" />
+
+                            <Button Command="{Binding ManualControl.ServoPowerOnCommand}" Content="伺服通电" />
+
+                            <Button Command="{Binding ManualControl.ServoPowerOffCommand}" Content="伺服断电" />
+
+                            <Button Command="{Binding ManualControl.MagnetOnCommand}" Content="磁铁吸合" />
+
+                            <Button Command="{Binding ManualControl.MagnetOffCommand}" Content="磁铁释放" />
+
+                            <Button Command="{Binding ManualControl.DrainOpenCommand}" Content="接液盘打开" />
+
+                            <Button Command="{Binding ManualControl.DrainCloseCommand}" Content="接液盘关闭" />
+
+                        </UniformGrid>
+
+                    </GroupBox>
+
+                </StackPanel>
             </ScrollViewer>
         </Border>
         <!--  第三部分  -->

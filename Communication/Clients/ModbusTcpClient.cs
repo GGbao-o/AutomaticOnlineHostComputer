@@ -29,7 +29,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         private readonly int    _port;
         private readonly byte   _unitId;       // 从站地址（默认 1）
         private readonly int    _timeoutMs;
-        private readonly bool   _enableConsoleLog = true;
+        private readonly bool   _enableConsoleLog; // 默认false, 避免hex dump刷屏
 
         // ── 底层 TCP ─────────────────────────────────────────────────
         private TcpClient? _tcp;
@@ -44,12 +44,15 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         /// <param name="port">端口，默认 502</param>
         /// <param name="unitId">从站 ID，默认 1</param>
         /// <param name="timeoutMs">读写超时（毫秒），默认 3000</param>
-        public ModbusTcpClient(string ip, int port = 502, byte unitId = 1, int timeoutMs = 3000)
+        /// <param name="enableConsoleLog">是否打印 hex dump 日志，默认 false</param>
+        public ModbusTcpClient(string ip, int port = 502, byte unitId = 1, int timeoutMs = 3000,
+                               bool enableConsoleLog = false)
         {
             _ip        = ip;
             _port      = port;
             _unitId    = unitId;
             _timeoutMs = timeoutMs;
+            _enableConsoleLog = enableConsoleLog;
             if (_enableConsoleLog)
                 Console.WriteLine($"[ModbusTcpClient] 创建客户端 ip={_ip}:{_port}, unitId={_unitId}, timeout={_timeoutMs}ms");
         }
@@ -58,6 +61,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
 
         /// <inheritdoc/>
         public bool IsConnected => _tcp?.Connected == true;
+        private int OperationTimeoutMs => Math.Max(_timeoutMs, 5000);
 
         /// <inheritdoc/>
         public async Task ConnectAsync(CancellationToken ct = default)
@@ -67,6 +71,8 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             {
                 if (IsConnected) return;
 
+                // 旧连接可能已经半断开但 TcpClient.Connected 仍为 true/旧值；重连前必须清理。
+                CloseSocketNoThrow();
                 _tcp = new TcpClient { SendTimeout = _timeoutMs, ReceiveTimeout = _timeoutMs };
                 if (_enableConsoleLog) Console.WriteLine($"[ModbusTcpClient] 开始连接 {_ip}:{_port}");
 
@@ -78,14 +84,19 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                 try
                 {
                     await _tcp.ConnectAsync(_ip, _port, linkedCts.Token);
+                    _stream = _tcp.GetStream();
+                    if (_enableConsoleLog) Console.WriteLine($"[ModbusTcpClient] 连接成功 {_ip}:{_port}");
                 }
                 catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
                 {
+                    CloseSocketNoThrow();
                     throw new TimeoutException($"Modbus TCP 连接超时（5s）：{_ip}:{_port}");
                 }
-
-                _stream = _tcp.GetStream();
-                if (_enableConsoleLog) Console.WriteLine($"[ModbusTcpClient] 连接成功 {_ip}:{_port}");
+                catch
+                {
+                    CloseSocketNoThrow();
+                    throw;
+                }
             }
             finally { _lock.Release(); }
         }
@@ -97,10 +108,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             await _lock.WaitAsync();
             try
             {
-                _stream?.Close();
-                _tcp?.Close();
-                _stream = null;
-                _tcp    = null;
+                CloseSocketNoThrow();
                 if (_enableConsoleLog) Console.WriteLine($"[ModbusTcpClient] 已断开 {_ip}:{_port}");
             }
             finally { _lock.Release(); }
@@ -206,6 +214,10 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             EnsureConnected();
 
             await _lock.WaitAsync(ct);
+            int opTimeoutMs = OperationTimeoutMs;
+            using var opTimeoutCts = new CancellationTokenSource(opTimeoutMs);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, opTimeoutCts.Token);
+            var ioCt = linkedCts.Token;
             try
             {
                 ushort tid = ++_transactionId;
@@ -224,14 +236,14 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                 if (_enableConsoleLog)
                     Console.WriteLine($"[ModbusTcpClient] TX tid={tid} unit={_unitId} pdu={BitConverter.ToString(pdu)} frame={BitConverter.ToString(request)}");
 
-                await _stream!.WriteAsync(request, ct);
+                await _stream!.WriteAsync(request, ioCt);
 
                 // 接收响应：MBAP(7) + PDU
                 var header = new byte[7];
-                await ReadExactAsync(_stream, header, 7, ct);
+                await ReadExactAsync(_stream, header, 7, ioCt);
                 int dataLen = ((header[4] << 8) | header[5]) - 1; // -1 去掉 UnitId
                 var body = new byte[dataLen];
-                await ReadExactAsync(_stream, body, dataLen, ct);
+                await ReadExactAsync(_stream, body, dataLen, ioCt);
 
                 if (_enableConsoleLog)
                     Console.WriteLine($"[ModbusTcpClient] RX tid={((header[0] << 8) | header[1])} header={BitConverter.ToString(header)} body={BitConverter.ToString(body)}");
@@ -241,6 +253,18 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                     throw new IOException($"Modbus 异常响应：错误码 0x{body[1]:X2}");
 
                 return body;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested && opTimeoutCts.IsCancellationRequested)
+            {
+                // 单次Modbus请求必须有硬超时；设备半开不回包时, 不能让主循环或动作任务一直挂住。
+                CloseSocketNoThrow();
+                throw new TimeoutException($"Modbus TCP请求超时({opTimeoutMs}ms)：{_ip}:{_port}");
+            }
+            catch
+            {
+                // 任何报文读写异常后都把连接标记为断开，防止后续继续复用坏 socket。
+                CloseSocketNoThrow();
+                throw;
             }
             finally { _lock.Release(); }
         }
@@ -346,6 +370,14 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                 if (n == 0) throw new IOException("Modbus TCP 连接已断开（远端关闭）。");
                 received += n;
             }
+        }
+
+        private void CloseSocketNoThrow()
+        {
+            try { _stream?.Close(); } catch { }
+            try { _tcp?.Close(); } catch { }
+            _stream = null;
+            _tcp = null;
         }
     }
 }

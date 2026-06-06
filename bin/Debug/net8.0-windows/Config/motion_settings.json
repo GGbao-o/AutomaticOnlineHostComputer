@@ -16,9 +16,9 @@
     "5": { "x": { "speed": 300, "accel": 80, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 70, "accel": 40, "decel": 40 } }
   },
   "manipulatorSpeeds": {
-    "1": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 400, "accel": 90, "decel": 40 }, "z": { "speed": 50, "accel": 40, "decel": 40 } },
-    "2": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 400, "accel": 90, "decel": 40 }, "z": { "speed": 50, "accel": 40, "decel": 40 } },
-    "3": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 400, "accel": 90, "decel": 40 }, "z": { "speed": 50, "accel": 40, "decel": 40 } }
+    "1": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 450, "accel": 90, "decel": 40 }, "z": { "speed": 50, "accel": 40, "decel": 40 } },
+    "2": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 450, "accel": 90, "decel": 40 }, "z": { "speed": 50, "accel": 40, "decel": 40 } },
+    "3": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 450, "accel": 90, "decel": 40 }, "z": { "speed": 50, "accel": 40, "decel": 40 } }
   },
   "relMove": {
     "defaultSpeed": 300,
@@ -59,21 +59,21 @@
     "grindingStuckTimeoutMs": 60000
   },
   "balancing": {
-    "rearCraneSafeX": -2000,
+    "rearCraneSafeX": -3000,
     "armCoords": {
-      "M817": { "y": 0, "z": 0 },
-      "M818": { "y": 0, "z": 0 },
-      "M819": { "y": 0, "z": 0 },
-      "M820": { "y": 0, "z": 0 },
-      "M821": { "y": 0, "z": 0 },
-      "M822": { "y": 0, "z": 0 }
+      "M817": { "y": 15680, "z": 339 },
+      "M818": { "y": 4675, "z": 304 },
+      "M710": { "y": 970, "z": 514 },
+      "M700": { "y": 100, "z": 339 },
+      "M821": { "y": 4675, "z": 304},
+      "M720": { "y": 15680, "z": 320 }
     }
   },
   "craneHomeX": {
     "1": 1000,
-    "2": -4000,
+    "2": -5000,
     "3": 1000,
-    "4": -4000,
+    "4": -5000,
     "5": 0
   },
   "skewBed": {
@@ -84,7 +84,7 @@
     "largeBoreOffset": 122,
     "smallBoreOffset": 55,
     "manipulator1SafeY": 11500,
-    "manipulator2SafeY": 12500,
-    "manipulator3SafeY": 12500
+    "manipulator2SafeY": 1000,
+    "manipulator3SafeY": 1000
   }
 }

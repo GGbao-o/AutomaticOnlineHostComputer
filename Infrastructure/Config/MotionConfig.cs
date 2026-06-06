@@ -124,7 +124,7 @@ public sealed class MotionConfig
     {
         /// <summary>后天车X坐标小于等于此值=已离开动平衡/研磨上料架区域, 机械手可安全进入</summary>
         public int RearCraneSafeX { get; set; } = -4000;
-        /// <summary>机械手自定义YZ坐标(Key=M817/M818/M819/M820/M821/M822, 非0时覆盖数据库坐标)</summary>
+        /// <summary>机械手自定义YZ坐标(Key=M817/M818/M710/M700/M821/M720, 非0时覆盖数据库坐标)</summary>
         public Dictionary<string, BalancingArmCoord> ArmCoords { get; set; } = new();
     }
 
@@ -138,7 +138,7 @@ public sealed class MotionConfig
     /// <summary>各天车归位X坐标(Key=天车编号1~5)。后天车同时作为机械手安全阈值。</summary>
     public Dictionary<int, int> CraneHomeX { get; set; } = new()
     {
-        [1] = 1000, [2] = -4000, [3] = 1000, [4] = -4000, [5] = 0,
+        [1] = 1000, [2] = -5000, [3] = 1000, [4] = -5000, [5] = 0,
     };
 
     /// <summary>取天车归位X(有配置用配置, 没有用默认)</summary>
