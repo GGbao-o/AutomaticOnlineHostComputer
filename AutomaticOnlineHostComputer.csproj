@@ -27,6 +27,9 @@
     <None Update="dbsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Config\motion_settings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="bin\Debug\net8.0-windows\Config\motion_settings.json" />
     <None Include="bin\Debug\net8.0-windows\motion_settings.json" />
     <Content Include="Libs\**\*.dll">
@@ -42,7 +45,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Docs\06-sql\" />
     <Folder Include="Libs\" />
   </ItemGroup>
 

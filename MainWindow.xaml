@@ -20,6 +20,9 @@
             <MenuItem Header="机器管理" Tag="machine" Click="MenuItem_Click" />
             <MenuItem Header="控制器管理" Tag="controller" Click="MenuItem_Click" />
             <MenuItem Header="工艺管理" Tag="process" Click="MenuItem_Click" />
+            <MenuItem Header="运动参数设置" Tag="motion" Click="MenuItem_Click" />
+            <MenuItem Header="设备总览" Tag="overview" Click="MenuItem_Click" />
+            <MenuItem Header="全流程状态" Tag="flowStatus" Click="MenuItem_Click" />
         </Menu>
 
         <ContentControl x:Name="ContentHost" Grid.Row="1" Margin="4" />

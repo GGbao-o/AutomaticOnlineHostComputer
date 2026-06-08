@@ -185,6 +185,7 @@ public sealed class HomeViewModel : ObservableObject
         Grinder4 = new GrinderCardViewModel("研磨机4(西门子)", "", PlcGrinderService.GrinderType.TypeA);
 
         WriteGrinderParamsCommand = new AsyncRelayCommand(WriteGrinderParamsAsync, nameof(WriteGrinderParamsCommand));
+        SkewBedToolSettingRows = CreateSkewBedToolSettingRows();
 
         GrindingToggleCommand = new AsyncRelayCommand(GrindingToggleAsync, nameof(GrindingToggleCommand));
         Line1ToggleCommand = new AsyncRelayCommand(Line1ToggleAsync, nameof(Line1ToggleCommand));
@@ -224,6 +225,9 @@ public sealed class HomeViewModel : ObservableObject
     public CraneCardViewModel CraneGL { get; }
 
     public CraneManualControlViewModel ManualControl { get; }
+
+    /// <summary>10台斜床的设备级对刀开关, 勾选后只覆盖该斜床后续写入的加工模式。</summary>
+    public ObservableCollection<SkewBedToolSettingRow> SkewBedToolSettingRows { get; }
 
     public ManipulatorCardViewModel Manipulator1 { get; }
     public ManipulatorCardViewModel Manipulator2 { get; }
@@ -272,6 +276,45 @@ public sealed class HomeViewModel : ObservableObject
 
     /// <summary>写入研磨参数到选中研磨机</summary>
     public ICommand WriteGrinderParamsCommand { get; }
+
+    private ObservableCollection<SkewBedToolSettingRow> CreateSkewBedToolSettingRows()
+    {
+        var beds = new (string Code, string Name)[]
+        {
+            ("ST108", "1号线斜床1 ST108"),
+            ("ST109", "1号线斜床2 ST109"),
+            ("ST111", "1号线斜床3 ST111"),
+            ("ST110", "1号线斜床4 ST110"),
+            ("ST112", "1号线斜床5 ST112"),
+            ("ST606", "2号线斜床1 ST606"),
+            ("ST607", "2号线斜床2 ST607"),
+            ("ST608", "2号线斜床3 ST608"),
+            ("ST609", "2号线斜床4 ST609"),
+            ("ST610", "2号线斜床5 ST610"),
+        };
+
+        return new ObservableCollection<SkewBedToolSettingRow>(
+            beds.Select(b => new SkewBedToolSettingRow(
+                b.Code,
+                b.Name,
+                _cfg.SkewBed.IsToolSettingEnabled(b.Code),
+                OnSkewBedToolSettingChanged)));
+    }
+
+    private void OnSkewBedToolSettingChanged(SkewBedToolSettingRow row)
+    {
+        // 设备级对刀设置只保存站号开关; 任务里的斜床工艺保持原值, 便于追溯原始任务。
+        _cfg.SkewBed.ToolSettingBeds[row.Code] = row.IsToolSetting;
+        try
+        {
+            _cfg.Save();
+            Console.WriteLine($"[HomeViewModel] 斜床对刀设置已保存: {row.Code}={(row.IsToolSetting ? "开启" : "关闭")}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[HomeViewModel] ⚠ 斜床对刀设置保存失败: {row.Code} {ex.Message}");
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  研磨自动流程引擎
@@ -733,10 +776,12 @@ public sealed class HomeViewModel : ObservableObject
 
         // ── 前后端共享中转架互斥锁 ──
         _sharedTransferRackLock = new SemaphoreSlim(1, 1);
+        // ── 机械手1只有一台, 1/2号线前端必须共用同一把锁, 防止两条线同时派机械手1 ──
+        _sharedManipulatorLock = new SemaphoreSlim(1, 1);
         var sharedSafety = new SafetyFlags();
 
         // ── 平衡料架位置锁(4把): 保护天车和机械手同时操作同一位置, 防止碰撞 ──
-        //    每把锁只保护一个信号地址: M817/M818/M821/M822
+        //    每把锁只保护一个信号地址: M817/M818/M821/M720
         //    持锁范围: 进入位置→放料/取料完成→离开位置后释放
         var lockM817 = new SemaphoreSlim(1, 1);
         var lockM818 = new SemaphoreSlim(1, 1);
@@ -759,24 +804,25 @@ public sealed class HomeViewModel : ObservableObject
             Console.WriteLine($"[HomeViewModel] ⚠ MC 192.168.2.63 连接失败(5s超时): {ex.Message}");
             Console.WriteLine("[HomeViewModel]   前端引擎后续仍通过共享MC缓存重连, 禁止1/2号线各自直连");
         }
-        _line1Engine = new Line1FrontFlowEngine(_craneCache, _manipulatorCache, _cfg, grindingCoords, _sharedTransferRackLock, sharedSafety, rackSvc: frontRackSvc);
+        _line1Engine = new Line1FrontFlowEngine(_craneCache, _manipulatorCache, _cfg, grindingCoords,
+            _sharedTransferRackLock, sharedSafety, rackSvc: frontRackSvc,
+            manipulatorLock: _sharedManipulatorLock);
         Console.WriteLine("[HomeViewModel] 1号线前端流程引擎已创建" + (sharedMc63Ready ? "(共享MC63已连接)" : "(共享MC63待重连)"));
 
         // ── 创建1号线后端流程引擎 (中转架状态从前端DeviceStatus读取) ──
-        // M817+M822 锁传给1号线后端: DoUnload长工件→M817, 短工件→M822
+        // M817+M720 锁传给1号线后端: DoUnload长工件→M817, 短工件→M720
         _line1RearEngine = new Line1RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords,
             _sharedTransferRackLock, sharedSafety, _line1Engine.DeviceStatus,
             lockM817: lockM817, lockM720: lockM720);
         Console.WriteLine("[HomeViewModel] 1号线后端流程引擎已创建");
 
         // ── 创建机械手2动平衡流转引擎 ──
-        // 4把锁全传: M2Flow用M817或M818, M3Flow用M821+M822
+        // 4把锁全传: M2Flow用M817或M818, M3Flow用M821+M720
         _line1BalancingEngine = new BalancingFlowEngine(_manipulatorCache, _craneCache, _mcCache, _cfg, grindingCoords,
             lockM817, lockM818, lockM821, lockM720);
         Console.WriteLine("[HomeViewModel] 机械手2动平衡流转引擎已创建(两条线共用)");
 
         // ── 创建2号线流程引擎 ──────────────────────────────────────
-        _sharedManipulatorLock = new SemaphoreSlim(1, 1);
         _sharedTransferRackLock2 = new SemaphoreSlim(1, 1);
         var sharedSafety2 = new SafetyFlags();
 
@@ -791,18 +837,6 @@ public sealed class HomeViewModel : ObservableObject
             lockM818: lockM818, lockM821: lockM821);
         Console.WriteLine("[HomeViewModel] 2号线后端流程引擎已创建");
 
-        // 1号线+2号线共用机械手锁
-        // _line1Engine已在上面创建, 需要注入共享锁。但由于构造已调用, 这里通过反射或重新赋值。
-        // 实际方案: Line1FrontFlowEngine的_manipulatorLock已在构造中自建, 需要改为接受外部锁。
-        // 当前修复: Line1FrontFlowEngine构造已支持manipulatorLock参数, 重新创建
-        _line1Engine = new Line1FrontFlowEngine(_craneCache, _manipulatorCache, _cfg, grindingCoords,
-            _sharedTransferRackLock, sharedSafety, rackSvc: frontRackSvc,
-            manipulatorLock: _sharedManipulatorLock);
-        _line1RearEngine = new Line1RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords,
-            _sharedTransferRackLock, sharedSafety, _line1Engine.DeviceStatus,
-            lockM817: lockM817, lockM720: lockM720);
-        Console.WriteLine("[HomeViewModel] 1号线引擎已重建(共享机械手锁)");
-
         // ── 前后端联动: 前端放中转架→通知后端工件数据 ──
         _line1Engine.OnRackPlaced = (code, wp) => _line1RearEngine?.SetRackWorkpiece(code, wp);
         _line2Engine.OnRackPlaced = (code, wp) => _line2RearEngine?.SetRackWorkpiece(code, wp);
@@ -815,9 +849,6 @@ public sealed class HomeViewModel : ObservableObject
         _line1RearEngine!.OnGrindingRackPlaced = wp => _grindingEngine?.EnqueueWorkpiece(wp);
         _line1BalancingEngine!.OnGrindingRackPlaced = wp => _grindingEngine?.EnqueueWorkpiece(wp);
         Console.WriteLine("[HomeViewModel] 研磨上料联动已绑定(1号线后天车+M3Flow→研磨缓存)");
-
-        // ── 前后端联动: 前端放中转架 → 通知后端工件数据 ──
-        _line1Engine.OnRackPlaced = (code, wp) => _line1RearEngine?.SetRackWorkpiece(code, wp);
 
         // ── 启动1号线状态同步（引擎→UI卡片，不另建连接，500ms刷新）───
         _line1StatusCts = new CancellationTokenSource();
@@ -862,12 +893,12 @@ public sealed class HomeViewModel : ObservableObject
         EnsureNewCard("ST032", "中转站2");          // M812 192.168.2.63
         EnsureNewCard("ST033", "中转站3");          // M813 192.168.2.63
         // 下料架 / 动平衡 / 研磨上料架 (MC设备)
-        EnsureNewCard("ST013", "下料架1");          // → ST710 MC:192.168.2.64 M824
-        EnsureNewCard("ST709", "研磨机上料架");     // → ST709 MC:192.168.2.65 M817~M823
-        EnsureNewCard("ST710", "研磨机下料架");     // → ST710 MC:192.168.2.64
-        EnsureNewCard("ST175", "研磨机上料5");      // 192.168.2.65 M823相关
-        EnsureNewCard("ST176", "研磨机上料6");      // 同上
-        EnsureNewCard("ST177", "研磨机上料7");      // 同上
+        EnsureNewCard("ST013", "下料架1");          // → ST710 MC64: M720空闲/M730安全/D200直径
+        EnsureNewCard("ST709", "研磨机上料架");     // → ST709 MC65: M730末位有板/D200测长
+        EnsureNewCard("ST710", "研磨机下料架");     // → ST710 MC64: M720/M730
+        EnsureNewCard("ST175", "动平衡料架2");      // → MC65 M700 + D100直径
+        EnsureNewCard("ST176", "动平衡料架1");      // → MC65 M710
+        EnsureNewCard("ST177", "研磨上料1号位");    // → MC65 M720
         // 机械手2/3 (Modbus, 引擎托管)
         EnsureNewCard("ST005", "机械手2");          // → ST005 Modbus:192.168.2.86
         EnsureNewCard("ST006", "机械手3");          // → ST006 Modbus:192.168.2.87
@@ -1325,11 +1356,21 @@ public sealed class HomeViewModel : ObservableObject
                 return;
             }
 
-            // ① 自动分配线路(1200-1500强制1号线, 400-1200空闲优先否则按缓存数少的分)
+            // ① 自动分配线路
+            //    安全优先: 大直径工件强制1号线, 避免机械手1给1号线送料时与2号线货叉上的大板干涉。
+            //    业务规则: 1200-1500强制1号线, 400-1200空闲优先否则按缓存数少的分。
             int line;
-            if (taskRow.Length > 1200 && taskRow.Length <= 1500)
+            string routeReason;
+            int largeDiameterLine1OnlyMm = _cfg.SkewBed.LargeDiameterLine1OnlyMm;
+            if (largeDiameterLine1OnlyMm > 0 && taskRow.Diameter >= largeDiameterLine1OnlyMm)
+            {
+                line = 1;
+                routeReason = $"直径{taskRow.Diameter}mm>={largeDiameterLine1OnlyMm}mm, 强制1号线防止穿越2号线货叉区域大板干涉";
+            }
+            else if (taskRow.Length > 1200 && taskRow.Length <= 1500)
             {
                 line = 1; // 长版只能1号线
+                routeReason = "版长1200-1500mm, 只能1号线";
             }
             else if (taskRow.Length >= 400 && taskRow.Length <= 1200)
             {
@@ -1338,15 +1379,15 @@ public sealed class HomeViewModel : ObservableObject
                 int l1cnt = _line1Engine?.CachedCount ?? 999;
                 int l2cnt = _line2Engine?.CachedCount ?? 999;
 
-                if (!l1run && !l2run) line = _defaultRouteLine;           // 都没启动→按选取
-                else if (!l1run)      line = 2;                          // 只有2号线在跑
-                else if (!l2run)      line = 1;                          // 只有1号线在跑
-                else                  line = l1cnt <= l2cnt ? 1 : 2;     // 都在跑→缓存少的优先
+                if (!l1run && !l2run) { line = _defaultRouteLine; routeReason = "两线未启动, 按页面默认线路"; }
+                else if (!l1run)      { line = 2; routeReason = "只有2号线运行"; }
+                else if (!l2run)      { line = 1; routeReason = "只有1号线运行"; }
+                else                  { line = l1cnt <= l2cnt ? 1 : 2; routeReason = $"两线运行, 按缓存少优先(1号={l1cnt},2号={l2cnt})"; }
             }
-            else { line = 0; }
+            else { line = 0; routeReason = "版长不在任何线路范围内"; }
 
             taskRow.AssignedLine = line;
-            Console.WriteLine($"[HomeViewModel] 工件分配 版号={taskRow.PlateNo} L={taskRow.Length} → {line}号线 (1号线缓存={_line1Engine?.CachedCount} 2号线缓存={_line2Engine?.CachedCount})");
+            Console.WriteLine($"[HomeViewModel] 工件分配 版号={taskRow.PlateNo} D={taskRow.Diameter} L={taskRow.Length} → {line}号线; 原因={routeReason} (1号线缓存={_line1Engine?.CachedCount} 2号线缓存={_line2Engine?.CachedCount})");
 
             if (line == 0)
             {
@@ -1494,7 +1535,7 @@ public sealed class HomeViewModel : ObservableObject
             }
         }
 
-        // ── 3. 探测 192.168.2.64:9000 (下料架 ST710 + 动平衡料架) ─────
+        // ── 3. 探测 192.168.2.64:9000 (研磨下料架 ST710) ─────
         {
             var client = new MitsubishiMcClient("192.168.2.64", 9000, MitsubishiMcClient.DeviceM,
                 frameType: MitsubishiMcClient.McFrameType.A1E);
@@ -1505,21 +1546,23 @@ public sealed class HomeViewModel : ObservableObject
                 await client.ConnectAsync(cts.Token);
                 Console.WriteLine("[ProbeMC] [2.64下料架] TCP连接成功 ✓");
 
-                // 读 M800 起始 2 字 (M824=第2字bit0)
-                var result = await client.ReadAsync(800, 2, cts.Token);
-                ushort raw1 = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
-                ushort raw2 = (ushort)(result.IntValues.Length > 1 ? result.IntValues[1] : 0);
-                Console.WriteLine($"[ProbeMC] [2.64下料架] ✔ 读成功 M800~M815=0x{raw1:X4} M816~M831=0x{raw2:X4}");
+                // 与GrindingFlowEngine保持一致: MC64下料架读 M720起1字, M720=0空闲, M730=1安全位置。
+                var result = await client.ReadAsync(720, 1, cts.Token);
+                ushort raw = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
+                Console.WriteLine($"[ProbeMC] [2.64下料架] ✔ 读成功 M720~M735=0x{raw:X4}");
 
-                // raw1 bits: M800~M815, raw2 bits: M816~M831
-                bool m824 = (raw2 & (1 << 8)) != 0;  // M824=raw2 bit8 研磨机上料架(第一个)
-                // 读 D100
-                int plateLen = 0;
-                try { var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 100, 1, cts.Token); plateLen = d.IntValues.Length > 0 ? d.IntValues[0] : 0; }
+                bool m720Empty = (raw & 1) == 0;           // M720=0: 下料架空闲/可放料
+                bool m730Safe = (raw & (1 << 10)) != 0;   // M730=1: 下料架在安全位置
+                bool unloadReady = m720Empty && m730Safe;
+                // 读 D200: 研磨下料架最近写入/显示的工件直径。
+                int unloadDiameter = 0;
+                try { var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, cts.Token); unloadDiameter = d.IntValues.Length > 0 ? d.IntValues[0] : 0; }
                 catch { }
 
-                if (cards.TryGetValue("ST013", out var c13)) { c13.ConnectedBrush = Brushes.LimeGreen; c13.Status1 = m824 ? "有版" : "空闲"; c13.Status1Brush = m824 ? Brushes.Orange : Brushes.Green; c13.Status2 = $"板长={plateLen}mm"; c13.IpText = "192.168.2.64:9000"; }
-                if (cards.TryGetValue("ST710", out var c710)) { c710.ConnectedBrush = Brushes.LimeGreen; c710.Status1 = m824 ? "有版" : "空闲"; c710.Status1Brush = m824 ? Brushes.Orange : Brushes.Green; c710.Status2 = "M824"; c710.IpText = "192.168.2.64:9000"; }
+                string unloadState = unloadReady ? "可放料" : (!m720Empty ? "有版/占用" : "未到安全位");
+                var unloadBrush = unloadReady ? Brushes.Green : Brushes.Orange;
+                if (cards.TryGetValue("ST013", out var c13)) { c13.ConnectedBrush = Brushes.LimeGreen; c13.Status1 = unloadState; c13.Status1Brush = unloadBrush; c13.Status2 = $"D200直径={unloadDiameter}"; c13.IpText = "192.168.2.64:9000"; }
+                if (cards.TryGetValue("ST710", out var c710)) { c710.ConnectedBrush = Brushes.LimeGreen; c710.Status1 = unloadState; c710.Status1Brush = unloadBrush; c710.Status2 = $"M720={(m720Empty ? 0 : 1)} M730={(m730Safe ? 1 : 0)}"; c710.IpText = "192.168.2.64:9000"; }
                 Console.WriteLine("[ProbeMC] [2.64下料架] 卡片已更新: ST013✓ ST710✓");
             }
             catch (Exception ex)
@@ -1542,24 +1585,29 @@ public sealed class HomeViewModel : ObservableObject
                 await client.ConnectAsync(cts.Token);
                 Console.WriteLine("[ProbeMC] [2.65上料架] TCP连接成功 ✓");
 
-                // 读 M800 起始 2 字 (M817~M823 在第1字+第2字)
-                var result = await client.ReadAsync(800, 2, cts.Token);
+                // 与Balancing/Grinding引擎保持一致: MC65读 M700起2字。
+                // word0: M700~M715, word1: M716~M731。
+                var result = await client.ReadAsync(700, 2, cts.Token);
                 ushort raw1 = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
                 ushort raw2 = (ushort)(result.IntValues.Length > 1 ? result.IntValues[1] : 0);
-                Console.WriteLine($"[ProbeMC] [2.65上料架] ✔ 读成功 M800~M815=0x{raw1:X4} M816~M831=0x{raw2:X4}");
+                Console.WriteLine($"[ProbeMC] [2.65上料架] ✔ 读成功 M700~M715=0x{raw1:X4} M716~M731=0x{raw2:X4}");
 
-                // raw1 bits: M800~M815, raw2 bits: M816~M831
-                bool m817 = (raw2 & (1 << 1)) != 0;  // M817=raw2 bit1 1号线动平衡上料架1
-                bool m823 = (raw2 & (1 << 7)) != 0;  // M823=raw2 bit7 研磨机上料架6号位
-                // 读 D100
-                int plateLen = 0;
-                try { var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 100, 1, cts.Token); plateLen = d.IntValues.Length > 0 ? d.IntValues[0] : 0; }
+                bool m700 = (raw1 & (1 << 0)) != 0;   // M700: 人工动平衡后料架2有板
+                bool m710 = (raw1 & (1 << 10)) != 0;  // M710: 动平衡料架1有板
+                bool m720 = (raw2 & (1 << 4)) != 0;   // M720: 研磨上料架1号位有板/占用
+                bool m730 = (raw2 & (1 << 14)) != 0;  // M730: 研磨上料架3号位末端有板, 允许研磨天车取板
+                // D100=动平衡后料架2测量直径; D200=研磨上料架2号位测长。
+                int d100Diameter = 0;
+                int d200Length = 0;
+                try { var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 100, 1, cts.Token); d100Diameter = d.IntValues.Length > 0 ? d.IntValues[0] : 0; }
+                catch { }
+                try { var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, cts.Token); d200Length = d.IntValues.Length > 0 ? d.IntValues[0] : 0; }
                 catch { }
 
-                if (cards.TryGetValue("ST709", out var c709)) { c709.ConnectedBrush = Brushes.LimeGreen; c709.Status1 = m823 ? "有版(6号位)" : (m817 ? "有版(1号位)" : "空闲"); c709.Status1Brush = (m823||m817) ? Brushes.Orange : Brushes.Green; c709.Status2 = $"板长={plateLen}mm"; c709.IpText = "192.168.2.65:9000"; }
-                if (cards.TryGetValue("ST175", out var c175)) { c175.ConnectedBrush = Brushes.LimeGreen; c175.Status1 = "就绪"; c175.Status1Brush = Brushes.Green; c175.IpText = "192.168.2.65:9000"; }
-                if (cards.TryGetValue("ST176", out var c176)) { c176.ConnectedBrush = Brushes.LimeGreen; c176.Status1 = "就绪"; c176.Status1Brush = Brushes.Green; c176.IpText = "192.168.2.65:9000"; }
-                if (cards.TryGetValue("ST177", out var c177)) { c177.ConnectedBrush = Brushes.LimeGreen; c177.Status1 = "就绪"; c177.Status1Brush = Brushes.Green; c177.IpText = "192.168.2.65:9000"; }
+                if (cards.TryGetValue("ST709", out var c709)) { c709.ConnectedBrush = Brushes.LimeGreen; c709.Status1 = m730 ? "末位有版" : "末位无版"; c709.Status1Brush = m730 ? Brushes.Orange : Brushes.Green; c709.Status2 = $"D200长度={d200Length}"; c709.IpText = "192.168.2.65:9000"; }
+                if (cards.TryGetValue("ST175", out var c175)) { c175.ConnectedBrush = Brushes.LimeGreen; c175.Status1 = m700 ? "有版" : "空闲"; c175.Status1Brush = m700 ? Brushes.Orange : Brushes.Green; c175.Status2 = $"D100直径={d100Diameter}"; c175.IpText = "192.168.2.65:9000"; }
+                if (cards.TryGetValue("ST176", out var c176)) { c176.ConnectedBrush = Brushes.LimeGreen; c176.Status1 = m710 ? "有版" : "空闲"; c176.Status1Brush = m710 ? Brushes.Orange : Brushes.Green; c176.Status2 = "M710"; c176.IpText = "192.168.2.65:9000"; }
+                if (cards.TryGetValue("ST177", out var c177)) { c177.ConnectedBrush = Brushes.LimeGreen; c177.Status1 = m720 ? "有版/占用" : "空闲"; c177.Status1Brush = m720 ? Brushes.Orange : Brushes.Green; c177.Status2 = "M720"; c177.IpText = "192.168.2.65:9000"; }
                 Console.WriteLine("[ProbeMC] [2.65上料架] 卡片已更新: ST709✓ ST175✓ ST176✓ ST177✓");
             }
             catch (Exception ex)

@@ -167,6 +167,26 @@ public sealed class MotionConfig
         public int Manipulator2SafeY { get; set; } = 1000;
         /// <summary>机械手3 安全位 Y 坐标(mm)</summary>
         public int Manipulator3SafeY { get; set; } = 1000;
+        /// <summary>
+        /// 大直径工件强制分配1号线阈值(mm)。
+        /// 机械手1给1号线货叉送料时会经过2号线货叉区域; 超过此直径不进入2号线, 避免大板对大板干涉。
+        /// 配置为0或负数表示关闭该防碰撞分配规则。
+        /// </summary>
+        public int LargeDiameterLine1OnlyMm { get; set; } = 300;
+
+        /// <summary>
+        /// 每台斜床的设备级对刀开关(Key=ST108/ST109/.../ST610)。
+        /// true 时不改任务工艺本身, 只在后端写斜床加工参数时覆盖加工模式=6。
+        /// </summary>
+        public Dictionary<string, bool> ToolSettingBeds { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ST108"] = false, ["ST109"] = false, ["ST110"] = false, ["ST111"] = false, ["ST112"] = false,
+            ["ST606"] = false, ["ST607"] = false, ["ST608"] = false, ["ST609"] = false, ["ST610"] = false,
+        };
+
+        /// <summary>判断指定斜床是否启用设备级对刀模式。</summary>
+        public bool IsToolSettingEnabled(string stationCode)
+            => ToolSettingBeds.TryGetValue(stationCode, out var enabled) && enabled;
 
         /// <summary>根据站号和版孔类型计算 Y 轴目标偏移：Y = (顶尖距离-长度)/2 + 孔偏移</summary>
         public int ComputeYOffset(string stationCode, double workpieceLength, int plugHole)
@@ -213,5 +233,25 @@ public sealed class MotionConfig
             Console.WriteLine($"[MotionConfig] 配置加载失败：{ex.Message}，使用默认值。");
             return new MotionConfig();
         }
+    }
+
+    /// <summary>
+    /// 保存到当前程序运行目录的 Config/motion_settings.json。
+    /// 运动参数页修改设备级配置后立即调用, 引擎持有同一个 MotionConfig 实例可即时生效。
+    /// </summary>
+    public void Save()
+    {
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        var dir = Path.Combine(baseDir, "Config");
+        Directory.CreateDirectory(dir);
+
+        var path = Path.Combine(dir, "motion_settings.json");
+        var json = JsonSerializer.Serialize(this, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        });
+        File.WriteAllText(path, json);
+        Console.WriteLine($"[MotionConfig] 配置已保存：{path}");
     }
 }

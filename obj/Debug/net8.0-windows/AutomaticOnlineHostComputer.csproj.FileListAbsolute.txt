@@ -87,3 +87,12 @@ D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlineHostComputer.pdb
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlineHostComputer.genruntimeconfig.cache
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\ref\AutomaticOnlineHostComputer.dll
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Motion\Controls\ManualMotionControlPanel.baml
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Motion\Controls\ManualMotionControlPanel.g.cs
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Motion\MotionSettingsView.g.cs
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Motion\MotionSettingsView.baml
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\FlowStatus\FlowStatusView.g.cs
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Overview\EquipmentOverviewView.g.cs
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\FlowStatus\FlowStatusView.baml
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Overview\EquipmentOverviewView.baml
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\bin\Debug\net8.0-windows\Config\motion_settings.json
