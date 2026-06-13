@@ -74,8 +74,8 @@ public sealed class CraneManualControlViewModel : ObservableObject
                 OnPropertyChanged(nameof(SelectedDeviceDisplay));
                 OnPropertyChanged(nameof(IsCraneSelected));
                 Console.WriteLine($"[CraneManualVM] 已切换设备 -> {SelectedDeviceDisplay}");
-                // 切换设备后自动读取当前位置填入目标输入框
-                _ = RefreshTargetsFromCurrentAsync();
+                // 切换设备后自动读取当前位置填入目标输入框; 读状态请求合并, 不阻塞下拉框/UI。
+                RequestRefreshTargetsFromCurrent();
             }
         }
     }
@@ -357,7 +357,9 @@ public sealed class CraneManualControlViewModel : ObservableObject
         SetRelSpeedCommand  = new AsyncRelayCommand(SetRelSpeedAsync,  nameof(SetRelSpeedCommand));
         SetAbsSpeedCommand  = new AsyncRelayCommand(SetAbsSpeedAsync,  nameof(SetAbsSpeedCommand));
         MoveAbsoluteCommand = new AsyncRelayCommand(MoveAbsoluteAsync, nameof(MoveAbsoluteCommand));
-        RefreshTargetCommand = new AsyncRelayCommand(RefreshTargetsFromCurrentAsync, nameof(RefreshTargetCommand));
+        // 读取当前位置是纯读状态按钮, 不能像运动命令一样执行期间禁用按钮。
+        // 连续点击时只保留最新一次请求, 避免100次点击堆出100个Modbus读队列。
+        RefreshTargetCommand = new RelayCommand(RequestRefreshTargetsFromCurrent);
         RelativeMoveXPlusCommand  = new AsyncRelayCommand(RelativeMoveXPlusAsync,  nameof(RelativeMoveXPlusCommand));
         RelativeMoveXMinusCommand = new AsyncRelayCommand(RelativeMoveXMinusAsync, nameof(RelativeMoveXMinusCommand));
         RelativeMoveYPlusCommand  = new AsyncRelayCommand(RelativeMoveYPlusAsync,  nameof(RelativeMoveYPlusCommand));
@@ -401,6 +403,10 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     /// <summary>手动按钮超时（秒）。后台轮询可能占着 Modbus 锁，手动命令设短超时避免 UI 卡死。</summary>
     private static readonly TimeSpan ManualCommandTimeout = TimeSpan.FromSeconds(5);
+    /// <summary>读取当前位置只是读XYZ, 必须轻量; 设备忙时快速放弃, 防止页面像被按钮卡住。</summary>
+    private static readonly TimeSpan RefreshPositionTimeout = TimeSpan.FromMilliseconds(800);
+    private int _refreshPositionRequested;
+    private int _refreshPositionRunning;
 
     /// <summary>
     /// 确保选中设备已连接（根据类型走天车或机械手缓存），返回其 <see cref="CraneService"/> 实例。
@@ -638,12 +644,39 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// 切换设备时自动调用，也可手动触发（加按钮）。
     /// 机械手只填 Y/Z（X 保持 0）。
     /// </summary>
-    private async Task RefreshTargetsFromCurrentAsync()
+    private void RequestRefreshTargetsFromCurrent()
     {
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【读取当前位置填入目标框】");
+        Interlocked.Exchange(ref _refreshPositionRequested, 1);
+
+        // 已有读取在路上时不再启动新任务; 结束后会补读一次最新请求。
+        if (Interlocked.CompareExchange(ref _refreshPositionRunning, 1, 0) == 0)
+            _ = DrainRefreshTargetsFromCurrentAsync();
+    }
+
+    private async Task DrainRefreshTargetsFromCurrentAsync()
+    {
         try
         {
-            using var cts = new CancellationTokenSource(ManualCommandTimeout);
+            while (Interlocked.Exchange(ref _refreshPositionRequested, 0) == 1)
+                await RefreshTargetsFromCurrentAsync();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _refreshPositionRunning, 0);
+
+            // 避免 finally 刚释放时又来了新请求: 再抢一次执行权, 保证最后一次点击不丢。
+            if (Volatile.Read(ref _refreshPositionRequested) == 1 &&
+                Interlocked.CompareExchange(ref _refreshPositionRunning, 1, 0) == 0)
+                _ = DrainRefreshTargetsFromCurrentAsync();
+        }
+    }
+
+    private async Task RefreshTargetsFromCurrentAsync()
+    {
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 读取当前位置填入目标框");
+        try
+        {
+            using var cts = new CancellationTokenSource(RefreshPositionTimeout);
             var service = await EnsureConnectedServiceAsync(cts.Token);
             var status = await service.ReadStatusAsync(cts.Token);
             if (status == null)

@@ -4,7 +4,7 @@
              x:Name="Root">
     <!-- 外边框绑定 ConnectedBrush：灰=未连接/等待, 绿=空闲/运行中, 红=故障 -->
     <Border BorderBrush="{Binding ConnectedBrush, ElementName=Root, FallbackValue=Gray}"
-            BorderThickness="2" Background="#EEF3F8" Margin="3" Height="110">
+            BorderThickness="2" Background="White" Margin="4" Height="112" CornerRadius="6">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
@@ -16,24 +16,26 @@
             <TextBlock Text="{Binding CardTitle, ElementName=Root}"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Top"
-                       Margin="0,6,0,0"
+                       Margin="6,7,6,0"
+                       FontWeight="SemiBold"
+                       Foreground="#1F2933"
                        TextWrapping="Wrap" />
 
-            <Border Grid.Row="1" Background="#D6E4F0" Padding="2" Margin="4,2,4,1">
+            <Border Grid.Row="1" Background="#EEF4FA" Padding="3,2" Margin="6,2,6,1" CornerRadius="3">
                 <TextBlock Text="{Binding Status1, ElementName=Root, FallbackValue=未知}"
                            HorizontalAlignment="Center"
                            FontSize="12"
                            Foreground="{Binding Status1Brush, ElementName=Root, FallbackValue=Black}" />
             </Border>
 
-            <Border Grid.Row="2" Background="#D6E4F0" Padding="2" Margin="4,1,4,1">
+            <Border Grid.Row="2" Background="#EEF4FA" Padding="3,2" Margin="6,1,6,1" CornerRadius="3">
                 <TextBlock Text="{Binding Status2, ElementName=Root, FallbackValue=无}"
                            HorizontalAlignment="Center"
                            FontSize="12"
                            Foreground="{Binding Status2Brush, ElementName=Root, FallbackValue=Black}" />
             </Border>
 
-            <Border Grid.Row="3" Background="#D6E4F0" Padding="2" Margin="4,1,4,4">
+            <Border Grid.Row="3" Background="#F7FAFC" Padding="3,2" Margin="6,1,6,6" CornerRadius="3">
                 <TextBlock Text="{Binding IpText, ElementName=Root, FallbackValue=未配置IP}"
                            HorizontalAlignment="Center"
                            FontSize="12" />

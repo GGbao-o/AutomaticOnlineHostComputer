@@ -5,7 +5,7 @@
         Width="1020" Height="700"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
-        Background="#E9E9E9">
+        Background="{StaticResource AppBackgroundBrush}">
     <Grid Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -20,7 +20,12 @@
             </Grid.ColumnDefinitions>
 
             <!-- 左侧录入区 -->
-            <Border Grid.Column="0" Background="#E9E9E9" BorderBrush="#D0D0D0" BorderThickness="1" Padding="8">
+            <Border Grid.Column="0"
+                    Padding="8"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -76,16 +81,20 @@
             </Border>
 
             <!-- 右侧工艺步骤预览 -->
-            <Border Grid.Column="2" BorderBrush="#F08C3A" BorderThickness="1" Background="#E9E9E9">
+            <Border Grid.Column="2"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6">
                 <DataGrid Margin="0"
                           AutoGenerateColumns="False"
                           CanUserAddRows="False"
                           IsReadOnly="True"
                           HeadersVisibility="Column"
                           GridLinesVisibility="All"
-                          HorizontalGridLinesBrush="#D0D0D0"
-                          VerticalGridLinesBrush="#D0D0D0"
-                          Background="#E9E9E9">
+                          HorizontalGridLinesBrush="#FFE2E8F0"
+                          VerticalGridLinesBrush="#FFE2E8F0"
+                          Background="White">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="工艺名称" Binding="{Binding ProcessName}" Width="*" />
                         <DataGridTextColumn Header="工序编号" Binding="{Binding StepNo}" Width="*" />

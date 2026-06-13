@@ -36,6 +36,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         // ── 字段 ─────────────────────────────────────────────────────
         private readonly ModbusTcpClient _client;
         private readonly string _name; // 天车名称，调试输出用
+        private readonly SemaphoreSlim _connectionLock = new(1, 1); // 连接/断开串行化，防止UI和引擎同时重连同一设备
         private bool _manualModeSet;   // 是否已确认 PLC 处于手动模式，避免重复写 D4500
 
         // ── 构造 ─────────────────────────────────────────────────────
@@ -54,9 +55,15 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <summary>建立 Modbus TCP 连接。重置手动模式缓存（重连后 PLC 状态未知）。</summary>
         public async Task ConnectAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[CraneService] [{_name}] 正在连接...");
+            await _connectionLock.WaitAsync(ct);
             try
             {
+                if (_client.IsConnected)
+                {
+                    return;
+                }
+
+                Console.WriteLine($"[CraneService] [{_name}] 正在连接...");
                 await _client.ConnectAsync(ct);
                 _manualModeSet = false; // 重连后 PLC 模式未知，重置缓存
                 Console.WriteLine($"[CraneService] [{_name}] 连接成功。IsConnected={_client.IsConnected}");
@@ -66,13 +73,20 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 Console.WriteLine($"[CraneService] [{_name}] 连接失败：{ex.Message}");
                 throw;
             }
+            finally { _connectionLock.Release(); }
         }
 
         /// <summary>断开连接。</summary>
         public async Task DisconnectAsync()
         {
-            await _client.DisconnectAsync();
-            Console.WriteLine($"[CraneService] [{_name}] 已断开连接。");
+            await _connectionLock.WaitAsync();
+            try
+            {
+                await _client.DisconnectAsync();
+                _manualModeSet = false;
+                Console.WriteLine($"[CraneService] [{_name}] 已断开连接。");
+            }
+            finally { _connectionLock.Release(); }
         }
 
         /// <summary>当前是否已连接。</summary>
@@ -383,12 +397,30 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         {
             try
             {
+                if (!_client.IsConnected)
+                {
+                    await ConnectAsync(ct);
+                }
+
                 return await _client.ReadCoilAsync(address, ct);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[CraneService] [{_name}] X区读失败 D{address}：{ex.Message}");
-                return false;
+                Console.WriteLine($"[CraneService] [{_name}] X区读失败 D{address}：{ex.Message}，尝试重连后重读一次");
+                try
+                {
+                    await DisconnectAsync();
+                    await ConnectAsync(ct);
+                    return await _client.ReadCoilAsync(address, ct);
+                }
+                catch (Exception retryEx)
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] X区重读失败 D{address}：{retryEx.Message}");
+                    // X区信号通常用于X11有板、X2下压、X6/X7磁铁反馈等安全判断。
+                    // 读取失败不能等价为false；false会被上层理解成“无板/未下压/未反馈”，
+                    // 生产上会把“通信未知”误判成“安全”，所以必须抛出让动作流程进入异常/暂停分支。
+                    throw new InvalidOperationException($"X区读取失败 D{address}, 状态未知, 禁止按0处理", retryEx);
+                }
             }
         }
 

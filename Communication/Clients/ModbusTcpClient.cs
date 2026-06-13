@@ -60,7 +60,7 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         // ── IDeviceClient ────────────────────────────────────────────
 
         /// <inheritdoc/>
-        public bool IsConnected => _tcp?.Connected == true;
+        public bool IsConnected => _tcp?.Connected == true && _stream != null;
         private int OperationTimeoutMs => Math.Max(_timeoutMs, 5000);
 
         /// <inheritdoc/>
@@ -211,8 +211,6 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         /// </summary>
         private async Task<byte[]> SendRequestAsync(byte[] pdu, int responseDataLen, CancellationToken ct)
         {
-            EnsureConnected();
-
             await _lock.WaitAsync(ct);
             int opTimeoutMs = OperationTimeoutMs;
             using var opTimeoutCts = new CancellationTokenSource(opTimeoutMs);
@@ -220,6 +218,11 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             var ioCt = linkedCts.Token;
             try
             {
+                // 连接状态必须在锁内重新确认。
+                // 可能在等待锁期间, 前一个请求超时并 CloseSocketNoThrow(), 导致 _stream 被置空。
+                EnsureConnected();
+                var stream = _stream ?? throw new InvalidOperationException("Modbus TCP 连接流为空，请重新连接。");
+
                 ushort tid = ++_transactionId;
 
                 // MBAP Header (7 bytes) + PDU
@@ -236,14 +239,14 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                 if (_enableConsoleLog)
                     Console.WriteLine($"[ModbusTcpClient] TX tid={tid} unit={_unitId} pdu={BitConverter.ToString(pdu)} frame={BitConverter.ToString(request)}");
 
-                await _stream!.WriteAsync(request, ioCt);
+                await stream.WriteAsync(request, ioCt);
 
                 // 接收响应：MBAP(7) + PDU
                 var header = new byte[7];
-                await ReadExactAsync(_stream, header, 7, ioCt);
+                await ReadExactAsync(stream, header, 7, ioCt);
                 int dataLen = ((header[4] << 8) | header[5]) - 1; // -1 去掉 UnitId
                 var body = new byte[dataLen];
-                await ReadExactAsync(_stream, body, dataLen, ioCt);
+                await ReadExactAsync(stream, body, dataLen, ioCt);
 
                 if (_enableConsoleLog)
                     Console.WriteLine($"[ModbusTcpClient] RX tid={((header[0] << 8) | header[1])} header={BitConverter.ToString(header)} body={BitConverter.ToString(body)}");

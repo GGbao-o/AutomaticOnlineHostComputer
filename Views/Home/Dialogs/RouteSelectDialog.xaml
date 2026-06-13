@@ -1,9 +1,13 @@
-<Window x:Class="AutomaticOnlineHostComputer.Views.Home.Dialogs.RouteSelectDialog"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="线路选取" Width="300" Height="180"
-        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
-        Background="#F0F2F5">
+<Window
+    x:Class="AutomaticOnlineHostComputer.Views.Home.Dialogs.RouteSelectDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="线路选取"
+    Width="300"
+    Height="300"
+    Background="{StaticResource AppBackgroundBrush}"
+    ResizeMode="NoResize"
+    WindowStartupLocation="CenterOwner">
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -11,17 +15,52 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TextBlock Text="分配线路（400~1200mm 范围可选）" FontSize="14" FontWeight="Bold" Margin="0,0,0,15" />
+        <Border
+            Margin="0,0,0,12"
+            Padding="10"
+            Background="#26323F"
+            CornerRadius="6">
+            <TextBlock
+                FontSize="14"
+                FontWeight="Bold"
+                Foreground="White"
+                Text="分配线路（400~1200mm 范围可选）" />
+        </Border>
 
         <StackPanel Grid.Row="1">
-            <RadioButton x:Name="RadioLine1" Content="1号线（400~1500mm）" IsChecked="True" Margin="0,0,0,8" FontSize="13" />
-            <RadioButton x:Name="RadioLine2" Content="2号线（400~1200mm）" FontSize="13" />
-            <TextBlock Text="1200~1500mm 强制走 1 号线" FontSize="11" Foreground="Gray" Margin="0,8,0,0" />
+            <RadioButton
+                x:Name="RadioLine1"
+                Margin="0,0,0,8"
+                Content="1号线（400~1500mm）"
+                FontSize="13"
+                IsChecked="True" />
+            <RadioButton
+                x:Name="RadioLine2"
+                Content="2号线（400~1200mm）"
+                FontSize="13" />
+            <TextBlock
+                Margin="0,8,0,0"
+                FontSize="11"
+                Foreground="Gray"
+                Text="1200~1500mm 强制走 1 号线" />
         </StackPanel>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0">
-            <Button Content="确定" Width="80" Height="28" Click="Confirm_Click" Margin="0,0,10,0" />
-            <Button Content="取消" Width="80" Height="28" Click="Cancel_Click" />
+        <StackPanel
+            Grid.Row="2"
+            Margin="0,10,0,0"
+            HorizontalAlignment="Center"
+            Orientation="Horizontal">
+            <Button
+                Width="80"
+                Height="28"
+                Margin="0,0,10,0"
+                Click="Confirm_Click"
+                Content="确定" />
+            <Button
+                Width="80"
+                Height="28"
+                Click="Cancel_Click"
+                Content="取消" />
         </StackPanel>
     </Grid>
 </Window>

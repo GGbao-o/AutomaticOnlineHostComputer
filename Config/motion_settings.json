@@ -16,9 +16,9 @@
     "5": { "x": { "speed": 350, "accel": 100, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 150, "accel": 80, "decel": 40 } }
   },
   "manipulatorSpeeds": {
-    "1": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 600, "accel": 200, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
-    "2": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 600, "accel": 200, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
-    "3": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 600, "accel": 200, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } }
+    "1": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 500, "accel": 200, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
+    "2": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 500, "accel": 200, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
+    "3": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 500, "accel": 200, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } }
   },
   "relMove": {
     "defaultSpeed": 300,
@@ -47,6 +47,81 @@
     "queuePollIntervalMs": 1000,
     "stationWaitTimeoutMs": 30000
   },
+  "erpTaskImport": {
+    "filePath": "D:\\job1.txt",
+    "pollIntervalMs": 1000,
+    "errorDirectory": "D:\\ErpTaskError",
+    "enabledOnStartup": false
+  },
+  "skewCompletionExport": {
+    "filePath": "D:\\job2.txt",
+    "enabled": true,
+    "stationMachineCodes": {
+      "ST108": "SB10428",
+      "ST109": "SB10427",
+      "ST111": "SB10426",
+      "ST110": "SB10425",
+      "ST112": "SB10362",
+      "ST606": "SB10450",
+      "ST607": "SB10071",
+      "ST608": "SB10204",
+      "ST609": "SB10169",
+      "ST610": "SB10451"
+    }
+  },
+  "xAbsFineTune": {
+    "enabled": true,
+    "toleranceMm": 3,
+    "maxAdjustMm": 1000,
+    "stationTargets": {
+      "1": {
+        "ST713": -1,
+        "ST107": -1,
+        "ST105": 1347,
+        "ST101": -1,
+        "ST106": -1
+      },
+      "2": {
+        "ST105": -29489,
+        "ST101": -28918,
+        "ST106": -28390,
+        "ST108": -26412,
+        "ST109": -1,
+        "ST110": -1,
+        "ST111": -1,
+        "ST112": -1,
+        "ST019": -1103,
+        "ST010": -1
+      },
+      "3": {
+        "ST714": -1,
+        "ST502": -1,
+        "ST016": -1,
+        "ST017": -1,
+        "ST018": -1
+      },
+      "4": {
+        "ST016": -1,
+        "ST017": -1,
+        "ST018": -1,
+        "ST606": -1,
+        "ST607": -1,
+        "ST608": -1,
+        "ST609": -1,
+        "ST610": -1,
+        "ST020": -1,
+        "ST021": -1
+      },
+      "5": {
+        "ST709": -1,
+        "ST710": -1,
+        "ST701": -1,
+        "ST702": -1,
+        "ST703": -1,
+        "ST704": -1
+      }
+    }
+  },
   "grinding": {
     "zFactor1": 0.9537,
     "zFactor2": 0.866,
@@ -61,12 +136,12 @@
   "balancing": {
     "rearCraneSafeX": -3000,
     "armCoords": {
-      "M817": { "y": 15680, "z": 339 },
-      "M818": { "y": 4675, "z": 304 },
-      "M710": { "y": 970, "z": 514 },
-      "M700": { "y": 5, "z": 425 },
-      "M821": { "y": 4675, "z": 304},
-      "M720": { "y": 15680, "z": 320 }
+      "M817": { "y": 15670, "z": 494 },
+      "M818": { "y": 4655, "z": 459 },
+      "M710": { "y": 970, "z": 667 },
+      "M700": { "y": 3, "z": 696 },
+      "M821": { "y": 5608, "z": 479},
+      "M720": { "y": 16795, "z": 452 }
     }
   },
   "craneHomeX": {
@@ -85,8 +160,12 @@
     "smallBoreOffset": 55,
     "manipulator1SafeY": 11500,
     "manipulator2SafeY": 1000,
-    "manipulator3SafeY": 1000,
+    "manipulator3SafeY": 1500,
     "largeDiameterLine1OnlyMm": 250,
+    "sharedAreaRetreatX": {
+      "ST108": 1000,
+      "ST606": 1000
+    },
     "toolSettingBeds": {
       "ST108": false,
       "ST109": false,

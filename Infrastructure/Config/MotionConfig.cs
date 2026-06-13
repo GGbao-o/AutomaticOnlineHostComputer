@@ -33,6 +33,12 @@ public sealed class MotionConfig
     public ShakeSection Shake { get; set; } = new();
     /// <summary>流程引擎参数</summary>
     public EngineSection Engine { get; set; } = new();
+    /// <summary>ERP下发任务文件导入参数。只负责导入到主页面任务列表, 不自动启动任务。</summary>
+    public ErpTaskImportSection ErpTaskImport { get; set; } = new();
+    /// <summary>斜床加工完成后导出给ERP/外部系统的完工文件参数。</summary>
+    public SkewCompletionExportSection SkewCompletionExport { get; set; } = new();
+    /// <summary>X绝对编码器下降前微调参数。只在Z下降取/放料前使用, 不改变原始运动路径。</summary>
+    public XAbsFineTuneSection XAbsFineTune { get; set; } = new();
 
     /// <summary>单轴速度/加减速参数</summary>
     public sealed class AxisSpeed
@@ -90,6 +96,78 @@ public sealed class MotionConfig
     {
         public int QueuePollIntervalMs { get; set; } = 1000;
         public int StationWaitTimeoutMs { get; set; } = 30_000;
+    }
+
+    public sealed class ErpTaskImportSection
+    {
+        /// <summary>ERP下发任务文件路径。文件内只允许一行、一条任务。</summary>
+        public string FilePath { get; set; } = @"D:\job1.txt";
+        /// <summary>轮询间隔(ms)。现场文件写入很快, 但不需要高频占用UI线程。</summary>
+        public int PollIntervalMs { get; set; } = 1000;
+        /// <summary>解析失败时的原始内容备份目录。备份成功后才清空任务文件。</summary>
+        public string ErrorDirectory { get; set; } = @"D:\ErpTaskError";
+        /// <summary>是否打开主页面后自动开始监听。生产测试默认false, 由人工点击按钮启动。</summary>
+        public bool EnabledOnStartup { get; set; } = false;
+    }
+
+    public sealed class SkewCompletionExportSection
+    {
+        /// <summary>斜床完工记录输出文件。多台斜床完成时按行追加, 不覆盖历史记录。</summary>
+        public string FilePath { get; set; } = @"D:\job2.txt";
+        /// <summary>总开关。false时不写job2, 但不影响斜床下料业务流程。</summary>
+        public bool Enabled { get; set; } = true;
+        /// <summary>站号→ERP机器编码。后端引擎全程使用站号, 不再按IP二次推导。</summary>
+        public Dictionary<string, string> StationMachineCodes { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ST108"] = "SB10428",
+            ["ST109"] = "SB10427",
+            ["ST111"] = "SB10426",
+            ["ST110"] = "SB10425",
+            ["ST112"] = "SB10362",
+            ["ST606"] = "SB10450",
+            ["ST607"] = "SB10071",
+            ["ST608"] = "SB10204",
+            ["ST609"] = "SB10169",
+            ["ST610"] = "SB10451",
+        };
+
+        public bool TryGetMachineCode(string stationCode, out string machineCode)
+            => StationMachineCodes.TryGetValue(stationCode, out machineCode!);
+    }
+
+    public sealed class XAbsFineTuneSection
+    {
+        /// <summary>总开关。false时完全跳过X绝对编码器微调。</summary>
+        public bool Enabled { get; set; } = true;
+        /// <summary>绝对编码器偏差允许值(mm)。|目标-当前|小于等于该值时不微调。</summary>
+        public int ToleranceMm { get; set; } = 3;
+        /// <summary>单次最大允许微调量(mm)。超过该值直接报警, 防止标定/坐标错误时大距离盲修。</summary>
+        public int MaxAdjustMm { get; set; } = 50;
+        /// <summary>每台天车每个工位的X绝对编码器标定值。值为-1表示该工位不做微调。</summary>
+        public Dictionary<int, Dictionary<string, int>> StationTargets { get; set; } = new()
+        {
+            [3] = new()
+            {
+                ["ST714"] = -1, ["ST502"] = -1, ["ST016"] = -1, ["ST017"] = -1, ["ST018"] = -1
+            },
+            [4] = new()
+            {
+                ["ST016"] = -1, ["ST017"] = -1, ["ST018"] = -1,
+                ["ST606"] = -1, ["ST607"] = -1, ["ST608"] = -1, ["ST609"] = -1, ["ST610"] = -1,
+                ["ST020"] = -1, ["ST021"] = -1
+            },
+            [5] = new()
+            {
+                ["ST709"] = -1, ["ST710"] = -1, ["ST701"] = -1, ["ST702"] = -1, ["ST703"] = -1, ["ST704"] = -1
+            }
+        };
+
+        public bool TryGetTarget(int craneNo, string stationCode, out int target)
+        {
+            target = -1;
+            if (!StationTargets.TryGetValue(craneNo, out var stations)) return false;
+            return stations.TryGetValue(stationCode, out target);
+        }
     }
 
     /// <summary>研磨自动流程参数</summary>
@@ -173,6 +251,20 @@ public sealed class MotionConfig
         /// 配置为0或负数表示关闭该防碰撞分配规则。
         /// </summary>
         public int LargeDiameterLine1OnlyMm { get; set; } = 300;
+
+        /// <summary>
+        /// ST108/ST606 共享区释放前的后天车X退避距离(mm)。
+        /// 目标X=当前X+配置值, 不叠加数据库偏移; 退避成功后才允许释放共享区锁。
+        /// </summary>
+        public Dictionary<string, int> SharedAreaRetreatX { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ST108"] = 2000,
+            ["ST606"] = 1000,
+        };
+
+        /// <summary>获取共享区释放前的X退避距离(mm)。未配置时返回0, 表示不额外退避。</summary>
+        public int GetSharedAreaRetreatX(string stationCode)
+            => SharedAreaRetreatX.TryGetValue(stationCode, out var x) ? x : 0;
 
         /// <summary>
         /// 每台斜床的设备级对刀开关(Key=ST108/ST109/.../ST610)。

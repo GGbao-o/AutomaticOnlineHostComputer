@@ -69,7 +69,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         /// <summary>#802 堵孔（mm，浮点）</summary>
         public const int BorePlugSize = 802;
 
-        /// <summary>#909 加工模式（新增：粗车1，精车2，研磨3，粗精磨4，精磨5，粗精研磨6）</summary>
+        /// <summary>#909 加工模式 目前就123</summary>
         public const int MachiningMode = 909;
 
         // ══════════════════════════════════════════════

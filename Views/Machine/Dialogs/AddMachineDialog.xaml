@@ -5,7 +5,7 @@
     Title="添加机器"
     Width="1020"
     Height="700"
-    Background="#E9E9E9"
+    Background="{StaticResource AppBackgroundBrush}"
     ResizeMode="CanResize"
     WindowStartupLocation="CenterOwner">
     <Grid Margin="8">
@@ -25,9 +25,10 @@
             <Border
                 Grid.Column="0"
                 Padding="8"
-                Background="#E9E9E9"
-                BorderBrush="#D0D0D0"
-                BorderThickness="1">
+                Background="{StaticResource PanelBackgroundBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -326,20 +327,21 @@
             <!--  右侧参数表  -->
             <Border
                 Grid.Column="2"
-                Background="#E9E9E9"
-                BorderBrush="#F08C3A"
-                BorderThickness="1">
+                Background="{StaticResource PanelBackgroundBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
                 <Grid>
                     <DataGrid
                         Margin="0"
                         AutoGenerateColumns="False"
-                        Background="#E9E9E9"
+                        Background="White"
                         CanUserAddRows="False"
                         GridLinesVisibility="All"
                         HeadersVisibility="Column"
-                        HorizontalGridLinesBrush="#D0D0D0"
+                        HorizontalGridLinesBrush="#FFE2E8F0"
                         IsReadOnly="True"
-                        VerticalGridLinesBrush="#D0D0D0">
+                        VerticalGridLinesBrush="#FFE2E8F0">
                         <DataGrid.Columns>
                             <DataGridTextColumn
                                 Width="*"

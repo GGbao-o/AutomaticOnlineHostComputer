@@ -30,11 +30,28 @@ public sealed class CraneConnectionCache
         {
             Console.WriteLine("[CraneCache] 开始从数据库装载5台天车IP...");
 
-            _ipMappings[1] = ("1号线天车前", FindIp(machineRows, "1号线天车前", "192.168.2.81"));
-            _ipMappings[2] = ("1号线天车后", FindIp(machineRows, "1号线天车后", "192.168.2.82"));
-            _ipMappings[3] = ("2号线天车前", FindIp(machineRows, "2号线天车前", "192.168.2.83"));
-            _ipMappings[4] = ("2号线天车后", FindIp(machineRows, "2号线天车后", "192.168.2.84"));
-            _ipMappings[5] = ("研磨机天车", FindIp(machineRows, "研磨机天车", "192.168.2.80"));
+            var nextMappings = new Dictionary<int, (string Name, string Ip)>
+            {
+                [1] = ("1号线天车前", FindIp(machineRows, "1号线天车前", "192.168.2.81")),
+                [2] = ("1号线天车后", FindIp(machineRows, "1号线天车后", "192.168.2.82")),
+                [3] = ("2号线天车前", FindIp(machineRows, "2号线天车前", "192.168.2.83")),
+                [4] = ("2号线天车后", FindIp(machineRows, "2号线天车后", "192.168.2.84")),
+                [5] = ("研磨机天车", FindIp(machineRows, "研磨机天车", "192.168.2.80")),
+            };
+
+            bool mappingChanged = _ipMappings.Count != nextMappings.Count
+                || nextMappings.Any(kv => !_ipMappings.TryGetValue(kv.Key, out var old)
+                    || !string.Equals(old.Ip, kv.Value.Ip, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(old.Name, kv.Value.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (!mappingChanged)
+            {
+                Console.WriteLine("[CraneCache] 天车IP映射未变化, 保留现有共享连接");
+                return;
+            }
+
+            _ipMappings.Clear();
+            foreach (var kv in nextMappings) _ipMappings[kv.Key] = kv.Value;
 
             foreach (var kv in _services)
             {

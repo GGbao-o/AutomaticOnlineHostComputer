@@ -17,7 +17,7 @@ public sealed class WorkpieceContext
     public string PlateNo { get; init; } = string.Empty;
 
     /// <summary>生产序号</summary>
-    public int Sequence { get; init; }
+    public string Sequence { get; init; } = string.Empty;
 
     /// <summary>版辊长度（mm）—— 决定线体分配、动平衡判断</summary>
     public double Length { get; init; }

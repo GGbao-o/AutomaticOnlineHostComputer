@@ -307,14 +307,15 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// 停止轮询并断开机械手连接。释放 TCP 连接和 Modbus 客户端资源，
-    /// 避免 PLC 连接数耗尽。
+    /// 停止卡片轮询。
+    /// 注意: _service 来自 ManipulatorConnectionCache, 是页面和流程引擎共用的连接。
+    /// 卡片不拥有这个连接, Dispose 时不能断开, 否则页面切换会把正在生产的引擎连接断掉。
     /// </summary>
     public void Dispose()
     {
         _pollCts?.Cancel();
         _pollCts?.Dispose();
-        _ = _service?.DisconnectAsync();
+        // 共享连接由 ManipulatorConnectionCache/流程生命周期管理；这里只停轮询, 不 Disconnect。
         Console.WriteLine($"[ManipulatorVM] [{Name}] 已释放资源");
     }
 }

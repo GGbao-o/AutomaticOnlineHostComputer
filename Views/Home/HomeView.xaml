@@ -3,11 +3,144 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="clr-namespace:AutomaticOnlineHostComputer.Views.Home.Controls"
-    Background="#F0F2F5">
+    Background="#E8EDF3">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <SolidColorBrush x:Key="PanelBorderBrush" Color="#C6D0DE" />
+        <SolidColorBrush x:Key="PanelHeaderBrush" Color="#F7FAFC" />
+        <SolidColorBrush x:Key="TextMainBrush" Color="#1F2933" />
+        <SolidColorBrush x:Key="TextMutedBrush" Color="#5C6675" />
+
+        <Style x:Key="BaseButtonStyle" TargetType="{x:Type Button}">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="78" />
+            <Setter Property="Margin" Value="3,0" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#1F2933" />
+            <Setter Property="Background" Value="#FFFFFF" />
+            <Setter Property="BorderBrush" Value="#BAC5D3" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border
+                            x:Name="Chrome"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            SnapsToDevicePixels="True">
+                            <ContentPresenter
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#EEF4FA" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="#8EA2B7" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#DDE7F1" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#9AA5B1" />
+                                <Setter TargetName="Chrome" Property="Background" Value="#EDF1F5" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="#D7DEE7" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style BasedOn="{StaticResource BaseButtonStyle}" TargetType="{x:Type Button}" />
+
+        <Style
+            x:Key="PrimaryButtonStyle"
+            BasedOn="{StaticResource BaseButtonStyle}"
+            TargetType="{x:Type Button}">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="#1F6F8B" />
+            <Setter Property="BorderBrush" Value="#1F6F8B" />
+        </Style>
+
+        <Style
+            x:Key="WarningButtonStyle"
+            BasedOn="{StaticResource BaseButtonStyle}"
+            TargetType="{x:Type Button}">
+            <Setter Property="Background" Value="#FFF7E6" />
+            <Setter Property="BorderBrush" Value="#D99A2B" />
+            <Setter Property="Foreground" Value="#6B4600" />
+        </Style>
+
+        <Style
+            x:Key="TaskActionButtonStyle"
+            BasedOn="{StaticResource BaseButtonStyle}"
+            TargetType="{x:Type Button}">
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinWidth" Value="48" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="2,0" />
+        </Style>
+
+        <Style TargetType="{x:Type DataGrid}">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="#D5DEE8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="GridLinesVisibility" Value="Horizontal" />
+            <Setter Property="HorizontalGridLinesBrush" Value="#E5EBF2" />
+            <Setter Property="VerticalGridLinesBrush" Value="#E5EBF2" />
+            <Setter Property="RowHeight" Value="34" />
+            <Setter Property="ColumnHeaderHeight" Value="36" />
+            <Setter Property="RowBackground" Value="#FFFFFF" />
+            <Setter Property="AlternatingRowBackground" Value="#F7FAFC" />
+            <Setter Property="SelectionMode" Value="Single" />
+            <Setter Property="SelectionUnit" Value="FullRow" />
+            <Setter Property="CanUserResizeRows" Value="False" />
+        </Style>
+
+        <Style TargetType="{x:Type DataGridColumnHeader}">
+            <Setter Property="Background" Value="#E7EDF4" />
+            <Setter Property="Foreground" Value="#26323F" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="BorderBrush" Value="#C6D0DE" />
+            <Setter Property="BorderThickness" Value="0,0,1,1" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style TargetType="{x:Type DataGridCell}">
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#DCEBF3" />
+                    <Setter Property="Foreground" Value="#102A43" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="{x:Type DataGridRow}">
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#EEF6FA" />
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#DCEBF3" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
-    <Grid Margin="4">
+    <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -18,77 +151,134 @@
 
         <Border
             Grid.Row="0"
-            Margin="4,0,4,2"
-            Padding="6,4"
-            Background="#FFF7ED"
-            BorderBrush="#F59E0B"
-            BorderThickness="1">
-            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
+            Margin="0,0,0,8"
+            Padding="10,8"
+            Background="#26323F"
+            BorderBrush="#1B2733"
+            BorderThickness="1"
+            CornerRadius="6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Foreground="White"
+                        Text="万美自动线控制台" />
+                    <TextBlock
+                        Margin="0,2,0,0"
+                        FontSize="12"
+                        Foreground="#B8C4D1"
+                        Text="任务派发 / 设备联动 / 线路状态" />
+                </StackPanel>
+
+                <ScrollViewer
+                    Grid.Column="1"
+                    Margin="18,0"
+                    HorizontalScrollBarVisibility="Auto"
+                    VerticalScrollBarVisibility="Disabled">
+                    <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
+                        <Button
+                            Width="96"
+                            Click="RouteSelect_Click"
+                            Content="线路选取" />
+                        <Button
+                            Width="96"
+                            Click="CraneMove_Click"
+                            Content="天车移动" />
+                        <Button
+                            Width="90"
+                            Command="{Binding Line1ToggleCommand}"
+                            Content="{Binding Line1ToggleText}"
+                            Style="{StaticResource PrimaryButtonStyle}" />
+                        <Button
+                            Width="90"
+                            Command="{Binding Line2ToggleCommand}"
+                            Content="{Binding Line2ToggleText}"
+                            Style="{StaticResource PrimaryButtonStyle}" />
+                        <Button
+                            Width="90"
+                            Command="{Binding GrindingToggleCommand}"
+                            Content="{Binding GrindingToggleText}"
+                            Style="{StaticResource PrimaryButtonStyle}" />
+                        <Button
+                            Width="90"
+                            Command="{Binding BalancingToggleCommand}"
+                            Content="{Binding BalancingToggleText}"
+                            Style="{StaticResource PrimaryButtonStyle}" />
+                    </StackPanel>
+                </ScrollViewer>
+
                 <Button
-                    Width="96"
-                    Height="28"
-                    Margin="0,0,2,0"
-                    Click="RouteSelect_Click"
-                    Content="线路选取" />
-                <Button
+                    Grid.Column="2"
                     Width="84"
-                    Height="28"
-                    Margin="2"
                     Click="ClearMachineStatus_Click"
-                    Content="清空状态" />
-                <Button
-                    Width="96"
-                    Height="28"
-                    Margin="2"
-                    Click="CraneMove_Click"
-                    Content="天车移动" />
-                <Button
-                    Width="90"
-                    Height="28"
-                    Margin="2"
-                    Command="{Binding Line1ToggleCommand}"
-                    Content="{Binding Line1ToggleText}" />
-                <Button
-                    Width="90"
-                    Height="28"
-                    Margin="2"
-                    Command="{Binding Line2ToggleCommand}"
-                    Content="{Binding Line2ToggleText}" />
-                <Button
-                    Width="84"
-                    Height="28"
-                    Margin="2"
-                    Command="{Binding GrindingToggleCommand}"
-                    Content="{Binding GrindingToggleText}" />
-                <Button
-                    Width="84"
-                    Height="28"
-                    Margin="2"
-                    Command="{Binding BalancingToggleCommand}"
-                    Content="{Binding BalancingToggleText}" />
-            </StackPanel>
+                    Content="清空状态"
+                    Style="{StaticResource WarningButtonStyle}" />
+            </Grid>
         </Border>
         <!--  第一部分  -->
         <Border
             Grid.Row="1"
-            Margin="4"
+            Margin="0"
             Background="White"
-            BorderBrush="#BFC8D6"
-            BorderThickness="1">
+            BorderBrush="{StaticResource PanelBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="6">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="6" Orientation="Horizontal">
-                        <Button
-                            Width="84"
-                            Height="30"
-                            Margin="2"
-                            Click="AddTask_Click"
-                            Content="添加任务" />
+                <Border
+                    Grid.Row="0"
+                    Padding="10,8"
+                    Background="{StaticResource PanelHeaderBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    CornerRadius="6,6,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="15"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource TextMainBrush}"
+                                Text="任务列表" />
+                            <TextBlock
+                                Margin="0,2,0,0"
+                                FontSize="12"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text="{Binding ErpTaskImportStatus}" />
+                        </StackPanel>
+
+                        <ScrollViewer
+                            Grid.Column="2"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Disabled">
+                            <StackPanel Orientation="Horizontal">
+                                <Button
+                                    Width="84"
+                                    Click="AddTask_Click"
+                                    Content="添加任务"
+                                    Style="{StaticResource PrimaryButtonStyle}" />
+                                <Button
+                                    Width="150"
+                                    Command="{Binding ErpTaskImportToggleCommand}"
+                                    Content="{Binding ErpTaskImportToggleText}" />
+                            </StackPanel>
+                        </ScrollViewer>
 
                         <!--<Button
                             Width="70"
@@ -143,8 +333,8 @@
                             Margin="2"
                             Command="{Binding TestBalancingRackPlacedCommand}"
                             Content="测试动平衡" />-->
-                    </StackPanel>
-                </ScrollViewer>
+                    </Grid>
+                </Border>
 
                 <!--  添加任务数据位置  -->
                 <ScrollViewer
@@ -152,11 +342,11 @@
                     HorizontalScrollBarVisibility="Auto"
                     VerticalScrollBarVisibility="Auto">
                     <DataGrid
-                        Margin="6"
+                        Margin="10"
+                        AlternationCount="2"
                         AutoGenerateColumns="False"
                         CanUserAddRows="False"
                         HeadersVisibility="Column"
-                        IsReadOnly="True"
                         ItemsSource="{Binding TaskRows}">
                         <DataGrid.Columns>
                             <DataGridTextColumn
@@ -175,18 +365,18 @@
                                 Width="90"
                                 Binding="{Binding Diameter}"
                                 Header="直径" />
-                            <!--  <DataGridTextColumn  -->
-                            <!--  Width="70"  -->
-                            <!--  Binding="{Binding PlugHole}"  -->
-                            <!--  Header="堵孔" />  -->
-                            <!--  <DataGridTextColumn  -->
-                            <!--  Width="70"  -->
-                            <!--  Binding="{Binding LeftPlugThickness}"  -->
-                            <!--  Header="左堵厚" />  -->
-                            <!--  <DataGridTextColumn  -->
-                            <!--  Width="70"  -->
-                            <!--  Binding="{Binding RightPlugThickness}"  -->
-                            <!--  Header="右堵厚" />  -->
+                            <DataGridTextColumn
+                                Width="70"
+                                Binding="{Binding PlugHole}"
+                                Header="堵孔" />
+                            <DataGridTextColumn
+                                Width="70"
+                                Binding="{Binding LeftPlugThickness}"
+                                Header="左堵厚" />
+                            <DataGridTextColumn
+                                Width="70"
+                                Binding="{Binding RightPlugThickness}"
+                                Header="右堵厚" />
                             <DataGridTextColumn
                                 Width="140"
                                 Binding="{Binding StartSourceText}"
@@ -196,6 +386,10 @@
                                 Binding="{Binding AssignedLineText}"
                                 Header="分配线路" />
                             <DataGridTextColumn
+                                Width="70"
+                                Binding="{Binding BalancingText}"
+                                Header="动平衡" />
+                            <DataGridTextColumn
                                 Width="130"
                                 Binding="{Binding Step}"
                                 Header="当前工序" />
@@ -203,10 +397,14 @@
                                 Width="130"
                                 Binding="{Binding ProcessType}"
                                 Header="工序" />
-                            <!--  <DataGridTextColumn  -->
-                            <!--  Width="120"  -->
-                            <!--  Binding="{Binding BoringProcess}"  -->
-                            <!--  Header="双头镗工艺" />  -->
+                            <DataGridTextColumn
+                                Width="70"
+                                Binding="{Binding SkipBoringText}"
+                                Header="跳过镗" />
+                            <DataGridTextColumn
+                                Width="120"
+                                Binding="{Binding BoringProcess}"
+                                Header="双头镗工艺" />
                             <DataGridTextColumn
                                 Width="70"
                                 Binding="{Binding SkewBedProcess}"
@@ -219,14 +417,22 @@
                                 Width="70"
                                 Binding="{Binding State}"
                                 Header="工件状态" />
-                            <DataGridTemplateColumn Width="70" Header="交互">
+                            <DataGridTemplateColumn Width="128" Header="交互">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <Button
-                                            Height="26"
-                                            Margin="2"
-                                            Command="{Binding ToggleRunCommand}"
-                                            Content="{Binding ActionText}" />
+                                        <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
+                                            <Button
+                                                Width="52"
+                                                Command="{Binding ToggleRunCommand}"
+                                                Content="{Binding ActionText}"
+                                                Style="{StaticResource TaskActionButtonStyle}" />
+                                            <Button
+                                                Width="52"
+                                                Command="{Binding DeleteCommand}"
+                                                Content="删除"
+                                                IsEnabled="{Binding CanDelete}"
+                                                Style="{StaticResource TaskActionButtonStyle}" />
+                                        </StackPanel>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
@@ -239,27 +445,36 @@
         <Border
             Grid.RowSpan="2"
             Panel.ZIndex="99"
-            Background="#CCF0F2F5"
+            Background="#DDE8EDF3"
             Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}, FallbackValue=Visible}">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                <TextBlock
-                    HorizontalAlignment="Center"
-                    FontSize="48"
-                    Text="⏳" />
-                <TextBlock
-                    Margin="0,12,0,0"
-                    HorizontalAlignment="Center"
-                    FontSize="18"
-                    FontWeight="Bold"
-                    Foreground="#333"
-                    Text="正在加载设备数据..." />
-                <TextBlock
-                    Margin="0,4,0,0"
-                    HorizontalAlignment="Center"
-                    FontSize="14"
-                    Foreground="#888"
-                    Text="连接天车 · 机械手 · 全厂设备" />
-            </StackPanel>
+            <Border
+                Width="320"
+                Padding="22,18"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="White"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+                <StackPanel>
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="17"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource TextMainBrush}"
+                        Text="正在加载设备数据" />
+                    <TextBlock
+                        Margin="0,6,0,14"
+                        HorizontalAlignment="Center"
+                        FontSize="13"
+                        Foreground="{StaticResource TextMutedBrush}"
+                        Text="连接天车、机械手和现场设备" />
+                    <ProgressBar
+                        Height="8"
+                        Foreground="#1F6F8B"
+                        IsIndeterminate="True" />
+                </StackPanel>
+            </Border>
         </Border>
 
     </Grid>

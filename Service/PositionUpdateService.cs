@@ -75,7 +75,7 @@ public sealed class PositionUpdateService
     /// 插入工件跟踪记录。DB 不可用时静默忽略。
     /// </summary>
     public async Task InsertWorkpieceTrackAsync(
-        string plateNo, int sequence, string stage, string processType,
+        string plateNo, string sequence, string stage, string processType,
         double length, double diameter, double plugHole, string marking,
         int? assignedLine, string? loadMethod, bool needsBalance)
     {

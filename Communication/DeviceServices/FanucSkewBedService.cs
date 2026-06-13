@@ -171,15 +171,50 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
         public async Task SendMachiningParamsAsync(double rollerLength, double rollerDiameter, double borePlugSize, int mode, CancellationToken ct = default)
         {
-            await SafeCallAsync(async () => {
-                Console.WriteLine($"[FANUC-SDK] 写加工参数: L={rollerLength} D={rollerDiameter} bore={borePlugSize} mode={mode}");
-                _sdk.SetMacro(FanucSkewBedAddress.RollerLength, rollerLength);
-                _sdk.SetMacro(FanucSkewBedAddress.RollerDiameter, rollerDiameter);
-                _sdk.SetMacro(FanucSkewBedAddress.BorePlugSize, borePlugSize);
-                _sdk.SetMacro(FanucSkewBedAddress.MachiningMode, mode);
-            }, "写加工参数");
+            const int maxAttempts = 3;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+                await SafeCallAsync(() => {
+                    Console.WriteLine($"[FANUC-SDK] 写加工参数 attempt={attempt}: L={rollerLength} D={rollerDiameter} bore={borePlugSize} mode={mode}");
+                    _sdk.SetMacro(FanucSkewBedAddress.RollerLength, rollerLength);
+                    _sdk.SetMacro(FanucSkewBedAddress.RollerDiameter, rollerDiameter);
+                    _sdk.SetMacro(FanucSkewBedAddress.BorePlugSize, borePlugSize);
+                    _sdk.SetMacro(FanucSkewBedAddress.MachiningMode, mode);
+                    return Task.CompletedTask;
+                }, "写加工参数");
+
+                if (await VerifyMachiningParamsAsync(rollerLength, rollerDiameter, borePlugSize, mode, attempt))
+                    break;
+
+                if (attempt == maxAttempts)
+                    throw new InvalidOperationException($"FANUC加工参数写入校验失败, 已禁止写#{FanucSkewBedAddress.DataSentDone}=1");
+
+                await Task.Delay(100, ct);
+            }
+
             await WriteMacroBoolAsync(FanucSkewBedAddress.DataSentDone, true);
         }
+
+        private Task<bool> VerifyMachiningParamsAsync(double rollerLength, double rollerDiameter, double borePlugSize, int mode, int attempt)
+        {
+            return SafeCallAsync(() => {
+                double l = _sdk.GetMacro(FanucSkewBedAddress.RollerLength);
+                double d = _sdk.GetMacro(FanucSkewBedAddress.RollerDiameter);
+                double b = _sdk.GetMacro(FanucSkewBedAddress.BorePlugSize);
+                double m = _sdk.GetMacro(FanucSkewBedAddress.MachiningMode);
+
+                bool ok = IsClose(l, rollerLength) &&
+                          IsClose(d, rollerDiameter) &&
+                          IsClose(b, borePlugSize) &&
+                          (int)Math.Round(m) == mode;
+
+                Console.WriteLine($"[FANUC-SDK] 加工参数读回 attempt={attempt}: #{FanucSkewBedAddress.RollerLength}={l} #{FanucSkewBedAddress.RollerDiameter}={d} #{FanucSkewBedAddress.BorePlugSize}={b} #{FanucSkewBedAddress.MachiningMode}={m} → {(ok ? "OK" : "NG")}");
+                return Task.FromResult(ok);
+            }, "校验加工参数");
+        }
+
+        private static bool IsClose(double actual, double expected) => Math.Abs(actual - expected) <= 0.01;
 
         public Task SetCraneLoadInPlaceAsync(bool v, CancellationToken ct = default) => WriteMacroBoolAsync(FanucSkewBedAddress.CraneLoadInPlace, v);
         public Task SetCraneLoadDoneAsync(CancellationToken ct = default) => WriteMacroBoolAsync(FanucSkewBedAddress.CraneLoadDone, true);

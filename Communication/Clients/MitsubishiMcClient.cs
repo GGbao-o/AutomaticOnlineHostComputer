@@ -125,16 +125,46 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             return new ReadResult(result);
         }
 
+        /// <summary>按字读取M区。FX系列按字读位设备时，起始M地址必须16点对齐。</summary>
+        public async Task<ReadResult> ReadMAlignedWordAsync(int alignedAddress, int count = 1, CancellationToken ct = default)
+        {
+            if (alignedAddress < 0 || alignedAddress % 16 != 0)
+                throw new ArgumentOutOfRangeException(nameof(alignedAddress), "M区按字读取的起始地址必须是16的整数倍。");
+
+            var words = await ReadWordsAsync(DeviceM, (ushort)alignedAddress, (ushort)count, ct, forceBitMode: false);
+            var result = new int[count];
+            for (int i = 0; i < count; i++) result[i] = (short)words[i];
+            return new ReadResult(result);
+        }
+
         public Task WriteAsync(byte deviceType, int address, int value, CancellationToken ct = default)
             => WriteWordsAsync(deviceType, (ushort)address, new[] { (ushort)value }, ct);
+
+        /// <summary>读改写M区一个bit。FX系列按字读写M设备时，内部自动换算到16点对齐字。</summary>
+        public async Task WriteMBitInWordAsync(int wordStartAddr, int bitOffset, bool value, CancellationToken ct = default)
+        {
+            if ((uint)bitOffset > 15) throw new ArgumentOutOfRangeException(nameof(bitOffset));
+            int targetAddr = wordStartAddr + bitOffset;
+            int alignedAddr = targetAddr - (targetAddr % 16);
+            int alignedBitOffset = targetAddr - alignedAddr;
+
+            var words = await ReadWordsAsync(DeviceM, (ushort)alignedAddr, 1, ct, forceBitMode: false);
+            int current = words.Length > 0 ? words[0] : 0;
+            int next = value ? (current | (1 << alignedBitOffset)) : (current & ~(1 << alignedBitOffset));
+            await WriteWordsAsync(DeviceM, (ushort)alignedAddr, new[] { (ushort)next }, ct, forceBitMode: false);
+        }
 
         // ═══════════════════════════════════════════════════════════════
         //  底层: 批量读
         // ═══════════════════════════════════════════════════════════════
-        private async Task<ushort[]> ReadWordsAsync(byte deviceType, ushort startAddr, ushort count, CancellationToken ct)
+        private Task<ushort[]> ReadWordsAsync(byte deviceType, ushort startAddr, ushort count, CancellationToken ct)
+            => ReadWordsAsync(deviceType, startAddr, count, ct, forceBitMode: null);
+
+        private async Task<ushort[]> ReadWordsAsync(byte deviceType, ushort startAddr, ushort count, CancellationToken ct, bool? forceBitMode)
         {
             EnsureConnected();
-            bool useBit = UseBitReadForM && (deviceType == DeviceM || deviceType == DeviceX || deviceType == DeviceY);
+            bool supportsBitMode = deviceType == DeviceM || deviceType == DeviceX || deviceType == DeviceY;
+            bool useBit = supportsBitMode && (forceBitMode ?? UseBitReadForM);
 
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.ASCII, true);
@@ -263,11 +293,15 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         // ═══════════════════════════════════════════════════════════════
         //  底层: 批量写
         // ═══════════════════════════════════════════════════════════════
-        private async Task WriteWordsAsync(byte deviceType, ushort startAddr, ushort[] values, CancellationToken ct)
+        private Task WriteWordsAsync(byte deviceType, ushort startAddr, ushort[] values, CancellationToken ct)
+            => WriteWordsAsync(deviceType, startAddr, values, ct, forceBitMode: null);
+
+        private async Task WriteWordsAsync(byte deviceType, ushort startAddr, ushort[] values, CancellationToken ct, bool? forceBitMode)
         {
             EnsureConnected();
             int n = values.Length;
-            bool useBit = UseBitReadForM && (deviceType == DeviceM || deviceType == DeviceX || deviceType == DeviceY);
+            bool supportsBitMode = deviceType == DeviceM || deviceType == DeviceX || deviceType == DeviceY;
+            bool useBit = supportsBitMode && (forceBitMode ?? UseBitReadForM);
 
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.ASCII, true);

@@ -4,7 +4,7 @@
              x:Name="Root">
     <!-- 外边框：绑定 ConnectedBrush，已连接=绿 故障=红 未连接=灰 -->
     <Border BorderBrush="{Binding ConnectedBrush, ElementName=Root, FallbackValue=Gray}"
-            BorderThickness="2" Background="White" Margin="2" Padding="0">
+            BorderThickness="2" Background="White" Margin="4" Padding="0" CornerRadius="6">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -13,13 +13,14 @@
             </Grid.RowDefinitions>
 
             <!-- 标题栏：天车名称 + 连接指示灯 -->
-            <DockPanel Margin="0,2,0,2">
+            <DockPanel Margin="0,0,0,2" Background="#F7FAFC" LastChildFill="True">
                 <!-- 连接状态指示点（绑定 ConnectedBrush 属性） -->
                 <Ellipse Width="10" Height="10" Margin="6,0,4,0"
                          Fill="{Binding ConnectedBrush, ElementName=Root, FallbackValue=Gray}"
                          DockPanel.Dock="Left" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding Title, ElementName=Root}"
-                           HorizontalAlignment="Center" FontSize="14" FontWeight="Bold" />
+                           Margin="0,6,8,6"
+                           HorizontalAlignment="Center" FontSize="14" FontWeight="Bold" Foreground="#1F2933" />
             </DockPanel>
 
             <!-- 中间：图标区 + 状态文字 -->
@@ -28,12 +29,12 @@
                     <ColumnDefinition Width="110" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Border Margin="4" Background="#E5E5E5" BorderBrush="#D0D0D0" BorderThickness="1">
+                <Border Margin="6,4" Background="#E9EEF4" BorderBrush="#CFD8E3" BorderThickness="1" CornerRadius="4">
                     <Viewbox Stretch="Uniform">
                         <TextBlock Text="🏗" FontSize="40"/>
                     </Viewbox>
                 </Border>
-                <StackPanel Grid.Column="1" Margin="0,2,4,2">
+                <StackPanel Grid.Column="1" Margin="0,4,6,4">
                     <!-- Line1 连接状态 -->
                     <TextBlock Text="{Binding Line1, ElementName=Root}" HorizontalAlignment="Center" FontSize="12"
                                Foreground="{Binding Line1Brush, ElementName=Root, FallbackValue=Black}" />
@@ -53,7 +54,7 @@
             </Grid>
 
             <!-- 底部：8个操作按钮（2行4列），绑定 ICommand -->
-            <UniformGrid Grid.Row="2" Columns="4" Margin="2">
+            <UniformGrid Grid.Row="2" Columns="4" Margin="4">
                 <!-- Btn1 -->
                 <Button Command="{Binding Btn1Command, ElementName=Root}"
                         Background="{Binding Btn1Brush, ElementName=Root, FallbackValue=#2C86C8}"

@@ -292,15 +292,15 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
     private async Task DoDrainCloseAsync() => await (await EnsureConnectedAsync()).DrainCloseAsync();
 
     /// <summary>
-    /// 停止轮询并断开天车连接。释放 TCP 连接和 Modbus 客户端资源，
-    /// 避免 PLC 连接数耗尽（通常仅支持 4~8 个并发连接）。
+    /// 停止卡片轮询。
+    /// 注意: _service 来自 CraneConnectionCache, 是页面和流程引擎共用的连接。
+    /// 卡片不拥有这个连接, Dispose 时不能断开, 否则页面切换会把正在生产的引擎连接断掉。
     /// </summary>
     public void Dispose()
     {
         _pollCts?.Cancel();
         _pollCts?.Dispose();
-        // 断开 TCP 连接释放 ModbusTcpClient 持有的 TcpClient/SemaphoreSlim
-        _ = _service?.DisconnectAsync();
+        // 共享连接由 CraneConnectionCache/流程生命周期管理；这里只停轮询, 不 Disconnect。
         Console.WriteLine($"[CraneCardVM] [{CraneName}] 已释放资源");
     }
 }

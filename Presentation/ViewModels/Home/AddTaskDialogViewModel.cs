@@ -9,7 +9,7 @@ namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 public sealed class AddTaskDialogViewModel : ObservableObject
 {
     private string _plateNo = string.Empty;
-    private int _sequence;
+    private string _sequence = string.Empty;
     private double _length;
     private double _diameter;
     private double _plugHole = 70;
@@ -19,11 +19,12 @@ public sealed class AddTaskDialogViewModel : ObservableObject
     private string _processType = "总工艺";
     private string _boringProcess = string.Empty;
     private string _skewBedProcess = "粗精一体不倒角";
+    private bool _forceBalancing;
     private bool _isStartFromTransferRack;
     private TransferRackStartOption? _selectedTransferRack;
 
     public string PlateNo { get => _plateNo; set => SetField(ref _plateNo, value); }
-    public int Sequence { get => _sequence; set => SetField(ref _sequence, value); }
+    public string Sequence { get => _sequence; set => SetField(ref _sequence, value); }
     public double Length { get => _length; set => SetField(ref _length, value); }
     public double Diameter { get => _diameter; set => SetField(ref _diameter, value); }
     public double PlugHole { get => _plugHole; set => SetField(ref _plugHole, value); }
@@ -34,6 +35,7 @@ public sealed class AddTaskDialogViewModel : ObservableObject
     public string ProcessType { get => _processType; set => SetField(ref _processType, value); }
     public string BoringProcess { get => _boringProcess; set => SetField(ref _boringProcess, value); }
     public string SkewBedProcess { get => _skewBedProcess; set => SetField(ref _skewBedProcess, value); }
+    public bool ForceBalancing { get => _forceBalancing; set => SetField(ref _forceBalancing, value); }
     public bool IsStartFromTransferRack { get => _isStartFromTransferRack; set => SetField(ref _isStartFromTransferRack, value); }
     public TransferRackStartOption? SelectedTransferRack { get => _selectedTransferRack; set => SetField(ref _selectedTransferRack, value); }
 
@@ -69,7 +71,7 @@ public sealed class AddTaskDialogViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 基础校验：版号不能为空，序号>0。
+    /// 基础校验：版号、序号不能为空；版号和序号允许包含英文符号。
     /// </summary>
     public bool Validate(out string message)
     {
@@ -79,9 +81,9 @@ public sealed class AddTaskDialogViewModel : ObservableObject
             return false;
         }
 
-        if (Sequence <= 0)
+        if (string.IsNullOrWhiteSpace(Sequence))
         {
-            message = "序号必须大于0";
+            message = "序号不能为空";
             return false;
         }
 
@@ -106,7 +108,7 @@ public sealed class AddTaskDialogViewModel : ObservableObject
         return new TaskRowViewModel
         {
             PlateNo = PlateNo.Trim(),
-            Sequence = Sequence,
+            Sequence = Sequence.Trim(),
             Length = Length,
             Diameter = Diameter,
             PlugHole = PlugHole,
@@ -116,6 +118,7 @@ public sealed class AddTaskDialogViewModel : ObservableObject
             ProcessType = ProcessType,
             BoringProcess = BoringProcess.Trim(),
             SkewBedProcess = SkewBedProcess.Trim(),
+            ForceBalancing = ForceBalancing,
             StartFromTransferRack = IsStartFromTransferRack,
             TransferRackLine = IsStartFromTransferRack ? SelectedTransferRack?.Line ?? 0 : 0,
             TransferRackCode = IsStartFromTransferRack ? SelectedTransferRack?.Code ?? string.Empty : string.Empty,

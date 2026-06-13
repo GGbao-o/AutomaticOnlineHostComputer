@@ -29,9 +29,26 @@ public sealed class ManipulatorConnectionCache
         {
             Console.WriteLine("[ManipulatorCache] 开始从数据库装载3台机械手IP(type_name=机械手)...");
 
-            _ipMappings[1] = ("机械手1", FindIp(machineRows, "机械手1", "192.168.2.85"));
-            _ipMappings[2] = ("机械手2", FindIp(machineRows, "机械手2", "192.168.2.86"));
-            _ipMappings[3] = ("机械手3", FindIp(machineRows, "机械手3", "192.168.2.87"));
+            var nextMappings = new Dictionary<int, (string Name, string Ip)>
+            {
+                [1] = ("机械手1", FindIp(machineRows, "机械手1", "192.168.2.85")),
+                [2] = ("机械手2", FindIp(machineRows, "机械手2", "192.168.2.86")),
+                [3] = ("机械手3", FindIp(machineRows, "机械手3", "192.168.2.87")),
+            };
+
+            bool mappingChanged = _ipMappings.Count != nextMappings.Count
+                || nextMappings.Any(kv => !_ipMappings.TryGetValue(kv.Key, out var old)
+                    || !string.Equals(old.Ip, kv.Value.Ip, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(old.Name, kv.Value.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (!mappingChanged)
+            {
+                Console.WriteLine("[ManipulatorCache] 机械手IP映射未变化, 保留现有共享连接");
+                return;
+            }
+
+            _ipMappings.Clear();
+            foreach (var kv in nextMappings) _ipMappings[kv.Key] = kv.Value;
 
             foreach (var svc in _services.Values)
                 _ = svc.DisconnectAsync();
