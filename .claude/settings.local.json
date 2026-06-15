@@ -38,7 +38,8 @@
       "Bash(awk 'NR>=806 && NR<=830' Line1RearFlowEngine.cs)",
       "Bash(python *)",
       "Bash(D:/python3.12.7/python.exe -m pip install openpyxl -q)",
-      "Bash(D:/python3.12.7/python.exe \"D:/BSH/hateshujukejicode/自动线上位机/V4.4.0 - DIS-0928-1/Automatic Online Host Computer/Docs/create_device_config.py\")"
+      "Bash(D:/python3.12.7/python.exe \"D:/BSH/hateshujukejicode/自动线上位机/V4.4.0 - DIS-0928-1/Automatic Online Host Computer/Docs/create_device_config.py\")",
+      "Bash(git diff *)"
     ]
   }
 }

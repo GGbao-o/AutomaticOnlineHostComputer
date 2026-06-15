@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -140,7 +141,7 @@ public sealed class MotionConfig
         /// <summary>总开关。false时完全跳过X绝对编码器微调。</summary>
         public bool Enabled { get; set; } = true;
         /// <summary>绝对编码器偏差允许值(mm)。|目标-当前|小于等于该值时不微调。</summary>
-        public int ToleranceMm { get; set; } = 3;
+        public int ToleranceMm { get; set; } = 5;
         /// <summary>单次最大允许微调量(mm)。超过该值直接报警, 防止标定/坐标错误时大距离盲修。</summary>
         public int MaxAdjustMm { get; set; } = 50;
         /// <summary>每台天车每个工位的X绝对编码器标定值。值为-1表示该工位不做微调。</summary>
@@ -221,6 +222,11 @@ public sealed class MotionConfig
 
     /// <summary>取天车归位X(有配置用配置, 没有用默认)</summary>
     public int GetCraneHomeX(int craneNo) => CraneHomeX.TryGetValue(craneNo, out var x) ? x : 1000;
+
+    /// <summary>直径补偿(mm)：按站号写入CNC前叠加。不影响Z公式/UI显示/缓存直径。</summary>
+    public Dictionary<string, double> DiameterOffsets { get; set; } = new();
+    public double GetDiameterOffset(string stationCode)
+        => DiameterOffsets.TryGetValue(stationCode, out var o) ? o : 0.0;
 
     /// <summary>斜床 Y 轴移动公式参数</summary>
     public SkewBedSection SkewBed { get; set; } = new();

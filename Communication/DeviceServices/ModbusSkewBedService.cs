@@ -148,6 +148,14 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <summary>清10373=0（尾座张开复位, 写10374前必须先清）</summary>
         public Task ClearTailstockOpenAsync(CancellationToken ct = default)
             => _client.WriteAsync(ModbusSkewBedAddress.TailstockOpenCmd, 0, ct);
+        
+        /// <summary>
+        /// 写10374=0 
+        /// </summary>
+        /// <param name="ct"></param>
+        /// <returns></returns>
+        public Task ClearTailstockStopAsync(CancellationToken ct = default)
+            => _client.WriteAsync(ModbusSkewBedAddress.TailstockStopCmd, 0, ct);
 
         // ─── 私有辅助 ─────────────────────────────────────────────────
 

@@ -28,6 +28,8 @@ public sealed class HomeViewModel : ObservableObject
     private readonly MotionConfig _cfg;
     private readonly ManipulatorConnectionCache _manipulatorCache;
     private readonly McConnectionCache _mcCache = new();
+    private readonly SemaphoreSlim _loadLock = new(1, 1);
+    private bool _enginesInitialized;
 
     /// <summary>工位坐标(站号→MachineRow), 供弹窗查询</summary>
     private Dictionary<string, MachineManagementRowVm> _stationDict =
@@ -55,9 +57,16 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
-            Console.WriteLine("[HomeViewModel] ▶ 【启动研磨】");
-            // Start() 内部已有 IsRunning 防重复逻辑，直接调用即可
-            _grindingEngine.Start();
+            if (_grindingEngine.IsRunning && _grindingEngine.IsPaused)
+            {
+                Console.WriteLine("[HomeViewModel] ▶ 【恢复研磨】");
+                _grindingEngine.Resume();
+            }
+            else
+            {
+                Console.WriteLine("[HomeViewModel] ▶ 【启动研磨】");
+                _grindingEngine.Start();
+            }
             IsGrindingRunning = true;
             OnPropertyChanged(nameof(GrindingCachedCount));
         }
@@ -364,6 +373,7 @@ public sealed class HomeViewModel : ObservableObject
     private SemaphoreSlim? _sharedManipulatorLock; // 机械手1互斥锁(1号线+2号线共享)
     private SemaphoreSlim? _sharedTransferRackLock2; // 2号线前后端共享中转架锁
     private CancellationTokenSource? _line2StatusCts;
+    private CancellationTokenSource? _grindingRackStatusCts;
 
     /// <summary>后台任务：从引擎 DeviceStatus 同步到 UI 卡片（不另建连接）</summary>
     private async Task SyncLine1StatusToCardsAsync(CancellationToken ct)
@@ -637,6 +647,117 @@ public sealed class HomeViewModel : ObservableObject
         SetReadyCard(cards, "ST010", mc65, engine.M720CanPlace, "可放料", "不可放料", $"M720 M3={(engine.M3Busy ? "忙" : "闲")}", "192.168.2.65:9000");
     }
 
+    /// <summary>研磨上下料架状态变化快，独立刷新到大屏卡片，避免只停留在页面加载时探测值。</summary>
+    private async Task SyncGrindingRackStatusToCardsAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var cards = StationCards;
+                await RefreshGrindingFeedRackCardsAsync(cards, ct);
+                await RefreshGrindingUnloadRackCardAsync(cards, ct);
+            }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[HomeViewModel] 研磨料架状态同步异常: {ex.Message}");
+            }
+
+            await Task.Delay(1500, ct);
+        }
+    }
+
+    private async Task RefreshGrindingFeedRackCardsAsync(Dictionary<string, StationCardViewModel> cards, CancellationToken ct)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(2000);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+            var client = await _mcCache.GetOrCreateAsync("192.168.2.65", 9000, linked.Token);
+
+            var r720 = await client.ReadMAlignedWordAsync(720, 1, linked.Token); // M720 bit0, M730 bit10
+            ushort raw720 = (ushort)(r720.IntValues.Length > 0 ? r720.IntValues[0] : 0);
+
+            bool m730 = (raw720 & (1 << 10)) != 0;
+
+            int d200Length = 0;
+            try
+            {
+                var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, linked.Token);
+                d200Length = d.IntValues.Length > 0 ? d.IntValues[0] : 0;
+            }
+            catch { }
+
+            if (cards.TryGetValue("ST709", out var c709))
+            {
+                c709.ConnectedBrush = Brushes.LimeGreen;
+                c709.Status1 = m730 ? "可取板" : "末位无版";
+                c709.Status1Brush = m730 ? Brushes.Orange : Brushes.Green;
+                c709.Status2 = $"M730 D200长度={d200Length}";
+                c709.IpText = "192.168.2.65:9000";
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            MarkMcCardReadFailed(cards, "ST709", "MC65超时");
+        }
+        catch (Exception ex)
+        {
+            MarkMcCardReadFailed(cards, "ST709", ex.Message);
+        }
+    }
+
+    private async Task RefreshGrindingUnloadRackCardAsync(Dictionary<string, StationCardViewModel> cards, CancellationToken ct)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(2000);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+            var client = await _mcCache.GetOrCreateAsync("192.168.2.64", 9000, linked.Token);
+
+            var result = await client.ReadMAlignedWordAsync(720, 1, linked.Token);
+            ushort raw = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
+            bool m720CanPlace = (raw & 1) != 0;
+            bool m730Safe = (raw & (1 << 10)) != 0;
+            bool unloadReady = m720CanPlace && m730Safe;
+
+            int unloadDiameter = 0;
+            try
+            {
+                var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, linked.Token);
+                unloadDiameter = d.IntValues.Length > 0 ? d.IntValues[0] : 0;
+            }
+            catch { }
+
+            if (cards.TryGetValue("ST710", out var c710))
+            {
+                c710.ConnectedBrush = Brushes.LimeGreen;
+                c710.Status1 = unloadReady ? "可放料" : (!m720CanPlace ? "不可放料" : "未到安全位");
+                c710.Status1Brush = unloadReady ? Brushes.Green : Brushes.Orange;
+                c710.Status2 = $"M720={(m720CanPlace ? 1 : 0)} M730={(m730Safe ? 1 : 0)} D200={unloadDiameter}";
+                c710.IpText = "192.168.2.64:9000";
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            MarkMcCardReadFailed(cards, "ST710", "MC64超时");
+        }
+        catch (Exception ex)
+        {
+            MarkMcCardReadFailed(cards, "ST710", ex.Message);
+        }
+    }
+
+    private static void MarkMcCardReadFailed(Dictionary<string, StationCardViewModel> cards, string code, string reason)
+    {
+        if (!cards.TryGetValue(code, out var card)) return;
+        card.ConnectedBrush = Brushes.Red;
+        card.Status1 = "读取失败";
+        card.Status1Brush = Brushes.Red;
+        card.Status2 = reason.Length > 24 ? reason[..24] : reason;
+    }
+
     private bool _isLine1Running;
     /// <summary>1号线是否在运行</summary>
     public bool IsLine1Running { get => _isLine1Running; set { if (SetField(ref _isLine1Running, value)) OnPropertyChanged(nameof(Line1ToggleText)); } }
@@ -710,9 +831,18 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
-            Console.WriteLine("[HomeViewModel] ▶ 【启动1号线】→ 前端+后端(动平衡单独启动)"); 
-            _line1Engine.Start();
-            _line1RearEngine?.Start();
+            if (_line1Engine.IsRunning || _line1RearEngine?.IsRunning == true)
+            {
+                Console.WriteLine("[HomeViewModel] ▶ 【恢复1号线】→ 前端+后端(动平衡单独恢复)");
+                if (_line1Engine.IsRunning) _line1Engine.Resume(); else _line1Engine.Start();
+                if (_line1RearEngine?.IsRunning == true) _line1RearEngine.Resume(); else _line1RearEngine?.Start();
+            }
+            else
+            {
+                Console.WriteLine("[HomeViewModel] ▶ 【启动1号线】→ 前端+后端(动平衡单独启动)");
+                _line1Engine.Start();
+                _line1RearEngine?.Start();
+            }
             IsLine1Running = true;
         }
     }
@@ -731,9 +861,18 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
-            Console.WriteLine("[HomeViewModel] ▶ 【启动2号线】→ 前端+后端");
-            _line2Engine.Start();
-            _line2RearEngine?.Start();
+            if (_line2Engine.IsRunning || _line2RearEngine?.IsRunning == true)
+            {
+                Console.WriteLine("[HomeViewModel] ▶ 【恢复2号线】→ 前端+后端");
+                if (_line2Engine.IsRunning) _line2Engine.Resume(); else _line2Engine.Start();
+                if (_line2RearEngine?.IsRunning == true) _line2RearEngine.Resume(); else _line2RearEngine?.Start();
+            }
+            else
+            {
+                Console.WriteLine("[HomeViewModel] ▶ 【启动2号线】→ 前端+后端");
+                _line2Engine.Start();
+                _line2RearEngine?.Start();
+            }
             IsLine2Running = true;
         }
     }
@@ -751,8 +890,16 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
-            Console.WriteLine("[HomeViewModel] ▶ 【启动动平衡】");
-            _line1BalancingEngine.Start();
+            if (_line1BalancingEngine.IsRunning && _line1BalancingEngine.IsPaused)
+            {
+                Console.WriteLine("[HomeViewModel] ▶ 【恢复动平衡】");
+                _line1BalancingEngine.Resume();
+            }
+            else
+            {
+                Console.WriteLine("[HomeViewModel] ▶ 【启动动平衡】");
+                _line1BalancingEngine.Start();
+            }
             IsBalancingRunning = true;
         }
         await Task.CompletedTask;
@@ -789,19 +936,119 @@ public sealed class HomeViewModel : ObservableObject
             || _grindingEngine?.IsRunning == true;
     }
 
-    /*异步获取机械手 天车的ip地址 然后存缓存中*/
-    public async Task LoadAsync()
+    private Task RefreshLoadedHomeAsync()
     {
+        IsLoading = false;
+        SyncBalancingCards(StationCards);
+        OnPropertyChanged(nameof(IpMap));
+        OnPropertyChanged(nameof(StationCards));
+        OnPropertyChanged(nameof(Grinder1));
+        OnPropertyChanged(nameof(Grinder2));
+        OnPropertyChanged(nameof(Grinder3));
+        OnPropertyChanged(nameof(Grinder4));
+        OnPropertyChanged(nameof(Line1CachedCount));
+        OnPropertyChanged(nameof(Line2CachedCount));
+        OnPropertyChanged(nameof(GrindingCachedCount));
+        Console.WriteLine("[HomeViewModel] LoadAsync轻量刷新: 引擎已初始化, 保留现有引擎/锁/缓存, 不重新连接、不重建流程实例");
+        if (_cfg.ErpTaskImport.EnabledOnStartup && !IsErpTaskImportRunning)
+            StartErpTaskImport();
+        return Task.CompletedTask;
+    }
+
+    private void StopStatusSyncLoops()
+    {
+        _line1StatusCts?.Cancel();
+        _line2StatusCts?.Cancel();
+        _grindingRackStatusCts?.Cancel();
+        _line1StatusCts = null;
+        _line2StatusCts = null;
+        _grindingRackStatusCts = null;
+    }
+
+    private async Task<bool> CanRebuildProductionContextAsync()
+    {
+        var reasons = new List<string>();
+
         if (IsAnyProductionEngineRunning())
+            reasons.Add("生产引擎后台任务仍在运行/暂停中");
+        if ((_line1Engine?.CachedCount ?? 0) > 0)
+            reasons.Add($"1号线前端缓存={_line1Engine!.CachedCount}");
+        if ((_line2Engine?.CachedCount ?? 0) > 0)
+            reasons.Add($"2号线前端缓存={_line2Engine!.CachedCount}");
+        if ((_line1RearEngine?.CachedCount ?? 0) > 0)
+            reasons.Add($"1号线后端中转缓存={_line1RearEngine!.CachedCount}");
+        if ((_line2RearEngine?.CachedCount ?? 0) > 0)
+            reasons.Add($"2号线后端中转缓存={_line2RearEngine!.CachedCount}");
+        if ((_line1BalancingEngine?.CachedCount ?? 0) > 0)
+            reasons.Add($"动平衡缓存={_line1BalancingEngine!.CachedCount} Keys=[{_line1BalancingEngine.CacheKeysText}]");
+        if ((_grindingEngine?.CachedCount ?? 0) > 0)
+            reasons.Add($"研磨缓存={_grindingEngine!.CachedCount}");
+
+        try
         {
-            // LoadAsync会刷新设备IP映射。生产运行中重载映射可能断开共享天车/机械手连接,
-            // 因此直接拒绝, 保留当前连接和引擎上下文, 不影响正在执行的工件。
-            Console.WriteLine("[HomeViewModel] ⚠ 生产引擎运行中, 禁止重新加载设备IP/连接映射; 请先暂停/停止产线后再刷新页面数据");
-            return;
+            using var cts = new CancellationTokenSource(3000);
+            var mc63 = await _mcCache.GetOrCreateAsync("192.168.2.63", 9000, cts.Token);
+            var r63 = await mc63.ReadMAlignedWordAsync(800, 2, cts.Token);
+            int m816Word = r63.IntValues.Length > 1 ? r63.IntValues[1] : 0;
+            bool m817 = (m816Word & (1 << 1)) != 0;
+            bool m818 = (m816Word & (1 << 2)) != 0;
+            bool m821 = (m816Word & (1 << 5)) != 0;
+            if (m817) reasons.Add("PLC现场M817=1(1号线动平衡下料架有板)");
+            if (m818) reasons.Add("PLC现场M818=1(2号线动平衡下料架有板)");
+            if (m821) reasons.Add("PLC现场M821=1(2号线短板中转位有板)");
+
+            var mc65 = await _mcCache.GetOrCreateAsync("192.168.2.65", 9000, cts.Token);
+            var r720 = await mc65.ReadMAlignedWordAsync(720, 1, cts.Token);
+            bool m720CanPlace = (r720.IntValues[0] & 1) != 0;
+            if (!m720CanPlace)
+                reasons.Add("PLC现场M720=0(研磨上料1号位不可放料, 可能已有板或未到位)");
+        }
+        catch (Exception ex)
+        {
+            reasons.Add($"PLC现场状态读取失败: {ex.Message}");
         }
 
+        if (reasons.Count == 0) return true;
+
+        Console.WriteLine("[HomeViewModel] ⚠ 禁止强制重载流程引擎: " + string.Join("; ", reasons));
+        return false;
+    }
+
+    /*异步获取机械手 天车的ip地址 然后存缓存中*/
+    public async Task LoadAsync(bool forceReload = false)
+    {
+        await _loadLock.WaitAsync();
+        try
+        {
+            if (_enginesInitialized && !forceReload)
+            {
+                await RefreshLoadedHomeAsync();
+                return;
+            }
+
+            if (_enginesInitialized)
+            {
+                if (!await CanRebuildProductionContextAsync())
+                {
+                    IsLoading = false;
+                    return;
+                }
+
+                StopStatusSyncLoops();
+            }
+
+            if (forceReload && IsAnyProductionEngineRunning())
+            {
+                // LoadAsync会刷新设备IP映射。生产运行中重载映射可能断开共享天车/机械手连接,
+                // 因此直接拒绝, 保留当前连接和引擎上下文, 不影响正在执行的工件。
+                Console.WriteLine("[HomeViewModel] ⚠ 生产引擎运行中, 禁止重新加载设备IP/连接映射; 请先暂停/停止产线后再刷新页面数据");
+                return;
+            }
+
         IsLoading = true;
-        Console.WriteLine("[HomeViewModel] ========== LoadAsync 开始 ==========");
+        Console.WriteLine(forceReload
+            ? "[HomeViewModel] ========== LoadAsync 强制重载开始 =========="
+            : "[HomeViewModel] ========== LoadAsync 首次初始化开始 ==========");
 
         var machineRows = await _queryService.GetMachineRowsAsync();
         Console.WriteLine($"[HomeViewModel] 数据库查询完成：machine表 {machineRows.Count} 行");
@@ -944,6 +1191,8 @@ public sealed class HomeViewModel : ObservableObject
         _ = SyncLine1StatusToCardsAsync(_line1StatusCts.Token);
         _line2StatusCts = new CancellationTokenSource();
         _ = SyncLine2StatusToCardsAsync(_line2StatusCts.Token);
+        _grindingRackStatusCts = new CancellationTokenSource();
+        _ = SyncGrindingRackStatusToCardsAsync(_grindingRackStatusCts.Token);
 
         // ── 初始化全厂状态卡片 ──────────────────────────────────────
         Console.WriteLine("[HomeViewModel] 开始初始化全厂状态总览卡片...");
@@ -1057,9 +1306,17 @@ public sealed class HomeViewModel : ObservableObject
             Console.WriteLine("[HomeViewModel] 研磨机GrinderPoll后台连接完成（已注入共享服务到卡片）");
         });
 
-        Console.WriteLine("[HomeViewModel] ========== LoadAsync 完成 ==========");
+        _enginesInitialized = true;
+        Console.WriteLine(forceReload
+            ? "[HomeViewModel] ========== LoadAsync 强制重载完成 =========="
+            : "[HomeViewModel] ========== LoadAsync 首次初始化完成 ==========");
         if (_cfg.ErpTaskImport.EnabledOnStartup && !IsErpTaskImportRunning)
             StartErpTaskImport();
+        }
+        finally
+        {
+            _loadLock.Release();
+        }
     }
     
     private static async Task SafeStartAsync(CraneCardViewModel vm)
