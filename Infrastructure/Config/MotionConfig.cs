@@ -101,7 +101,7 @@ public sealed class MotionConfig
 
     public sealed class ErpTaskImportSection
     {
-        /// <summary>ERP下发任务文件路径。文件内只允许一行、一条任务。</summary>
+        /// <summary>ERP下发任务文件路径。支持多行任务，按文件顺序导入。</summary>
         public string FilePath { get; set; } = @"D:\job1.txt";
         /// <summary>轮询间隔(ms)。现场文件写入很快, 但不需要高频占用UI线程。</summary>
         public int PollIntervalMs { get; set; } = 1000;
@@ -233,6 +233,9 @@ public sealed class MotionConfig
 
     public sealed class SkewBedSection
     {
+        private static readonly string[] Line1BedCodes = { "ST108", "ST109", "ST111", "ST110", "ST112" };
+        private static readonly string[] Line2BedCodes = { "ST606", "ST607", "ST608", "ST609", "ST610" };
+
         /// <summary>各斜床顶尖距离 (站号→mm)，默认 1450</summary>
         public Dictionary<string, int> CenterDistances { get; set; } = new()
         {
@@ -241,6 +244,17 @@ public sealed class MotionConfig
             // 2号线斜床6~10 (DB站号: ST606~ST610)
             ["ST606"] = 1315, ["ST607"] = 1450, ["ST608"] = 1450, ["ST609"] = 1450, ["ST610"] = 1450,
         };
+
+        /// <summary>
+        /// 各斜床允许加工的最大工件长度(mm)。只用于任务分线和后端斜床匹配, 不参与Y轴偏移计算。
+        /// 未配置或配置为0/负数时按不可加工处理, 防止长度能力未知时误派工件。
+        /// </summary>
+        public Dictionary<string, int> MaxWorkpieceLengthMm { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ST606"] = 1280, ["ST607"] = 1280, ["ST608"] = 1280, ["ST609"] = 1280, ["ST610"] = 1255,
+            ["ST108"] = 1350, ["ST109"] = 1300, ["ST111"] = 1300, ["ST110"] = 1300, ["ST112"] = 1170,
+        };
+
         /// <summary>大孔(堵孔100) Y轴移动距离，默认 125mm</summary>
         public int LargeBoreOffset { get; set; } = 122;
         /// <summary>小孔(堵孔70) Y轴移动距离，默认 65mm</summary>
@@ -285,6 +299,36 @@ public sealed class MotionConfig
         /// <summary>判断指定斜床是否启用设备级对刀模式。</summary>
         public bool IsToolSettingEnabled(string stationCode)
             => ToolSettingBeds.TryGetValue(stationCode, out var enabled) && enabled;
+
+        /// <summary>获取指定斜床最大加工长度(mm)。未配置时返回0, 表示该斜床不参与长度匹配。</summary>
+        public int GetMaxWorkpieceLengthMm(string stationCode)
+            => MaxWorkpieceLengthMm.TryGetValue(stationCode, out var max) ? max : 0;
+
+        /// <summary>判断指定斜床能否加工该长度。长度必须为正数且不超过该斜床配置上限。</summary>
+        public bool CanProcessLength(string stationCode, double workpieceLength)
+        {
+            int max = GetMaxWorkpieceLengthMm(stationCode);
+            return workpieceLength > 0 && max > 0 && workpieceLength <= max;
+        }
+
+        /// <summary>按线路返回斜床站号。返回空数组表示无效线路。</summary>
+        public static IReadOnlyList<string> GetBedCodesForLine(int line) => line switch
+        {
+            1 => Line1BedCodes,
+            2 => Line2BedCodes,
+            _ => Array.Empty<string>()
+        };
+
+        /// <summary>判断某条线是否至少有一台斜床能加工该长度。</summary>
+        public bool AnyBedCanProcessLine(int line, double workpieceLength)
+        {
+            foreach (var code in GetBedCodesForLine(line))
+            {
+                if (CanProcessLength(code, workpieceLength))
+                    return true;
+            }
+            return false;
+        }
 
         /// <summary>根据站号和版孔类型计算 Y 轴目标偏移：Y = (顶尖距离-长度)/2 + 孔偏移</summary>
         public int ComputeYOffset(string stationCode, double workpieceLength, int plugHole)

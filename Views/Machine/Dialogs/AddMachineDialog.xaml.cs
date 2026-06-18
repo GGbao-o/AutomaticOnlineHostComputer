@@ -13,6 +13,7 @@ public partial class AddMachineDialog : Window
     private readonly ManagementUpdateService _updateService;
 
     private readonly int? _editId;
+    private readonly string _editStationCode = string.Empty;
 
     public AddMachineDialog()
     {
@@ -28,6 +29,7 @@ public partial class AddMachineDialog : Window
     public AddMachineDialog(MachineManagementRowVm row) : this()
     {
         _editId = row.SourceId;
+        _editStationCode = row.StationCode ?? string.Empty;
         Title = "编辑机器";
         FillForm(row);
     }
@@ -66,7 +68,7 @@ public partial class AddMachineDialog : Window
         return new AddMachineInput
         {
             LineNo = GetLineNo(LineNoComboBox),
-            StationCode = string.Empty,
+            StationCode = _editStationCode,
             Name = RequireText(NameTextBox.Text, "机器名称"),
             TypeName = GetComboText(TypeNameComboBox),
             AreaName = string.Empty,

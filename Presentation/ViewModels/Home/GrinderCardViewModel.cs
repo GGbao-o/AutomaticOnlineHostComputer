@@ -107,41 +107,40 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
     //  状态更新（由 GrinderPoll 轮询后调用）
     // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>根据已读取的原始值更新卡片 5 行显示（由 GrinderPoll 调用）。</summary>
-    public void UpdateTypeA(int di)
+    /// <summary>根据已读取的快照更新卡片 5 行显示（由 GrinderPoll 调用）。</summary>
+    public void UpdateTypeA(PlcGrinderService.TypeAStatusSnapshot snapshot)
     {
-        bool fault   = (di & (1 << 0))  != 0;  // bit0  报警
-        bool stone1  = (di & (1 << 1))  != 0;  // bit1  磨石1厚度报警
-        bool stone2  = (di & (1 << 2))  != 0;  // bit2  磨石2厚度报警
-        bool reqData = (di & (1 << 9))  != 0;  // bit9  请求数据
-        bool reqLoad = (di & (1 << 10)) != 0;  // bit10 请求上料
-        bool clamped = (di & (1 << 11)) != 0;  // bit11 锁紧完成
-        bool reqUnld = (di & (1 << 12)) != 0;  // bit12 请求下料
-        bool unclamp = (di & (1 << 13)) != 0;  // bit13 松开完成
-        bool busy    = (di & (1 << 14)) != 0;  // bit14 加工中
-        bool door    = (di & (1 << 15)) != 0;  // bit15 门开
+        bool fault   = snapshot.Alarm;
+        bool stone1  = snapshot.GrindStone1Alarm;
+        bool stone2  = snapshot.GrindStone2Alarm;
+        bool reqData = snapshot.ReqData;
+        bool reqLoad = snapshot.ReqLoad;
+        bool clamped = snapshot.Clamped;
+        bool reqUnld = snapshot.ReqUnload;
+        bool unclamp = snapshot.Unclamp;
+        bool busy    = snapshot.Busy;
+        bool door    = snapshot.Door;
 
         ConnectedBrush = fault ? Brushes.Red : Brushes.LimeGreen;
         Line1Brush = fault ? Brushes.Red : Brushes.Green;
         Line1 = fault ? "已连接 | ⚠ 故障" : "已连接，就绪";
 
-        Line2 = busy    ? "加工中" :
-                clamped ? "锁紧完成 → 天车可上移" :
+        Line2 = reqUnld ? "请求下料 → 等待天车取料" :
                 reqLoad ? "请求上料 → 等待天车送料" :
-                unclamp ? "松开完成 → 天车可上移" :
-                reqUnld ? "请求下料 → 等待天车取料" :
+                clamped ? "锁紧完成 → 天车可上移" :
                 reqData ? "请求数据 → 等待下发参数" :
+                unclamp ? "松开完成 → 天车可上移" :
+                busy    ? "加工中" :
                 "空闲";
 
-        var flags = new System.Collections.Generic.List<string>();
-        if (door)   flags.Add("门开⚠");
+        var flags = new System.Collections.Generic.List<string> { door ? "门开=1" : "门关=0" };
         if (stone1) flags.Add("磨石1报警✘");
         if (stone2) flags.Add("磨石2报警✘");
-        Line3 = flags.Count > 0 ? string.Join(" | ", flags) : "安全，就绪";
+        Line3 = string.Join(" | ", flags);
 
         Line4 = "西门子PLC (TypeA)";
         Line4Brush = Brushes.DarkBlue;
-        Line5 = $"DI=0x{di:X4} 心跳={(di & (1 << 8)) != 0}";
+        Line5 = $"DI=0x{snapshot.RawDI:X4} 心跳={snapshot.Heartbeat}";
     }
 
     public void UpdateTypeB(int machineStatus, bool reqData, bool reqLoad, bool clamped,
@@ -151,15 +150,15 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
         Line1Brush = machineStatus == 2 ? Brushes.Red : Brushes.Green;
         Line1 = machineStatus == 2 ? "已连接 | ⚠ 报警" : "已连接，就绪";
 
-        Line2 = busy    ? "加工中" :
-                clamped ? "锁紧完成 → 天车可上移" :
+        Line2 = reqUnld ? "请求下料 → 等待天车取料" :
                 reqLoad ? "请求上料 → 等待天车送料" :
-                unclamp ? "松开完成 → 天车可上移" :
-                reqUnld ? "请求下料 → 等待天车取料" :
+                clamped ? "锁紧完成 → 天车可上移" :
                 reqData ? "请求数据 → 等待下发参数" :
+                unclamp ? "松开完成 → 天车可上移" :
+                busy    ? "加工中" :
                 machineStatus == 0 ? "空闲" : $"忙碌中({machineStatus})";
 
-        Line3 = door ? "安全门开⚠" : "就绪";
+        Line3 = door ? "门开=1" : "门关=0";
 
         Line4 = "新代数控 (TypeB)";
         Line4Brush = Brushes.DarkGreen;

@@ -34,7 +34,7 @@
                     Grid.Row="1"
                     HorizontalScrollBarVisibility="Auto"
                     VerticalScrollBarVisibility="Auto">
-                    <Grid MinWidth="1500" MinHeight="700">
+                    <Grid MinWidth="1100" MinHeight="700">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
@@ -58,15 +58,29 @@
                             VirtualizingPanel.VirtualizationMode="Recycling">
                             <DataGrid.Columns>
                                 <DataGridTextColumn
-                                    Width="70"
+                                    Width="60"
                                     Binding="{Binding Id}"
-                                    Header="机号" />
+                                    Header="ID" />
                                 <DataGridTextColumn
-                                    Width="150"
+                                    Width="90"
+                                    Binding="{Binding StationCode}"
+                                    Header="站号" />
+                                <DataGridTextColumn
+                                    Width="160"
                                     Binding="{Binding Name}"
-                                    Header="机器名称" />
-                                <!-- <DataGridTextColumn Header="位置" Binding="{Binding Position}" Width="120" /> -->
-                                <!-- <DataGridTextColumn Header="缩略图" Binding="{Binding Thumb}" Width="120" /> -->
+                                    Header="名称" />
+                                <DataGridTextColumn
+                                    Width="110"
+                                    Binding="{Binding TypeName}"
+                                    Header="类型" />
+                                <DataGridTextColumn
+                                    Width="130"
+                                    Binding="{Binding Ip}"
+                                    Header="IP" />
+                                <DataGridTextColumn
+                                    Width="60"
+                                    Binding="{Binding Port}"
+                                    Header="端口" />
                                 <DataGridTextColumn
                                     Width="70"
                                     Binding="{Binding X}"
@@ -81,44 +95,16 @@
                                     Header="标定Z" />
                                 <DataGridTextColumn
                                     Width="70"
-                                    Binding="{Binding CurrentX}"
-                                    Header="当前X" />
-                                <DataGridTextColumn
-                                    Width="70"
-                                    Binding="{Binding CurrentY}"
-                                    Header="当前Y" />
-                                <DataGridTextColumn
-                                    Width="70"
-                                    Binding="{Binding CurrentZ}"
-                                    Header="当前Z" />
-                                <DataGridTextColumn
-                                    Width="55"
-                                    Binding="{Binding DeltaX}"
-                                    Header="ΔX" />
-                                <DataGridTextColumn
-                                    Width="55"
-                                    Binding="{Binding DeltaY}"
-                                    Header="ΔY" />
-                                <DataGridTextColumn
-                                    Width="55"
-                                    Binding="{Binding DeltaZ}"
-                                    Header="ΔZ" />
-                                <DataGridTextColumn
-                                    Width="100"
                                     Binding="{Binding XOffset}"
-                                    Header="X轴偏移" />
+                                    Header="X偏移" />
                                 <DataGridTextColumn
-                                    Width="100"
+                                    Width="70"
                                     Binding="{Binding YOffset}"
-                                    Header="Y轴偏移" />
+                                    Header="Y偏移" />
                                 <DataGridTextColumn
-                                    Width="100"
+                                    Width="70"
                                     Binding="{Binding ZOffset}"
-                                    Header="Z轴偏移" />
-                                <DataGridTextColumn
-                                    Width="80"
-                                    Binding="{Binding Shake}"
-                                    Header="抖动" />
+                                    Header="Z偏移" />
                             </DataGrid.Columns>
                         </DataGrid>
 

@@ -77,10 +77,15 @@ public sealed class StationCardViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task StartPollingAsync()
     {
-        // FANUC FOCAS 设备(端口8193) — 用FOCAS协议探测
+        // FANUC FOCAS 设备由后端流程引擎的独立Worker托管。
+        // 页面不能直接FOCAS探测, 否则离线设备会通过Task.Run占用线程池并拖慢UI刷新。
         if (_port == 8193 || _protocol.Contains("FANUC", StringComparison.OrdinalIgnoreCase))
         {
-            await ProbeFanucAsync();
+            Status1 = "引擎托管";
+            Status2 = HasIp ? $"{_ip}:8193" : "未配置IP";
+            ConnectedBrush = Brushes.Gray;
+            Status1Brush = Brushes.Gray;
+            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} FANUC设备({_ip}:8193)，跳过页面直连探测，由后端引擎Worker托管");
             return;
         }
 
@@ -156,43 +161,6 @@ public sealed class StationCardViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>FANUC FOCAS 设备一次性探测: 连接→读CNC状态(statinfo)→断开。</summary>
-    private async Task ProbeFanucAsync()
-    {
-        if (!HasIp) { SetFailed("无IP"); return; }
-        FanucFocasClient? focas = null;
-        try
-        {
-            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} FANUC探测 {_ip}:{_port}...");
-            focas = new FanucFocasClient(_ip, (ushort)_port, 5);
-            using var cts = new CancellationTokenSource(5000);
-            var (ok, status) = await focas.ProbeAsync(cts.Token);
-            if (ok)
-            {
-                ConnectedBrush = Brushes.LimeGreen;
-                Status1 = "就绪";
-                Status1Brush = Brushes.Green;
-                Status2 = status;
-                Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} ✔ FANUC探测成功: {status}");
-            }
-            else
-            {
-                SetFailed(status);
-                Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} FANUC探测失败: {status}");
-            }
-        }
-        catch (OperationCanceledException) { SetFailed("FANUC连接超时"); }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} FANUC探测异常: {ex.GetType().Name} — {ex.Message}");
-            SetFailed(ex.Message.Length > 25 ? ex.Message[..25] : ex.Message);
-        }
-        finally
-        {
-            if (focas != null) { try { await focas.DisposeAsync(); } catch { } }
-        }
-    }
-
     /// <summary>MC 协议设备一次性探测: 连→读指定M寄存器→断。</summary>
     private async Task ProbeMcAsync()
     {
@@ -208,16 +176,11 @@ public sealed class StationCardViewModel : ObservableObject, IDisposable
             await mc.ConnectAsync(cts.Token);
             Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} MC连接成功 ✓");
 
-            // 读指定M地址: M816+从M800读2字取bit, M900+用位读, 其他直接读
-            int val;
-            if (mAddr >= 816 && mAddr <= 831)
-            {
-                var result = await mc.ReadAsync(800, 2, cts.Token); // M800起2字=32bit
-                int word2 = result.IntValues.Length > 1 ? result.IntValues[1] : 0;
-                val = (word2 & (1 << (mAddr - 816))) != 0 ? 1 : 0;
-            }
-            else if (mAddr >= 900) { mc.UseBitReadForM = true; var r = await mc.ReadAsync(mAddr, 1, cts.Token); val = r.IntValues.Length > 0 ? r.IntValues[0] : 0; }
-            else { var r = await mc.ReadAsync(mAddr, 1, cts.Token); val = r.IntValues.Length > 0 ? r.IntValues[0] : 0; }
+            int alignedAddr = mAddr - (mAddr % 16);
+            int bitOffset = mAddr - alignedAddr;
+            var result = await mc.ReadMAlignedWordAsync(alignedAddr, 1, cts.Token);
+            int word = result.IntValues.Length > 0 ? result.IntValues[0] : 0;
+            int val = (word & (1 << bitOffset)) != 0 ? 1 : 0;
             bool hasPlate = val != 0;
             ConnectedBrush = Brushes.LimeGreen;
             Status1 = hasPlate ? "有版" : "空闲";

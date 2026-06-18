@@ -84,14 +84,24 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <summary>一次读5个关键信号: 请求数据/请求上料/夹紧/请求下料/张开。</summary>
         public async Task<(bool rqData, bool rqLoad, bool clamped, bool rqUnload, bool opened)> ReadSignalsAsync(CancellationToken ct = default)
         {
-            var t = new Task<bool>[5];
-            t[0] = ReadBoolAsync(ModbusSkewBedAddress.RequestData, ct);
-            t[1] = ReadBoolAsync(ModbusSkewBedAddress.RequestLoad, ct);
-            t[2] = ReadBoolAsync(ModbusSkewBedAddress.TailstockClamped, ct);
-            t[3] = ReadBoolAsync(ModbusSkewBedAddress.RequestUnload, ct);
-            t[4] = ReadBoolAsync(ModbusSkewBedAddress.TailstockOpened, ct);
-            await Task.WhenAll(t);
-            return (t[0].Result, t[1].Result, t[2].Result, t[3].Result, t[4].Result);
+            const int start = ModbusSkewBedAddress.RequestData;        // 10352
+            const int end = ModbusSkewBedAddress.TailstockOpened;      // 10358
+            var r = await _client.ReadAsync(start, end - start + 1, ct);
+
+            bool At(int address)
+            {
+                int index = address - start;
+                if ((uint)index >= (uint)r.IntValues.Length)
+                    throw new InvalidOperationException($"斜床信号快照缺少地址{address}。");
+                return r.IntValues[index] != 0;
+            }
+
+            return (
+                At(ModbusSkewBedAddress.RequestData),
+                At(ModbusSkewBedAddress.RequestLoad),
+                At(ModbusSkewBedAddress.TailstockClamped),
+                At(ModbusSkewBedAddress.RequestUnload),
+                At(ModbusSkewBedAddress.TailstockOpened));
         }
 
         // ─── 写入加工参数 ────────────────────────────────────────────

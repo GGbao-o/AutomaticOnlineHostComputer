@@ -170,6 +170,7 @@ public sealed class HomeViewModel : ObservableObject
     private Task? _erpTaskImportTask;
     private bool _isErpTaskImportRunning;
     private string _erpTaskImportStatus = "ERP监听：未启动";
+    private string _lastErpInvalidBackupSignature = string.Empty;
     public bool IsErpTaskImportRunning
     {
         get => _isErpTaskImportRunning;
@@ -374,6 +375,25 @@ public sealed class HomeViewModel : ObservableObject
     private SemaphoreSlim? _sharedTransferRackLock2; // 2号线前后端共享中转架锁
     private CancellationTokenSource? _line2StatusCts;
     private CancellationTokenSource? _grindingRackStatusCts;
+    private CenteringRackService? _frontRackDispatchSvc;
+    private CancellationTokenSource? _frontDispatchCts;
+    private Task? _frontDispatchTask;
+    private readonly object _frontDispatchLock = new();
+    private readonly Queue<FrontDispatchItem> _frontDispatchQueue = new();
+    private bool _frontDispatchWaitingM800Clear;
+    private int _frontDispatchLoopCycle;
+
+    private sealed class FrontDispatchItem
+    {
+        public FrontDispatchItem(TaskRowViewModel row, WorkpieceCache workpiece)
+        {
+            Row = row;
+            Workpiece = workpiece;
+        }
+
+        public TaskRowViewModel Row { get; }
+        public WorkpieceCache Workpiece { get; }
+    }
 
     /// <summary>后台任务：从引擎 DeviceStatus 同步到 UI 卡片（不另建连接）</summary>
     private async Task SyncLine1StatusToCardsAsync(CancellationToken ct)
@@ -441,11 +461,12 @@ public sealed class HomeViewModel : ObservableObject
                     if (cards.TryGetValue("ST401", out var c4))
                     {
                         c4.ConnectedBrush = ds.BoringConnected ? Brushes.LimeGreen : Brushes.Gray;
-                        bool idle = ds.Boring_R6101 && !ds.Boring_R6103 && !ds.Boring_R6105 && !ds.Boring_R6107 && !ds.Boring_R6109;
-                        c4.Status1 = ds.BoringConnected ? (idle ? "空闲" : "加工中") : "断开";
-                        c4.Status1Brush = idle ? Brushes.Green : Brushes.Orange;
+                        c4.Status1 = ds.BoringConnected
+                            ? BuildBoringOverviewState(ds.Boring_R6101, ds.Boring_R6103, ds.Boring_R6105, ds.Boring_R6107, ds.Boring_R6109)
+                            : "断开";
+                        c4.Status1Brush = GetSignalStateBrush(c4.Status1);
                         c4.Status2 = ds.BoringConnected
-                            ? $"R6101={To01(ds.Boring_R6101)} R6103={To01(ds.Boring_R6103)} R6105={To01(ds.Boring_R6105)} R6107={To01(ds.Boring_R6107)} R6109={To01(ds.Boring_R6109)}"
+                            ? BuildBoringSignalText(ds.Boring_R6101, ds.Boring_R6103, ds.Boring_R6105, ds.Boring_R6107, ds.Boring_R6109)
                             : "—";
                     }
 
@@ -470,6 +491,12 @@ public sealed class HomeViewModel : ObservableObject
                         ds.M817SnapshotValid ? "M817" : "M817快照失败", "192.168.2.63:9000");
 
                 }
+                else
+                {
+                    if (_line2Engine?.IsRunning != true)
+                        MarkCardsNotStarted(cards, "ST001", "ST002");
+                    MarkCardsNotStarted(cards, "ST011", "ST401", "ST501", "ST901", "ST105", "ST101", "ST106");
+                }
 
                 // ═══════════════════════════════════════════════════════
                 //  C. 后端引擎状态 — 仅在1号线运行时刷新
@@ -483,13 +510,17 @@ public sealed class HomeViewModel : ObservableObject
                       cr.Status1Brush = rds.CraneRearConnected ? Brushes.Green : Brushes.Gray;
                       cr.Status2 = rds.CraneRearConnected ? "192.168.2.82:502" : "—"; }
 
-                    // 斜床 ST108~ST112 — 各自独立显示连接+状态+寄存器信号
-                    if (cards.TryGetValue("ST108", out var sk1) && rds.Skew1Connected) { sk1.ConnectedBrush = Brushes.LimeGreen; sk1.Status1 = rds.Skew1State; sk1.Status1Brush = Brushes.Green; sk1.Status2 = rds.Skew1Signals; }
-                    if (cards.TryGetValue("ST109", out var sk2) && rds.Skew2Connected) { sk2.ConnectedBrush = Brushes.LimeGreen; sk2.Status1 = rds.Skew2State; sk2.Status1Brush = Brushes.Green; sk2.Status2 = rds.Skew2Signals; }
-                    if (cards.TryGetValue("ST111", out var sk3) && rds.Skew3Connected) { sk3.ConnectedBrush = Brushes.LimeGreen; sk3.Status1 = rds.Skew3State; sk3.Status1Brush = Brushes.Green; sk3.Status2 = rds.Skew3Signals; }
-                    if (cards.TryGetValue("ST110", out var sk4) && rds.Skew4Connected) { sk4.ConnectedBrush = Brushes.LimeGreen; sk4.Status1 = rds.Skew4State; sk4.Status1Brush = Brushes.Green; sk4.Status2 = rds.Skew4Signals; }
-                    if (cards.TryGetValue("ST112", out var sk5) && rds.Skew5Connected) { sk5.ConnectedBrush = Brushes.LimeGreen; sk5.Status1 = rds.Skew5State; sk5.Status1Brush = Brushes.Green; sk5.Status2 = rds.Skew5Signals; }
+                    // 斜床 ST108~ST112 — 成功显示真实信号, 失败也必须覆盖旧状态。
+                    SetSkewCard(cards, "ST108", rds.Skew1Connected, rds.Skew1State, rds.Skew1Signals);
+                    SetSkewCard(cards, "ST109", rds.Skew2Connected, rds.Skew2State, rds.Skew2Signals);
+                    SetSkewCard(cards, "ST111", rds.Skew3Connected, rds.Skew3State, rds.Skew3Signals);
+                    SetSkewCard(cards, "ST110", rds.Skew4Connected, rds.Skew4State, rds.Skew4Signals);
+                    SetSkewCard(cards, "ST112", rds.Skew5Connected, rds.Skew5State, rds.Skew5Signals);
 
+                }
+                else
+                {
+                    MarkCardsNotStarted(cards, "ST902", "ST108", "ST109", "ST111", "ST110", "ST112");
                 }
 
                 SyncBalancingCards(cards);
@@ -511,10 +542,12 @@ public sealed class HomeViewModel : ObservableObject
 
                 if (engineRunning && _line2Engine!.DeviceStatus is { } ds)
                 {
+                    EnsureCard("ST001", "总上料架");
+                    EnsureCard("ST002", "机械手1");
                     EnsureCard("ST712", "货叉2");
                     EnsureCard("ST402", "二号双头镗");
                     EnsureCard("ST502", "二号打号机");
-                    EnsureCard("ST903", "2号线天车前");
+                    EnsureCard("ST104", "2号线天车前");
                     EnsureCard("ST016", "2号线中转架1");
                     EnsureCard("ST017", "2号线中转架2");
                     EnsureCard("ST018", "2号线中转架3");
@@ -523,6 +556,19 @@ public sealed class HomeViewModel : ObservableObject
                     EnsureCard("ST608", "2号线斜床3");
                     EnsureCard("ST609", "2号线斜床4");
                     EnsureCard("ST610", "2号线斜床5");
+
+                    // 共享总上料架/机械手1: 只启动2号线时也必须刷新, 不能依赖1号线同步循环。
+                    if (cards.TryGetValue("ST001", out var c1))
+                    { c1.ConnectedBrush = ds.RackConnected ? Brushes.LimeGreen : Brushes.Gray;
+                      c1.Status1 = ds.RackConnected ? (ds.RackRequestPickup ? "请求取料" : "空闲") : "断开";
+                      c1.Status1Brush = ds.RackConnected ? (ds.RackRequestPickup ? Brushes.Orange : Brushes.Green) : Brushes.Gray;
+                      c1.Status2 = ds.RackConnected ? $"板长={ds.RackPlateLength}mm 中4={(ds.TransferRack4Free?"空":"满")} 5={(ds.TransferRack5Free?"空":"满")} 6={(ds.TransferRack6Free?"空":"满")}" : "—"; }
+
+                    if (cards.TryGetValue("ST002", out var c2))
+                    { c2.ConnectedBrush = ds.Manipulator1Connected ? Brushes.LimeGreen : Brushes.Gray;
+                      c2.Status1 = ds.Manipulator1Connected ? (ds.Manipulator1Safe ? "安全位" : $"Y={ds.Manipulator1Y}") : "断开";
+                      c2.Status1Brush = ds.Manipulator1Connected ? (ds.Manipulator1Safe ? Brushes.Green : Brushes.Orange) : Brushes.Gray;
+                      c2.Status2 = ds.Manipulator1Connected ? $"安全Y={_cfg.SkewBed.Manipulator1SafeY}" : "—"; }
 
                     // 货叉2 ST712
                     if (cards.TryGetValue("ST712", out var c3))
@@ -534,10 +580,13 @@ public sealed class HomeViewModel : ObservableObject
                     // 双头镗 ST402
                     if (cards.TryGetValue("ST402", out var c4))
                     { c4.ConnectedBrush = ds.BoringConnected ? Brushes.LimeGreen : Brushes.Gray;
-                      bool idle = ds.Boring_R6101 && !ds.Boring_R6103 && !ds.Boring_R6105 && !ds.Boring_R6107 && !ds.Boring_R6109;
-                      c4.Status1 = ds.BoringConnected ? (idle ? "空闲" : "加工中") : "断开";
-                      c4.Status1Brush = idle ? Brushes.Green : Brushes.Orange;
-                      c4.Status2 = $"R6101={To01(ds.Boring_R6101)} R6103={To01(ds.Boring_R6103)} R6105={To01(ds.Boring_R6105)} R6107={To01(ds.Boring_R6107)} R6109={To01(ds.Boring_R6109)}"; }
+                      c4.Status1 = ds.BoringConnected
+                          ? BuildBoringOverviewState(ds.Boring_R6101, ds.Boring_R6103, ds.Boring_R6105, ds.Boring_R6107, ds.Boring_R6109)
+                          : "断开";
+                      c4.Status1Brush = GetSignalStateBrush(c4.Status1);
+                      c4.Status2 = ds.BoringConnected
+                          ? BuildBoringSignalText(ds.Boring_R6101, ds.Boring_R6103, ds.Boring_R6105, ds.Boring_R6107, ds.Boring_R6109)
+                          : "—"; }
 
                     // 打号机 ST502
                     if (cards.TryGetValue("ST502", out var c5))
@@ -546,8 +595,8 @@ public sealed class HomeViewModel : ObservableObject
                       c5.Status1Brush = ds.MarkerConnected ? Brushes.Green : Brushes.Gray;
                       c5.Status2 = ds.MarkerConnected ? @"\\192.168.2.74\1" : "—"; }
 
-                    // 天车前 ST903
-                    if (cards.TryGetValue("ST903", out var c6))
+                    // 天车前 ST104
+                    if (cards.TryGetValue("ST104", out var c6))
                     { c6.ConnectedBrush = ds.CraneFrontConnected ? Brushes.LimeGreen : Brushes.Gray;
                       c6.Status1 = ds.CraneFrontConnected ? "就绪" : "断开";
                       c6.Status1Brush = ds.CraneFrontConnected ? Brushes.Green : Brushes.Gray;
@@ -560,6 +609,12 @@ public sealed class HomeViewModel : ObservableObject
                     SetPlateCard(cards, "ST020", ds.RackConnected && ds.M818SnapshotValid, ds.M818_HasPlate,
                         ds.M818SnapshotValid ? "M818" : "M818快照失败", "192.168.2.63:9000");
                 }
+                else
+                {
+                    if (_line1Engine?.IsRunning != true)
+                        MarkCardsNotStarted(cards, "ST001", "ST002");
+                    MarkCardsNotStarted(cards, "ST712", "ST402", "ST502", "ST104", "ST016", "ST017", "ST018");
+                }
 
                 // 后端引擎状态
                 if (engineRunning && _line2RearEngine?.DeviceStatus is { } rds)
@@ -568,13 +623,18 @@ public sealed class HomeViewModel : ObservableObject
                     if (cards.TryGetValue("ST904", out var cr))
                     { cr.ConnectedBrush = rds.CraneRearConnected ? Brushes.LimeGreen : Brushes.Gray;
                       cr.Status1 = rds.CraneRearConnected ? "就绪" : "断开";
+                      cr.Status1Brush = rds.CraneRearConnected ? Brushes.Green : Brushes.Gray;
                       cr.Status2 = rds.CraneRearConnected ? "192.168.2.84:502" : "—"; }
 
-                    if (cards.TryGetValue("ST606", out var sk1) && rds.Skew1Connected) { sk1.ConnectedBrush = Brushes.LimeGreen; sk1.Status1 = rds.Skew1State; sk1.Status1Brush = Brushes.Green; sk1.Status2 = rds.Skew1Signals; }
-                    if (cards.TryGetValue("ST607", out var sk2) && rds.Skew2Connected) { sk2.ConnectedBrush = Brushes.LimeGreen; sk2.Status1 = rds.Skew2State; sk2.Status1Brush = Brushes.Green; sk2.Status2 = rds.Skew2Signals; }
-                    if (cards.TryGetValue("ST608", out var sk3) && rds.Skew3Connected) { sk3.ConnectedBrush = Brushes.LimeGreen; sk3.Status1 = rds.Skew3State; sk3.Status1Brush = Brushes.Green; sk3.Status2 = rds.Skew3Signals; }
-                    if (cards.TryGetValue("ST609", out var sk4) && rds.Skew4Connected) { sk4.ConnectedBrush = Brushes.LimeGreen; sk4.Status1 = rds.Skew4State; sk4.Status1Brush = Brushes.Green; sk4.Status2 = rds.Skew4Signals; }
-                    if (cards.TryGetValue("ST610", out var sk5) && rds.Skew5Connected) { sk5.ConnectedBrush = Brushes.LimeGreen; sk5.Status1 = rds.Skew5State; sk5.Status1Brush = Brushes.Green; sk5.Status2 = rds.Skew5Signals; }
+                    SetSkewCard(cards, "ST606", rds.Skew1Connected, rds.Skew1State, rds.Skew1Signals);
+                    SetSkewCard(cards, "ST607", rds.Skew2Connected, rds.Skew2State, rds.Skew2Signals);
+                    SetSkewCard(cards, "ST608", rds.Skew3Connected, rds.Skew3State, rds.Skew3Signals);
+                    SetSkewCard(cards, "ST609", rds.Skew4Connected, rds.Skew4State, rds.Skew4Signals);
+                    SetSkewCard(cards, "ST610", rds.Skew5Connected, rds.Skew5State, rds.Skew5Signals);
+                }
+                else
+                {
+                    MarkCardsNotStarted(cards, "ST904", "ST606", "ST607", "ST608", "ST609", "ST610");
                 }
 
                 SyncBalancingCards(cards);
@@ -596,8 +656,57 @@ public sealed class HomeViewModel : ObservableObject
         }
     }
 
+    private static void MarkCardsNotStarted(Dictionary<string, StationCardViewModel> cards, params string[] codes)
+    {
+        foreach (var code in codes)
+        {
+            if (!cards.TryGetValue(code, out var card)) continue;
+            card.ConnectedBrush = Brushes.Gray;
+            card.Status1 = "未启动";
+            card.Status1Brush = Brushes.Gray;
+            card.Status2 = "线路未启动";
+        }
+    }
+
     /// <summary>将第三部分机械手卡片的状态镜像到第四部分 StatusCard（不建新连接，复用已有 VM）。</summary>
     private static string To01(bool b) => b ? "1" : "0";
+
+    private static string BuildGrinderOverviewState(bool fault, bool statusAlarm, bool reqData, bool reqLoad,
+        bool clamped, bool reqUnload, bool unclamp, bool busy, int? machineStatus = null)
+    {
+        if (fault || statusAlarm) return statusAlarm ? "报警" : "故障";
+        if (reqUnload) return "请求下料";
+        if (reqLoad) return "请求上料";
+        if (clamped) return "锁紧完成";
+        if (reqData) return "请求数据";
+        if (unclamp) return "松开完成";
+        if (busy) return "加工中";
+        return machineStatus is > 0 ? $"忙碌中({machineStatus})" : "空闲";
+    }
+
+    private static string BuildBoringOverviewState(bool reqData, bool reqLoad, bool clamped, bool reqUnload, bool unclamp)
+    {
+        if (reqUnload) return "请求下料";
+        if (reqLoad) return "请求上料";
+        if (clamped) return "夹紧完成";
+        if (reqData) return "请求数据";
+        if (unclamp) return "松开完成";
+        return "空闲";
+    }
+
+    private static string BuildBoringSignalText(bool reqData, bool reqLoad, bool clamped, bool reqUnload, bool unclamp)
+        => $"R6101={To01(reqData)} R6103={To01(reqLoad)} R6105={To01(clamped)} R6107={To01(reqUnload)} R6109={To01(unclamp)}";
+
+    private static Brush GetSignalStateBrush(string state)
+    {
+        return state switch
+        {
+            "故障" or "报警" or "读失败" or "读取失败" or "连接失败" or "无法连接" => Brushes.Red,
+            "断开" or "连接异常" or "连接暂缓" => Brushes.Gray,
+            "空闲" or "就绪" or "安全位" => Brushes.Green,
+            _ => Brushes.Orange
+        };
+    }
 
     private static void SyncManipulatorMirror(Dictionary<string, StationCardViewModel> cards,
         string code, ManipulatorCardViewModel manipVm, string name)
@@ -613,11 +722,32 @@ public sealed class HomeViewModel : ObservableObject
         string code, bool connected, bool hasPlate, string status2, string ipText)
     {
         if (!cards.TryGetValue(code, out var card)) return;
+        bool readFailed = !connected && status2.Contains("失败", StringComparison.Ordinal);
         card.ConnectedBrush = connected ? Brushes.LimeGreen : Brushes.Gray;
-        card.Status1 = connected ? (hasPlate ? "有版" : "空闲") : "断开";
-        card.Status1Brush = !connected ? Brushes.Gray : (hasPlate ? Brushes.Orange : Brushes.Green);
-        card.Status2 = connected ? status2 : "—";
+        card.Status1 = connected ? (hasPlate ? "有版" : "空闲") : (readFailed ? "读取失败" : "断开");
+        card.Status1Brush = connected ? (hasPlate ? Brushes.Orange : Brushes.Green) : (readFailed ? Brushes.Red : Brushes.Gray);
+        card.Status2 = connected || readFailed ? status2 : "—";
         card.IpText = connected ? ipText : "未连接";
+    }
+
+    private static void SetSkewCard(Dictionary<string, StationCardViewModel> cards,
+        string code, bool connected, string state, string signals)
+    {
+        if (!cards.TryGetValue(code, out var card)) return;
+
+        string displayState = string.IsNullOrWhiteSpace(state) ? (connected ? "未知" : "断开") : state;
+        string displaySignals = string.IsNullOrWhiteSpace(signals) ? "—" : signals;
+
+        card.ConnectedBrush = connected ? Brushes.LimeGreen : Brushes.Red;
+        card.Status1 = connected ? displayState : (displayState == "--" ? "读失败" : displayState);
+        card.Status1Brush = connected ? GetSignalStateBrush(displayState) : Brushes.Red;
+        card.Status2 = connected ? displaySignals : ShortStatusText(displaySignals);
+    }
+
+    private static string ShortStatusText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text == "--") return "连接/读取失败";
+        return text.Length <= 80 ? text : text[..80];
     }
 
     private static void SetReadyCard(Dictionary<string, StationCardViewModel> cards,
@@ -768,6 +898,9 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>1号线缓存工件数量</summary>
     public int Line1CachedCount => _line1Engine?.CachedCount ?? 0;
 
+    /// <summary>总上料架前的全局待派发队列数量。任务先进入这里, M800到位后再唯一派发到1/2号线。</summary>
+    public int FrontDispatchCachedCount { get { lock (_frontDispatchLock) return _frontDispatchQueue.Count; } }
+
     // ── 2号线运行状态 ────────────────────────────────────────────────
     private bool _isLine2Running;
     public bool IsLine2Running { get => _isLine2Running; set { if (SetField(ref _isLine2Running, value)) OnPropertyChanged(nameof(Line2ToggleText)); } }
@@ -905,6 +1038,26 @@ public sealed class HomeViewModel : ObservableObject
         await Task.CompletedTask;
     }
 
+    public string GetSkewEmergencyInfo(int line, string bedCode)
+    {
+        return line switch
+        {
+            1 => _line1RearEngine?.GetSkewEmergencyInfo(bedCode) ?? "1号线后端引擎未初始化",
+            2 => _line2RearEngine?.GetSkewEmergencyInfo(bedCode) ?? "2号线后端引擎未初始化",
+            _ => $"无效线体: {line}"
+        };
+    }
+
+    public string EmergencyClearSkewBed(int line, string bedCode)
+    {
+        return line switch
+        {
+            1 => _line1RearEngine?.EmergencyClearSkewBed(bedCode) ?? "1号线后端引擎未初始化",
+            2 => _line2RearEngine?.EmergencyClearSkewBed(bedCode) ?? "2号线后端引擎未初始化",
+            _ => $"无效线体: {line}"
+        };
+    }
+
     public ICommand Line1ToggleCommand { get; }
     /// <summary>2号线启动/暂停</summary>
     public ICommand Line2ToggleCommand { get; }
@@ -948,6 +1101,7 @@ public sealed class HomeViewModel : ObservableObject
         OnPropertyChanged(nameof(Grinder4));
         OnPropertyChanged(nameof(Line1CachedCount));
         OnPropertyChanged(nameof(Line2CachedCount));
+        OnPropertyChanged(nameof(FrontDispatchCachedCount));
         OnPropertyChanged(nameof(GrindingCachedCount));
         Console.WriteLine("[HomeViewModel] LoadAsync轻量刷新: 引擎已初始化, 保留现有引擎/锁/缓存, 不重新连接、不重建流程实例");
         if (_cfg.ErpTaskImport.EnabledOnStartup && !IsErpTaskImportRunning)
@@ -960,9 +1114,12 @@ public sealed class HomeViewModel : ObservableObject
         _line1StatusCts?.Cancel();
         _line2StatusCts?.Cancel();
         _grindingRackStatusCts?.Cancel();
+        _frontDispatchCts?.Cancel();
         _line1StatusCts = null;
         _line2StatusCts = null;
         _grindingRackStatusCts = null;
+        _frontDispatchCts = null;
+        _frontDispatchTask = null;
     }
 
     private async Task<bool> CanRebuildProductionContextAsync()
@@ -975,6 +1132,8 @@ public sealed class HomeViewModel : ObservableObject
             reasons.Add($"1号线前端缓存={_line1Engine!.CachedCount}");
         if ((_line2Engine?.CachedCount ?? 0) > 0)
             reasons.Add($"2号线前端缓存={_line2Engine!.CachedCount}");
+        if (FrontDispatchCachedCount > 0)
+            reasons.Add($"总上料架全局待派发队列={FrontDispatchCachedCount}");
         if ((_line1RearEngine?.CachedCount ?? 0) > 0)
             reasons.Add($"1号线后端中转缓存={_line1RearEngine!.CachedCount}");
         if ((_line2RearEngine?.CachedCount ?? 0) > 0)
@@ -1097,6 +1256,7 @@ public sealed class HomeViewModel : ObservableObject
         // ── 创建共享MC服务给前端引擎(避免1/2号线重复直连63) ──
         //     frontRackSvc 始终传给两个前端；即使首连失败，也只能通过_McCache重连，不能退化为各自new TCP。
         var frontRackSvc = new CenteringRackService("总上料架+中转架", _mcCache, "192.168.2.63", 9000);
+        _frontRackDispatchSvc = frontRackSvc;
         bool sharedMc63Ready = false;
         try
         {
@@ -1186,13 +1346,14 @@ public sealed class HomeViewModel : ObservableObject
         };
         Console.WriteLine("[HomeViewModel] 研磨上料联动已绑定(1号线后天车+M3Flow→研磨缓存)");
 
-        // ── 启动1号线状态同步（引擎→UI卡片，不另建连接，500ms刷新）───
+        // ── 启动状态同步（引擎缓存→UI卡片，不另建连接，约1.5s刷新）───
         _line1StatusCts = new CancellationTokenSource();
         _ = SyncLine1StatusToCardsAsync(_line1StatusCts.Token);
         _line2StatusCts = new CancellationTokenSource();
         _ = SyncLine2StatusToCardsAsync(_line2StatusCts.Token);
         _grindingRackStatusCts = new CancellationTokenSource();
         _ = SyncGrindingRackStatusToCardsAsync(_grindingRackStatusCts.Token);
+        StartFrontDispatchLoop();
 
         // ── 初始化全厂状态卡片 ──────────────────────────────────────
         Console.WriteLine("[HomeViewModel] 开始初始化全厂状态总览卡片...");
@@ -1233,7 +1394,7 @@ public sealed class HomeViewModel : ObservableObject
         EnsureNewCard("ST106", "1号线中转架3");     // M813 192.168.2.63
         // 2号线前端/中转
         EnsureNewCard("ST712", "货叉2");            // → ST712 MC:192.168.2.89
-        EnsureNewCard("ST903", "2号线天车前");      // → 3号天车 Modbus:192.168.2.83
+        EnsureNewCard("ST104", "2号线天车前");      // → 3号天车 Modbus:192.168.2.83
         EnsureNewCard("ST904", "2号线天车后");      // → 4号天车 Modbus:192.168.2.84
         EnsureNewCard("ST016", "2号线中转架1");     // M814 192.168.2.63
         EnsureNewCard("ST017", "2号线中转架2");     // M815 192.168.2.63
@@ -1291,9 +1452,15 @@ public sealed class HomeViewModel : ObservableObject
                 SafeStartManipulatorAsync(Manipulator3));
             Console.WriteLine("[HomeViewModel] 3台机械手后台连接完成");
         });
-        // 跳过引擎已管理的设备 以及 非ModbusTCP协议设备
-        // ST605=沈阳FANUC FOCAS无法走ModbusTCP探测; ST401/Syntec已单独探测; ST501/文件握手无需TCP
-        var engineManagedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ST007", "ST711", "ST103", "ST107", "ST901", "ST002", "ST401", "ST501", "ST605" };
+        // 跳过引擎已管理的设备以及非ModbusTCP协议设备。
+        // 后端FANUC斜床不做页面直连探测, 只显示后端引擎Worker缓存的状态。
+        var engineManagedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "ST007", "ST711", "ST103", "ST107", "ST901", "ST002", "ST401", "ST501", "ST605",
+            // 后端FANUC斜床由LineRear引擎的FanucSkewBedService独立Worker读取缓存。
+            // 页面不能再直接FOCAS探测, 避免Task.Run阻塞线程池并覆盖引擎状态。
+            "ST112", "ST606", "ST607", "ST608", "ST609", "ST610"
+        };
         _ = Task.Run(async () =>
         {
             var tasks = newCards.Values.Where(c => c.HasIp && !engineManagedCodes.Contains(c.StationCode)).Select(c => SafeStartStationAsync(c)).ToList();
@@ -1361,7 +1528,7 @@ public sealed class HomeViewModel : ObservableObject
 
     /// <summary>
     /// 自动连接4台研磨机（ST701/ST702=新代TypeB, ST703/ST704=西门子TypeA）。
-    /// 有IP则用PlcGrinderService连，每5s读状态并更新对应站卡显示。
+    /// 有IP则用PlcGrinderService连，按研磨配置周期读状态并更新对应站卡显示。
     /// </summary>
     private async Task StartGrinderConnectionsAsync(Dictionary<string, StationCardViewModel> cards)
     {
@@ -1390,19 +1557,22 @@ public sealed class HomeViewModel : ObservableObject
             }
 
             card.IpText = $"{ip}:502";
-            Console.WriteLine($"[GrinderPoll] {name} ({code}) 启动轮询 Type={gtype} IP={ip}");
-            _ = GrinderPollLoopAsync(code, name, gtype, ip, card, grinderCard, _grindingEngine!);
+            int pollMs = Math.Max(500, _cfg.Grinding.PollIntervalMs);
+            Console.WriteLine($"[GrinderPoll] {name} ({code}) 启动轮询 Type={gtype} IP={ip} poll={pollMs}ms");
+            _ = GrinderPollLoopAsync(code, name, gtype, ip, card, grinderCard, _grindingEngine!, pollMs);
         }
     }
 
-    /// <summary>研磨机轮询循环：连接 → 5s读状态 → 更新站卡 → 断开重连。</summary>
+    /// <summary>研磨机轮询循环：连接 → 快速读状态 → 更新站卡 → 断开重连。日志按变化/周期节流。</summary>
     private static async Task GrinderPollLoopAsync(string code, string name,
         PlcGrinderService.GrinderType gtype, string ip, StationCardViewModel stationCard,
-        GrinderCardViewModel grinderCard, GrindingFlowEngine grindingEngine)
+        GrinderCardViewModel grinderCard, GrindingFlowEngine grindingEngine, int pollDelayMs)
     {
         PlcGrinderService? svc = null;
-        int delay = 5000;
+        int retryDelay = 5000;
         int cycleCount = 0;
+        string? lastLogKey = null;
+        int logEveryCycles = Math.Max(1, 5000 / Math.Max(1, pollDelayMs));
 
         Console.WriteLine($"[GrinderPoll] [{name}] ========== 轮询线程启动 IP={ip} ==========");
 
@@ -1424,15 +1594,18 @@ public sealed class HomeViewModel : ObservableObject
                         stationCard.ConnectedBrush = System.Windows.Media.Brushes.Gray;
                         stationCard.Status1Brush = System.Windows.Media.Brushes.Gray;
                         grinderCard.SetDisconnected();
-                        await Task.Delay(delay);
-                        delay = Math.Min(delay * 2, 30000);
+                        await Task.Delay(retryDelay);
+                        retryDelay = Math.Min(retryDelay * 2, 30000);
                         continue;
                     }
 
                     Console.WriteLine($"[GrinderPoll] [{name}] {(svc == null ? "首次连接" : "重连")} IP={ip}...");
                     var oldSvc = svc;
                     var newSvc = new PlcGrinderService(name, ip, gtype);
-                    await newSvc.ConnectAsync();
+                    using (var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
+                    {
+                        await newSvc.ConnectAsync(connectCts.Token);
+                    }
 
                     if (!grindingEngine.TrySetGrinderService(code, newSvc, out var rejectReason))
                     {
@@ -1446,98 +1619,109 @@ public sealed class HomeViewModel : ObservableObject
                         stationCard.ConnectedBrush = System.Windows.Media.Brushes.Gray;
                         stationCard.Status1Brush = System.Windows.Media.Brushes.Gray;
                         grinderCard.SetDisconnected();
-                        await Task.Delay(delay);
-                        delay = Math.Min(delay * 2, 30000);
+                        await Task.Delay(retryDelay);
+                        retryDelay = Math.Min(retryDelay * 2, 30000);
                         continue;
                     }
 
                     oldSvc?.Dispose();
                     svc = newSvc;
                     Console.WriteLine($"[GrinderPoll] [{name}] ✔ 连接成功 IP={ip} Type={gtype}");
-                    delay = 5000;
+                    retryDelay = 5000;
                     stationCard.ConnectedBrush = System.Windows.Media.Brushes.LimeGreen;
                     // 注入共享服务到研磨机卡片 + 研磨流程引擎，避免各自另建连接导致双连接冲突
                     grinderCard.SetSharedService(svc);
                 }
 
                 // 读全部状态
+                using var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
                 if (gtype == PlcGrinderService.GrinderType.TypeA)
                 {
-                    int di = await ReadGrinderDIAsync(svc, code);
-                    bool fault   = (di & (1 << 0)) != 0;  // bit0=报警
-                    bool busy    = (di & (1 << 14)) != 0; // bit14=加工中
-                    bool reqData = (di & (1 << 9)) != 0;  // bit9=请求数据
-                    bool stone1  = (di & (1 << 1)) != 0;  // bit1=磨石1报警
-                    bool stone2  = (di & (1 << 2)) != 0;  // bit2=磨石2报警
+                    var snapshot = await svc.ReadTypeAStatusSnapshotAsync(readCts.Token);
+                    bool fault   = snapshot.Alarm;
+                    bool stone1  = snapshot.GrindStone1Alarm;
+                    bool stone2  = snapshot.GrindStone2Alarm;
+                    bool reqData = snapshot.ReqData;
+                    bool reqLoad = snapshot.ReqLoad;
+                    bool clamped = snapshot.Clamped;
+                    bool reqUnld = snapshot.ReqUnload;
+                    bool unclamp = snapshot.Unclamp;
+                    bool busy    = snapshot.Busy;
+                    bool door    = snapshot.Door;
 
-                    stationCard.ConnectedBrush = fault ? System.Windows.Media.Brushes.Red
-                        : System.Windows.Media.Brushes.LimeGreen;
-                    stationCard.Status1Brush = fault ? System.Windows.Media.Brushes.Red
-                        : System.Windows.Media.Brushes.Green;
-                    stationCard.Status1 = fault ? "故障" : (busy ? "加工中" : (reqData ? "请求数据" : "空闲"));
-                    stationCard.Status2 = fault ? $"DI=0x{di:X4}" : "西门子PLC";
+                    string state = BuildGrinderOverviewState(fault, false, reqData, reqLoad, clamped, reqUnld, unclamp, busy);
+                    stationCard.ConnectedBrush = fault ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.LimeGreen;
+                    stationCard.Status1 = state;
+                    stationCard.Status1Brush = GetSignalStateBrush(state);
+                    stationCard.Status2 = $"DI=0x{snapshot.RawDI:X4} b12={To01(reqUnld)} 数据={To01(reqData)} 上料={To01(reqLoad)} 锁紧={To01(clamped)} 下料={To01(reqUnld)} 松开={To01(unclamp)} 加工={To01(busy)} 门={(door ? "开" : "关")} 磨石1={To01(stone1)} 磨石2={To01(stone2)}";
 
-                    // 同步更新研磨机卡片（共享同一 DI 读值）
-                    grinderCard.UpdateTypeA(di);
+                    // 同步更新研磨机卡片（共享同一快照）
+                    grinderCard.UpdateTypeA(snapshot);
 
-                    Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} TypeA DI=0x{di:X4} " +
-                        $"报警={fault} 加工={busy} 请求数据={reqData} 磨石1={stone1} 磨石2={stone2}");
+                    string logKey = $"A:{snapshot.RawDI:X4}";
+                    if (ShouldLogGrinderPoll(cycleCount, logEveryCycles, logKey, ref lastLogKey))
+                    {
+                        Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} TypeA快照 {snapshot.ToSignalText()} " +
+                            $"报警={fault} 请求数据={reqData} 请求上料={reqLoad} 锁紧={clamped} 请求下料={reqUnld} 松开={unclamp} 加工={busy} 门开={door} 磨石1={stone1} 磨石2={stone2}");
+                    }
                 }
                 else
                 {
-                    int status   = await svc.GetMachineStatusAsync();
-                    bool reqData = await svc.IsRequestDataAsync();
-                    bool reqLoad = await svc.IsRequestLoadAsync();
-                    bool clamped = await svc.IsClampDoneLoadOutAsync();
-                    bool reqUnld = await svc.IsRequestUnloadAsync();
-                    bool unclamp = await svc.IsUnclampDoneAsync();
-                    bool busy    = await svc.IsMachiningAsync();
-                    bool door    = await svc.IsDoorOpenAsync();
+                    var snapshot = await svc.ReadTypeBStatusSnapshotAsync(readCts.Token);
+                    int status   = snapshot.MachineStatus;
+                    bool reqData = snapshot.ReqData;
+                    bool reqLoad = snapshot.ReqLoad;
+                    bool clamped = snapshot.Clamped;
+                    bool reqUnld = snapshot.ReqUnload;
+                    bool unclamp = snapshot.Unclamp;
+                    bool busy    = snapshot.Busy;
+                    bool door    = snapshot.Door;
 
-                    stationCard.ConnectedBrush = status == 2 ? System.Windows.Media.Brushes.Red
-                        : System.Windows.Media.Brushes.LimeGreen;
-                    stationCard.Status1Brush = status == 2 ? System.Windows.Media.Brushes.Red
-                        : System.Windows.Media.Brushes.Green;
-                    stationCard.Status1 = status == 2 ? "报警" : (busy ? "加工中" : (reqData ? "请求数据" : "空闲"));
-                    stationCard.Status2 = status == 2 ? $"R7308={status}" : (door ? "安全门开" : "新代数控");
+                    string state = BuildGrinderOverviewState(false, status == 2, reqData, reqLoad, clamped, reqUnld, unclamp, busy, status);
+                    stationCard.ConnectedBrush = status == 2 ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.LimeGreen;
+                    stationCard.Status1 = state;
+                    stationCard.Status1Brush = GetSignalStateBrush(state);
+                    stationCard.Status2 = $"R7304={snapshot.RequestUnload} R7308={status} 数据={To01(reqData)} 上料={To01(reqLoad)} 锁紧={To01(clamped)} 下料={To01(reqUnld)} 松开={To01(unclamp)} 加工={To01(busy)} 门={(door ? "开" : "关")}";
 
                     // 同步更新研磨机卡片
                     grinderCard.UpdateTypeB(status, reqData, reqLoad, clamped, reqUnld, unclamp, busy, door);
 
-                    Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} TypeB R7308={status} " +
-                        $"加工={busy} 请求数据={reqData} 门开={door}");
+                    string logKey = $"B:{snapshot.ToSignalText()}";
+                    if (ShouldLogGrinderPoll(cycleCount, logEveryCycles, logKey, ref lastLogKey))
+                    {
+                        Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} TypeB快照 {snapshot.ToSignalText()} " +
+                            $"请求下料={reqUnld} R7304地址=14609");
+                    }
                 }
 
-                await Task.Delay(delay);
+                await Task.Delay(pollDelayMs);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} ✘ 异常：{ex.GetType().Name} — {ex.Message}");
+                if (svc != null && grindingEngine.CanReplaceGrinderService(code, out _))
+                {
+                    try { await svc.DisconnectAsync(); } catch { }
+                }
                 stationCard.Status1 = "连接失败";
                 stationCard.Status2 = "等待重连...";
                 stationCard.ConnectedBrush = System.Windows.Media.Brushes.Gray;
                 stationCard.Status1Brush = System.Windows.Media.Brushes.Gray;
                 grinderCard.SetDisconnected();
-                Console.WriteLine($"[GrinderPoll] [{name}] 退避 {delay / 1000}s 后重试...");
-                await Task.Delay(delay);
-                delay = Math.Min(delay * 2, 30000);
+                Console.WriteLine($"[GrinderPoll] [{name}] 退避 {retryDelay / 1000}s 后重试...");
+                await Task.Delay(retryDelay);
+                retryDelay = Math.Min(retryDelay * 2, 30000);
             }
         }
     }
 
-    /// <summary>读研磨机 TypeA DI 寄存器（Modbus地址=0，即40001）。</summary>
-    private static async Task<int> ReadGrinderDIAsync(PlcGrinderService svc, string code)
+    private static bool ShouldLogGrinderPoll(int cycleCount, int logEveryCycles, string logKey, ref string? lastLogKey)
     {
-        // 用反射或直接读——PlcGrinderService 没有公开读DI的方法，
-        // 通过 ReadAllStatusAsync 的方式读数：读Modbus地址0
-        try
-        {
-            return await svc.ReadDIRawAsync();
-        }
-        catch
-        {
-            return 0;
-        }
+        bool changed = !string.Equals(lastLogKey, logKey, StringComparison.Ordinal);
+        bool periodic = cycleCount == 1 || cycleCount % logEveryCycles == 1;
+        if (!changed && !periodic) return false;
+        lastLogKey = logKey;
+        return true;
     }
 
     /// <summary>
@@ -1563,6 +1747,243 @@ public sealed class HomeViewModel : ObservableObject
             // 进度显示是旁路能力, 失败绝不能影响现场流程。
             Console.WriteLine($"[HomeViewModel] ⚠ 更新任务进度失败 版号={row.PlateNo} 序号={row.Sequence}: {ex.Message}");
         }
+    }
+
+    private void StartFrontDispatchLoop()
+    {
+        if (_frontDispatchTask is { IsCompleted: false })
+            return;
+
+        _frontDispatchCts?.Cancel();
+        _frontDispatchCts = new CancellationTokenSource();
+        _frontDispatchTask = Task.Run(() => FrontDispatchLoopAsync(_frontDispatchCts.Token));
+        Console.WriteLine("[FrontDispatch] 总上料架全局派发循环已启动");
+    }
+
+    private void EnqueueFrontDispatch(TaskRowViewModel row, WorkpieceCache wp)
+    {
+        lock (_frontDispatchLock)
+        {
+            if (_frontDispatchQueue.Any(x => ReferenceEquals(x.Row, row)))
+            {
+                Console.WriteLine($"[FrontDispatch] {wp.IdentityText} 已在全局队列中, 跳过重复入队");
+                wp.ReportStage("等待总上料架派发");
+                return;
+            }
+
+            _frontDispatchQueue.Enqueue(new FrontDispatchItem(row, wp));
+        }
+
+        wp.ReportStage("等待总上料架派发");
+        OnPropertyChanged(nameof(FrontDispatchCachedCount));
+        Console.WriteLine($"[FrontDispatch] 📥 入全局FIFO {wp.IdentityText} d={wp.Diameter} L={wp.Length} 队列={FrontDispatchCachedCount}");
+    }
+
+    private bool TryPeekFrontDispatch(out FrontDispatchItem? item)
+    {
+        lock (_frontDispatchLock)
+            return _frontDispatchQueue.TryPeek(out item);
+    }
+
+    private bool TryDequeueFrontDispatch(FrontDispatchItem expected, out FrontDispatchItem? item)
+    {
+        lock (_frontDispatchLock)
+        {
+            if (!_frontDispatchQueue.TryPeek(out var head) || !ReferenceEquals(head, expected))
+            {
+                item = null;
+                return false;
+            }
+
+            item = _frontDispatchQueue.Dequeue();
+            return true;
+        }
+    }
+
+    private bool RemoveFrontDispatch(TaskRowViewModel row)
+    {
+        lock (_frontDispatchLock)
+        {
+            if (_frontDispatchQueue.Count == 0) return false;
+
+            bool removed = false;
+            var kept = new Queue<FrontDispatchItem>(_frontDispatchQueue.Count);
+            while (_frontDispatchQueue.Count > 0)
+            {
+                var item = _frontDispatchQueue.Dequeue();
+                if (ReferenceEquals(item.Row, row))
+                {
+                    removed = true;
+                    continue;
+                }
+
+                kept.Enqueue(item);
+            }
+
+            while (kept.Count > 0)
+                _frontDispatchQueue.Enqueue(kept.Dequeue());
+
+            return removed;
+        }
+    }
+
+    private void RequeueFrontDispatchHead(FrontDispatchItem item)
+    {
+        lock (_frontDispatchLock)
+        {
+            var rebuilt = new Queue<FrontDispatchItem>(_frontDispatchQueue.Count + 1);
+            rebuilt.Enqueue(item);
+            while (_frontDispatchQueue.Count > 0)
+                rebuilt.Enqueue(_frontDispatchQueue.Dequeue());
+            while (rebuilt.Count > 0)
+                _frontDispatchQueue.Enqueue(rebuilt.Dequeue());
+        }
+
+        OnPropertyChanged(nameof(FrontDispatchCachedCount));
+        Console.WriteLine($"[FrontDispatch] ↩ 派发失败, 已放回全局队头 {item.Workpiece.IdentityText} 队列={FrontDispatchCachedCount}");
+    }
+
+    private async Task<CenteringRackStatus?> ReadFrontRackStatusForDispatchAsync(CancellationToken ct)
+    {
+        var svc = _frontRackDispatchSvc;
+        if (svc == null)
+            return null;
+
+        using var timeoutCts = new CancellationTokenSource(3000);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        return await svc.ReadAllStatusAsync(linked.Token);
+    }
+
+    private async Task FrontDispatchLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                _frontDispatchLoopCycle++;
+
+                if (!TryPeekFrontDispatch(out var item) || item == null)
+                {
+                    await Task.Delay(500, ct);
+                    continue;
+                }
+
+                var status = await ReadFrontRackStatusForDispatchAsync(ct);
+                if (status == null)
+                {
+                    if (_frontDispatchLoopCycle % 10 == 1)
+                        Console.WriteLine("[FrontDispatch] ⚠ 总上料架服务未初始化, 等待LoadAsync完成");
+                    await Task.Delay(500, ct);
+                    continue;
+                }
+
+                if (_frontDispatchWaitingM800Clear)
+                {
+                    if (!status.RequestPickup)
+                    {
+                        _frontDispatchWaitingM800Clear = false;
+                        Console.WriteLine("[FrontDispatch] M800已复位, 允许派发下一块物理板");
+                    }
+
+                    await Task.Delay(300, ct);
+                    continue;
+                }
+
+                if (!item.Row.IsRunning)
+                {
+                    if (_frontDispatchLoopCycle % 10 == 1)
+                        Console.WriteLine($"[FrontDispatch] 队头{item.Workpiece.IdentityText} 当前任务行未启动/已暂停, 保持FIFO等待恢复或删除");
+                    await Task.Delay(500, ct);
+                    continue;
+                }
+
+                if (!status.RequestPickup)
+                {
+                    if (_frontDispatchLoopCycle % 20 == 1)
+                        Console.WriteLine($"[FrontDispatch] 等M800=1 当前队头={item.Workpiece.IdentityText} 全局队列={FrontDispatchCachedCount}");
+                    await Task.Delay(500, ct);
+                    continue;
+                }
+
+                int line1FrontCount = _line1Engine?.CachedCount ?? 0;
+                int line2FrontCount = _line2Engine?.CachedCount ?? 0;
+                if (line1FrontCount > 0 || line2FrontCount > 0)
+                {
+                    if (_frontDispatchLoopCycle % 10 == 1)
+                        Console.WriteLine($"[FrontDispatch] 等线路前端缓存消化: 1号={line1FrontCount} 2号={line2FrontCount}");
+                    await Task.Delay(500, ct);
+                    continue;
+                }
+
+                int line = SelectRouteLineBySkewCapacity(item.Row, out string routeReason);
+                if (line == 0)
+                {
+                    if (_frontDispatchLoopCycle % 10 == 1)
+                        Console.WriteLine($"[FrontDispatch] 队头暂不能派发 {item.Workpiece.IdentityText}: {routeReason}");
+                    item.Workpiece.ReportStage($"等待派发: {routeReason}", "等待中");
+                    await Task.Delay(800, ct);
+                    continue;
+                }
+
+                if (!TryDequeueFrontDispatch(item, out var dequeued) || dequeued == null)
+                    continue;
+
+                try
+                {
+                    await RunOnUiAsync(() =>
+                    {
+                        dequeued.Row.AssignedLine = line;
+                        OnPropertyChanged(nameof(FrontDispatchCachedCount));
+                        OnPropertyChanged(nameof(Line1CachedCount));
+                        OnPropertyChanged(nameof(Line2CachedCount));
+                        return true;
+                    });
+
+                    if (line == 1)
+                    {
+                        if (_line1Engine == null) throw new InvalidOperationException("1号线前端引擎为空");
+                        _line1Engine.EnqueueWorkpiece(dequeued.Workpiece);
+                    }
+                    else
+                    {
+                        if (_line2Engine == null) throw new InvalidOperationException("2号线前端引擎为空");
+                        _line2Engine.EnqueueWorkpiece(dequeued.Workpiece);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    dequeued.Row.AssignedLine = 0;
+                    RequeueFrontDispatchHead(dequeued);
+                    Console.WriteLine($"[FrontDispatch] ⚠ 写入{line}号线前端缓存失败, 已回队头: {ex.GetType().Name} - {ex.Message}");
+                    await Task.Delay(800, ct);
+                    continue;
+                }
+
+                await RunOnUiAsync(() =>
+                {
+                    OnPropertyChanged(nameof(Line1CachedCount));
+                    OnPropertyChanged(nameof(Line2CachedCount));
+                    return true;
+                });
+
+                dequeued.Workpiece.ReportStage($"已派发{line}号线前端缓存");
+                _frontDispatchWaitingM800Clear = true;
+                Console.WriteLine(
+                    $"[FrontDispatch] 🚀 M800=1 D100={status.PlateLength}mm 队头{dequeued.Workpiece.IdentityText} D={dequeued.Workpiece.Diameter} L={dequeued.Workpiece.Length} → {line}号线; {routeReason}; 剩余={FrontDispatchCachedCount}");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                if (_frontDispatchLoopCycle % 10 == 1)
+                    Console.WriteLine($"[FrontDispatch] ⚠ 派发循环异常: {ex.GetType().Name} - {ex.Message}");
+                await Task.Delay(800, ct);
+            }
+        }
+
+        Console.WriteLine("[FrontDispatch] 总上料架全局派发循环已停止");
     }
 
     private Service.WorkpieceCache BuildWorkpieceCache(TaskRowViewModel taskRow)
@@ -1594,20 +2015,103 @@ public sealed class HomeViewModel : ObservableObject
 
     private bool IsLengthAllowedForTransferRackLine(double length, int line, out string message)
     {
-        if (length > 1200 && length <= 1500)
+        if (length <= 0)
         {
-            message = line == 1 ? string.Empty : "长板(1200~1500)只能从1号线中转架开始";
-            return line == 1;
+            message = "版长必须大于0";
+            return false;
         }
 
-        if (length >= 400 && length <= 1200)
+        if (_cfg.SkewBed.AnyBedCanProcessLine(line, length))
         {
             message = string.Empty;
-            return line is 1 or 2;
+            return true;
         }
 
-        message = "版长不在任何线路范围内";
+        message = $"{line}号线没有可加工 {length}mm 版长的斜床, 请检查斜床最大加工长度配置";
         return false;
+    }
+
+    private int SelectRouteLineBySkewCapacity(TaskRowViewModel taskRow, out string routeReason)
+    {
+        double length = taskRow.Length;
+        int largeDiameterLine1OnlyMm = _cfg.SkewBed.LargeDiameterLine1OnlyMm;
+        bool line1CanProcess = _cfg.SkewBed.AnyBedCanProcessLine(1, length);
+        bool line2CanProcess = _cfg.SkewBed.AnyBedCanProcessLine(2, length);
+        bool l1run = _isLine1Running && _line1Engine?.IsRunning == true && _line1Engine.IsPaused != true;
+        bool l2run = _isLine2Running && _line2Engine?.IsRunning == true && _line2Engine.IsPaused != true;
+
+        if (largeDiameterLine1OnlyMm > 0 && taskRow.Diameter >= largeDiameterLine1OnlyMm)
+        {
+            if (!line1CanProcess)
+            {
+                routeReason = $"直径{taskRow.Diameter}mm>={largeDiameterLine1OnlyMm}mm需走1号线, 但1号线无可加工{length}mm的斜床";
+                return 0;
+            }
+
+            if (!l1run)
+            {
+                routeReason = $"直径{taskRow.Diameter}mm>={largeDiameterLine1OnlyMm}mm需走1号线, 但1号线未启动或已暂停";
+                return 0;
+            }
+
+            routeReason = $"直径{taskRow.Diameter}mm>={largeDiameterLine1OnlyMm}mm, 强制1号线防止穿越2号线货叉区域大板干涉";
+            return 1;
+        }
+
+        if (!line1CanProcess && !line2CanProcess)
+        {
+            routeReason = $"版长{length}mm无可加工斜床";
+            return 0;
+        }
+
+        if (line1CanProcess && !line2CanProcess)
+        {
+            if (!l1run)
+            {
+                routeReason = $"版长{length}mm仅1号线有斜床可加工, 但1号线未启动或已暂停";
+                return 0;
+            }
+
+            routeReason = $"版长{length}mm仅1号线有斜床可加工";
+            return 1;
+        }
+
+        if (!line1CanProcess && line2CanProcess)
+        {
+            if (!l2run)
+            {
+                routeReason = $"版长{length}mm仅2号线有斜床可加工, 但2号线未启动或已暂停";
+                return 0;
+            }
+
+            routeReason = $"版长{length}mm仅2号线有斜床可加工";
+            return 2;
+        }
+
+        int l1cnt = _line1Engine?.DispatchPressure ?? 999;
+        int l2cnt = _line2Engine?.DispatchPressure ?? 999;
+
+        if (!l1run && !l2run)
+        {
+            routeReason = "两线斜床均可加工, 但1/2号线当前都未启动或处于暂停, 等待线路启动";
+            return 0;
+        }
+
+        if (!l1run)
+        {
+            routeReason = "两线斜床均可加工, 只有2号线运行";
+            return 2;
+        }
+
+        if (!l2run)
+        {
+            routeReason = "两线斜床均可加工, 只有1号线运行";
+            return 1;
+        }
+
+        int selected = l1cnt <= l2cnt ? 1 : 2;
+        routeReason = $"两线斜床均可加工, 按前端压力少优先(1号={l1cnt},2号={l2cnt})";
+        return selected;
     }
 
     private bool TryGetManualRackHasPlate(int line, string rackCode, out bool hasPlate, out string message)
@@ -1831,65 +2335,84 @@ public sealed class HomeViewModel : ObservableObject
             return;
         }
 
-        string raw = secondRead.Trim();
-        if (!TryGetSingleErpLine(raw, out string line, out string lineError))
+        var lines = GetErpTaskLines(secondRead);
+        if (lines.Count == 0)
         {
-            await BackupBadErpTaskAsync(raw, lineError, ct);
-            await ClearErpTaskFileAsync(path, ct);
-            await SetErpTaskImportStatusAsync($"ERP监听：解析失败 {lineError}");
-            return;
-        }
-
-        if (!ErpTaskImportParser.TryParse(line, out var row, out string parseError) || row == null)
-        {
-            await BackupBadErpTaskAsync(line, parseError, ct);
-            await ClearErpTaskFileAsync(path, ct);
-            await SetErpTaskImportStatusAsync($"ERP监听：解析失败 {parseError}");
+            await SetErpTaskImportStatusAsync($"ERP监听：监听中 {path}");
             return;
         }
 
         // TaskRows是UI绑定集合, 必须回到WPF UI线程写入。
         // 这里只调用AddTask, 不启动任务, 后续仍由人工点击“启动”进入原业务流程。
-        var importResult = await RunOnUiAsync(() =>
+        var importResult = await RunOnUiAsync(() => ImportErpTaskLines(lines));
+
+        await RewriteErpTaskFileAsync(path, importResult.RetainedLines, ct);
+        if (importResult.InvalidLines.Count == 0)
         {
-            if (TaskRows.Any(x => string.Equals(x.PlateNo, row.PlateNo, StringComparison.OrdinalIgnoreCase)
-                                  && string.Equals(x.Sequence, row.Sequence, StringComparison.OrdinalIgnoreCase)))
+            _lastErpInvalidBackupSignature = string.Empty;
+        }
+        else if (!string.Equals(_lastErpInvalidBackupSignature, importResult.InvalidMessage, StringComparison.Ordinal))
+        {
+            await BackupBadErpTaskAsync(string.Join(Environment.NewLine, importResult.InvalidLines), importResult.InvalidMessage, ct);
+            _lastErpInvalidBackupSignature = importResult.InvalidMessage;
+        }
+
+        await SetErpTaskImportStatusAsync(
+            $"ERP监听：导入{importResult.ImportedCount}行, 保留重复{importResult.DuplicateCount}行, 保留异常{importResult.InvalidLines.Count}行");
+        Console.WriteLine($"[ERP导入] ✓ 批量处理完成: 导入={importResult.ImportedCount} 重复保留={importResult.DuplicateCount} 异常保留={importResult.InvalidLines.Count}");
+    }
+
+    private static List<string> GetErpTaskLines(string content)
+    {
+        return content.Replace("\r\n", "\n").Replace('\r', '\n')
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToList();
+    }
+
+    private ErpBatchImportResult ImportErpTaskLines(IReadOnlyList<string> lines)
+    {
+        var retainedLines = new List<string>();
+        var invalidLines = new List<string>();
+        var invalidMessages = new List<string>();
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var task in TaskRows)
+            seenKeys.Add(BuildErpTaskKey(task.PlateNo, task.Sequence));
+
+        int imported = 0;
+        int duplicates = 0;
+        foreach (string line in lines)
+        {
+            if (!ErpTaskImportParser.TryParse(line, out var row, out string parseError) || row == null)
             {
-                return (Ok: false, Message: $"任务重复: 版号={row.PlateNo} 序号={row.Sequence}");
+                retainedLines.Add(line);
+                invalidLines.Add(line);
+                invalidMessages.Add($"[{line}] {parseError}");
+                Console.WriteLine($"[ERP导入] ⚠ 解析失败, 保留原行: {parseError}; 原始='{line}'");
+                continue;
+            }
+
+            string key = BuildErpTaskKey(row.PlateNo, row.Sequence);
+            if (!seenKeys.Add(key))
+            {
+                duplicates++;
+                retainedLines.Add(line);
+                Console.WriteLine($"[ERP导入] ⚠ 任务重复, 保留原行: 版号={row.PlateNo} 序号={row.Sequence}");
+                continue;
             }
 
             AddTask(row);
-            return (Ok: true, Message: $"已导入 版号={row.PlateNo} 序号={row.Sequence}");
-        });
-
-        if (!importResult.Ok)
-        {
-            await BackupBadErpTaskAsync(line, importResult.Message, ct);
-            await ClearErpTaskFileAsync(path, ct);
-            await SetErpTaskImportStatusAsync($"ERP监听：导入失败 {importResult.Message}");
-            return;
+            imported++;
+            Console.WriteLine($"[ERP导入] ✓ 已导入: 版号={row.PlateNo} 序号={row.Sequence}; 原始='{line}'");
         }
 
-        await ClearErpTaskFileAsync(path, ct);
-        await SetErpTaskImportStatusAsync($"ERP监听：{importResult.Message}");
-        Console.WriteLine($"[ERP导入] ✓ {importResult.Message}; 原始='{line}'");
+        return new ErpBatchImportResult(imported, duplicates, retainedLines, invalidLines,
+            invalidMessages.Count == 0 ? string.Empty : string.Join(Environment.NewLine, invalidMessages));
     }
 
-    private static bool TryGetSingleErpLine(string content, out string line, out string error)
-    {
-        var lines = content.Replace("\r\n", "\n").Replace('\r', '\n')
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (lines.Length != 1)
-        {
-            line = string.Empty;
-            error = $"ERP文件必须只有一行任务, 当前非空行数={lines.Length}";
-            return false;
-        }
-
-        line = lines[0];
-        error = string.Empty;
-        return true;
-    }
+    private static string BuildErpTaskKey(string plateNo, string sequence)
+        => $"{plateNo.Trim()}\u001F{sequence.Trim()}";
 
     private async Task BackupBadErpTaskAsync(string raw, string reason, CancellationToken ct)
     {
@@ -1919,6 +2442,29 @@ public sealed class HomeViewModel : ObservableObject
         await fs.FlushAsync(ct);
         Console.WriteLine($"[ERP导入] 已清空ERP任务文件: {path}");
     }
+
+    private static async Task RewriteErpTaskFileAsync(string path, IReadOnlyList<string> retainedLines, CancellationToken ct)
+    {
+        await using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+        if (retainedLines.Count > 0)
+        {
+            string text = string.Join(Environment.NewLine, retainedLines) + Environment.NewLine;
+            byte[] bytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetBytes(text);
+            await fs.WriteAsync(bytes, ct);
+        }
+
+        await fs.FlushAsync(ct);
+        Console.WriteLine(retainedLines.Count == 0
+            ? $"[ERP导入] 已清空ERP任务文件: {path}"
+            : $"[ERP导入] 已回写ERP任务文件: {path}, 保留{retainedLines.Count}行");
+    }
+
+    private sealed record ErpBatchImportResult(
+        int ImportedCount,
+        int DuplicateCount,
+        List<string> RetainedLines,
+        List<string> InvalidLines,
+        string InvalidMessage);
 
     private async Task<T> RunOnUiAsync<T>(Func<T> action)
     {
@@ -1955,6 +2501,13 @@ public sealed class HomeViewModel : ObservableObject
         // 设置启动回调：用户点任务行的「启动」→ 分配工件到对应线路
         row.OnStartRequested = taskRow =>
         {
+            if (taskRow.AssignedLine > 0)
+            {
+                taskRow.State = "运行中";
+                Console.WriteLine($"[HomeViewModel] {taskRow.PlateNo}/{taskRow.Sequence} 已分配到{taskRow.AssignedLine}号线, 忽略重复启动入队");
+                return;
+            }
+
             // 先构建完整工件数据；无论从总上料架还是人工中转架开始, 后续缓存都保存同一份WorkpieceCache。
             var wp = BuildWorkpieceCache(taskRow);
             if (taskRow.ProcessType == "省去双头镗工艺") Console.WriteLine($"[HomeViewModel] ⚡ 工件跳过双头镗工艺");
@@ -1965,51 +2518,10 @@ public sealed class HomeViewModel : ObservableObject
                 return;
             }
 
-            // ① 自动分配线路
-            //    安全优先: 大直径工件强制1号线, 避免机械手1给1号线送料时与2号线货叉上的大板干涉。
-            //    业务规则: 1200-1500强制1号线, 400-1200空闲优先否则按缓存数少的分。
-            int line;
-            string routeReason;
-            int largeDiameterLine1OnlyMm = _cfg.SkewBed.LargeDiameterLine1OnlyMm;
-            if (largeDiameterLine1OnlyMm > 0 && taskRow.Diameter >= largeDiameterLine1OnlyMm)
-            {
-                line = 1;
-                routeReason = $"直径{taskRow.Diameter}mm>={largeDiameterLine1OnlyMm}mm, 强制1号线防止穿越2号线货叉区域大板干涉";
-            }
-            else if (taskRow.Length > 1200 && taskRow.Length <= 1500)
-            {
-                line = 1; // 长版只能1号线
-                routeReason = "版长1200-1500mm, 只能1号线";
-            }
-            else if (taskRow.Length >= 400 && taskRow.Length <= 1200)
-            {
-                bool l1run = _line1Engine?.IsRunning == true;
-                bool l2run = _line2Engine?.IsRunning == true;
-                int l1cnt = _line1Engine?.CachedCount ?? 999;
-                int l2cnt = _line2Engine?.CachedCount ?? 999;
-
-                if (!l1run && !l2run) { line = _defaultRouteLine; routeReason = "两线未启动, 按页面默认线路"; }
-                else if (!l1run)      { line = 2; routeReason = "只有2号线运行"; }
-                else if (!l2run)      { line = 1; routeReason = "只有1号线运行"; }
-                else                  { line = l1cnt <= l2cnt ? 1 : 2; routeReason = $"两线运行, 按缓存少优先(1号={l1cnt},2号={l2cnt})"; }
-            }
-            else { line = 0; routeReason = "版长不在任何线路范围内"; }
-
-            taskRow.AssignedLine = line;
-            Console.WriteLine($"[HomeViewModel] 工件分配 版号={taskRow.PlateNo} 序号={taskRow.Sequence} D={taskRow.Diameter} L={taskRow.Length} → {line}号线; 原因={routeReason} (1号线缓存={_line1Engine?.CachedCount} 2号线缓存={_line2Engine?.CachedCount})");
-
-            if (line == 0)
-            {
-                Console.WriteLine("[HomeViewModel] ⚠ 版长不在任何线路范围内");
-                RejectTaskStart(taskRow, "版长不在任何线路范围内");
-                return;
-            }
-
-            // ③ 入队对应线路引擎
-            if (line == 1) _line1Engine?.EnqueueWorkpiece(wp);
-            else if (line == 2) _line2Engine?.EnqueueWorkpiece(wp);
-            wp.ReportStage($"已入{line}号线缓存");
-            Console.WriteLine($"[HomeViewModel] 📥 工件入{line}号线缓存 d={wp.Diameter} L={wp.Length}{(wp.ForceBalancing ? " 强制动平衡" : "")}");
+            // 总上料架是1/2号线共用的唯一物理入口。
+            // 任务先进入全局FIFO, 等M800=1确认当前物理板到位后, 再由唯一调度器按线路能力和运行状态派发。
+            taskRow.AssignedLine = 0;
+            EnqueueFrontDispatch(taskRow, wp);
         };
 
         TaskRows.Add(row);
@@ -2027,6 +2539,10 @@ public sealed class HomeViewModel : ObservableObject
                 System.Windows.MessageBoxImage.Warning);
             return;
         }
+
+        bool removedFromDispatch = RemoveFrontDispatch(row);
+        if (removedFromDispatch)
+            OnPropertyChanged(nameof(FrontDispatchCachedCount));
 
         if (TaskRows.Remove(row))
             Console.WriteLine($"[HomeViewModel] 删除未启动任务：版号={row.PlateNo} 序号={row.Sequence}");
@@ -2062,7 +2578,7 @@ public sealed class HomeViewModel : ObservableObject
                 // 读 M800 起始 2 字 (M800~M831)
                 Console.WriteLine("[ProbeMC] [总上料架] STEP3 发送MC读帧 M800 2字...");
                 ReadResult result;
-                try { result = await rackClient.ReadAsync(800, 2, cts.Token); }
+                try { result = await rackClient.ReadMAlignedWordAsync(800, 2, cts.Token); }
                 catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [总上料架] ✘ MC读超时(5s) — TCP通但PLC无响应(A1E帧被拒?)"); throw; }
                 ushort raw1 = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
                 ushort raw2 = (ushort)(result.IntValues.Length > 1 ? result.IntValues[1] : 0);
@@ -2119,7 +2635,7 @@ public sealed class HomeViewModel : ObservableObject
             {
                 var forkClient = new MitsubishiMcClient(
                     forkIp, 9000, MitsubishiMcClient.DeviceM,
-                    frameType: MitsubishiMcClient.McFrameType.A1E) { UseBitReadForM = true };
+                    frameType: MitsubishiMcClient.McFrameType.A1E) { UseBitReadForM = false };
                 try
                 {
                     Console.WriteLine($"[ProbeMC] [货叉] STEP1 尝试TCP连接 {forkIp}:9000 (timeout=5s)...");
@@ -2128,19 +2644,19 @@ public sealed class HomeViewModel : ObservableObject
                     catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [货叉] ✘ TCP连接超时(5s) — PLC离线或IP/端口不对"); throw; }
                     Console.WriteLine($"[ProbeMC] [货叉] STEP2 TCP连接成功 ✓ IsConnected={forkClient.IsConnected}");
 
-                    // 读 M900 (nibble编码, UseBitReadForM=true)
+                    // FX系列M区按字读必须16点对齐; M900所在字为M896~M911。
                     ReadResult result;
-                    try { result = await forkClient.ReadAsync(900, 1, cts.Token); }
+                    try { result = await forkClient.ReadMAlignedWordAsync(896, 1, cts.Token); }
                     catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [货叉] ✘ MC读超时(5s)"); throw; }
                     ushort raw = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
-                    Console.WriteLine($"[ProbeMC] [货叉] ✔ M900~M915=0x{raw:X4}");
+                    Console.WriteLine($"[ProbeMC] [货叉] ✔ M896~M911=0x{raw:X4}");
 
                     // ── 更新卡片 ──
-                    bool hasPlate = (raw & (1 << 0)) != 0;
-                    bool atPos1  = (raw & (1 << 2)) != 0;
-                    bool atPos2  = (raw & (1 << 3)) != 0;
-                    bool atPos3  = (raw & (1 << 4)) != 0;
-                    bool atStdby = (raw & (1 << 1)) != 0;
+                    bool hasPlate = (raw & (1 << 4)) != 0; // M900
+                    bool atStdby = (raw & (1 << 5)) != 0;  // M901
+                    bool atPos1  = (raw & (1 << 6)) != 0;  // M902
+                    bool atPos2  = (raw & (1 << 7)) != 0;  // M903
+                    bool atPos3  = (raw & (1 << 8)) != 0;  // M904
                     string pos = atStdby ? "待机位" : atPos1 ? "1号位" : atPos2 ? "2号位" : atPos3 ? "3号位" : "待机位";
 
                     if (cards.TryGetValue("ST011", out var c2))
@@ -2277,16 +2793,15 @@ public sealed class HomeViewModel : ObservableObject
             await svc.ConnectAsync(cts.Token);
             Console.WriteLine("[ProbeSyntec] [双头镗] 连接成功 ✓");
 
-            // 读 R6101 请求数据信号
-            bool reqData = await svc.IsRequestDataAsync(cts.Token);
-            Console.WriteLine($"[ProbeSyntec] [双头镗] ✔ R6101 请求数据={reqData}");
+            var sig = await svc.ReadAllSignalsAsync(cts.Token);
+            Console.WriteLine($"[ProbeSyntec] [双头镗] ✔ {BuildBoringSignalText(sig.r6101, sig.r6103, sig.r6105, sig.r6107, sig.r6109)}");
 
             if (cards.TryGetValue("ST401", out var c))
             {
                 c.ConnectedBrush = Brushes.LimeGreen;
-                c.Status1 = reqData ? "请求数据" : "空闲";
-                c.Status1Brush = reqData ? Brushes.Orange : Brushes.Green;
-                c.Status2 = $"R6101={(reqData?1:0)} {ip}:502";
+                c.Status1 = BuildBoringOverviewState(sig.r6101, sig.r6103, sig.r6105, sig.r6107, sig.r6109);
+                c.Status1Brush = GetSignalStateBrush(c.Status1);
+                c.Status2 = $"{BuildBoringSignalText(sig.r6101, sig.r6103, sig.r6105, sig.r6107, sig.r6109)} {ip}:502";
                 c.IpText = $"{ip}:502";
             }
             Console.WriteLine("[ProbeSyntec] [双头镗] 卡片已更新: ST401✓");

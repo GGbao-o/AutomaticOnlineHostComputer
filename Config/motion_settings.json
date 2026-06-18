@@ -16,9 +16,9 @@
     "5": { "x": { "speed": 350, "accel": 100, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 150, "accel": 80, "decel": 40 } }
   },
   "manipulatorSpeeds": {
-    "1": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 500, "accel": 200, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
-    "2": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 500, "accel": 200, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
-    "3": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 500, "accel": 200, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } }
+    "1": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 600, "accel": 300, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
+    "2": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 600, "accel": 300, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
+    "3": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 600, "accel": 300, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } }
   },
   "relMove": {
     "defaultSpeed": 300,
@@ -48,13 +48,13 @@
     "stationWaitTimeoutMs": 30000
   },
   "erpTaskImport": {
-    "filePath": "D:\\job\\job1.txt",
+    "filePath": "D:\\job1\\job1.txt",
     "pollIntervalMs": 1000,
     "errorDirectory": "D:\\ErpTaskError",
     "enabledOnStartup": false
   },
   "skewCompletionExport": {
-    "filePath": "D:\\job\\job2.txt",
+    "filePath": "D:\\job1\\job2.txt",
     "enabled": true,
     "stationMachineCodes": {
       "ST108": "SB10428",
@@ -114,12 +114,12 @@
         "ST021": -1
       },
       "5": {
-        "ST709": -22158,
-        "ST701": -19380,
-        "ST702": -12334,
+        "ST709": -10201,
+        "ST701": -8924,
+        "ST702": -5680,
         "ST703": -1,
-        "ST710": -1490,
-        "ST704": 1935
+        "ST710": -688,
+        "ST704": 889
       }
     }
   },
@@ -154,8 +154,12 @@
   },
   "skewBed": {
     "centerDistances": {
-      "ST606": 1315, "ST607": 1450, "ST608": 1450, "ST609": 1450, "ST610": 1450,
+      "ST606": 1350, "ST607": 1450, "ST608": 1450, "ST609": 1450, "ST610": 1325,
       "ST108": 1424, "ST109": 1387, "ST111": 1387, "ST110": 1387, "ST112": 1240
+    },
+    "maxWorkpieceLengthMm":{
+      "ST606": 1280, "ST607": 1280, "ST608": 1280, "ST609": 1280, "ST610": 1255,
+      "ST108": 1350, "ST109": 1300, "ST111": 1300, "ST110": 1300, "ST112": 1170
     },
     "largeBoreOffset": 122,
     "smallBoreOffset": 55,

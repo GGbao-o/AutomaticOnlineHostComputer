@@ -75,6 +75,9 @@ public sealed class TaskRowViewModel : ObservableObject
 
     public string ActionText => _isRunning ? "暂停" : "启动";
 
+    /// <summary>当前任务行是否处于启动态。全局派发队列用它判断队头是否允许继续派发。</summary>
+    public bool IsRunning => _isRunning;
+
     /// <summary>
     /// 只有还没启动、还没分配线路的任务才允许从页面删除。
     /// 已启动任务可能已经进入前端缓存/中转架缓存，不能只删 UI 行，避免现场状态被隐藏。
@@ -104,6 +107,7 @@ public sealed class TaskRowViewModel : ObservableObject
             _isRunning = true;
             State = "运行中";
             OnPropertyChanged(nameof(ActionText));
+            OnPropertyChanged(nameof(IsRunning));
             OnPropertyChanged(nameof(CanDelete));
             RaiseDeleteCanExecuteChanged();
             Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 启动 → 通知分配线路");
@@ -115,6 +119,7 @@ public sealed class TaskRowViewModel : ObservableObject
             _isRunning = false;
             State = "已暂停";
             OnPropertyChanged(nameof(ActionText));
+            OnPropertyChanged(nameof(IsRunning));
             OnPropertyChanged(nameof(CanDelete));
             RaiseDeleteCanExecuteChanged();
             Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 已暂停");
@@ -133,6 +138,7 @@ public sealed class TaskRowViewModel : ObservableObject
         State = "待执行";
         Step = reason;
         OnPropertyChanged(nameof(ActionText));
+        OnPropertyChanged(nameof(IsRunning));
         OnPropertyChanged(nameof(CanDelete));
         RaiseDeleteCanExecuteChanged();
         Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 启动被拒绝: {reason}");

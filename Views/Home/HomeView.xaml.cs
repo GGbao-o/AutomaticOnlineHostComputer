@@ -69,6 +69,16 @@ public partial class HomeView : UserControl
     }
 
     /// <summary>
+    /// 斜床应急作废 — 清上位机斜床缓存/状态并释放软件锁。
+    /// <para>⚠ 不控制天车动作, 不退磁, 不写CNC/PLC; 执行前必须人工确认现场安全。</para>
+    /// </summary>
+    private void SkewBedEmergency_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SkewBedEmergencyDialog(_viewModel) { Owner = Window.GetWindow(this) };
+        dialog.ShowDialog();
+    }
+
+    /// <summary>
     /// 天车移动按钮 — 打开手动天车移动对话框
     /// <para>⚠ 仅移动X轴, YZ轴保持不动(-1跳过)</para>
     /// <para>⚠ 使用前必须: ①确认天车Z已在安全高度 ②点击「刷新位置」获取当前坐标 ③确认磁铁上无工件</para>
