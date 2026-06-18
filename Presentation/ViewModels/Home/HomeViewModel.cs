@@ -2554,8 +2554,8 @@ public sealed class HomeViewModel : ObservableObject
 
     /// <summary>
     /// 开始页面只连接一次
-    /// 一次性连接 MC 设备（总上料架 192.168.2.63:9000 + 货叉 ST711 IP:9000），
-    /// 读 M800/M900 状态写入 StationCards，然后断开。用于排查 MC 协议是否通。
+    /// 一次性通过共享MC缓存探测设备（总上料架 192.168.2.63:9000 + 货叉 ST711 IP:9000），
+    /// 读 M800/M900 状态写入 StationCards。页面探测不另建连接, 避免和引擎读写抢PLC连接。
     /// </summary>
     private async Task ProbeMcDevicesAsync()
     {
@@ -2564,16 +2564,14 @@ public sealed class HomeViewModel : ObservableObject
 
         // ── 1. 探测总上料架+中转架 192.168.2.63:9000 ──────────────────
         {
-            var rackClient = new MitsubishiMcClient(
-                "192.168.2.63", 9000, MitsubishiMcClient.DeviceM,
-                frameType: MitsubishiMcClient.McFrameType.A1E);
             try
             {
-                Console.WriteLine("[ProbeMC] [总上料架] STEP1 尝试TCP连接 192.168.2.63:9000 (timeout=5s)...");
                 using var cts = new CancellationTokenSource(5000);
-                try { await rackClient.ConnectAsync(cts.Token); }
+                Console.WriteLine("[ProbeMC] [总上料架] STEP1 获取共享MC连接 192.168.2.63:9000 (timeout=5s)...");
+                MitsubishiMcClient rackClient;
+                try { rackClient = await _mcCache.GetOrCreateAsync("192.168.2.63", 9000, cts.Token); }
                 catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [总上料架] ✘ TCP连接超时(5s) — PLC离线或IP/端口不对"); throw; }
-                Console.WriteLine($"[ProbeMC] [总上料架] STEP2 TCP连接成功 ✓ IsConnected={rackClient.IsConnected}");
+                Console.WriteLine($"[ProbeMC] [总上料架] STEP2 共享MC连接可用 ✓ IsConnected={rackClient.IsConnected}");
 
                 // 读 M800 起始 2 字 (M800~M831)
                 Console.WriteLine("[ProbeMC] [总上料架] STEP3 发送MC读帧 M800 2字...");
@@ -2613,11 +2611,6 @@ public sealed class HomeViewModel : ObservableObject
                 // 标记断开
                 if (cards.TryGetValue("ST001", out var c1)) { c1.ConnectedBrush = Brushes.Red; c1.Status1 = "无法连接"; c1.Status2 = ex.Message.Length > 30 ? ex.Message[..30] : ex.Message; }
             }
-            finally
-            {
-                try { await rackClient.DisconnectAsync(); Console.WriteLine("[ProbeMC] [总上料架] 已断开 ✓"); }
-                catch (Exception ex) { Console.WriteLine($"[ProbeMC] [总上料架] 断开异常: {ex.Message}"); }
-            }
         }
 
         // ── 2. 探测货叉 (从 IpMap 取 ST711 的 IP) ─────────────────────
@@ -2633,16 +2626,14 @@ public sealed class HomeViewModel : ObservableObject
             }
             else
             {
-                var forkClient = new MitsubishiMcClient(
-                    forkIp, 9000, MitsubishiMcClient.DeviceM,
-                    frameType: MitsubishiMcClient.McFrameType.A1E) { UseBitReadForM = false };
                 try
                 {
-                    Console.WriteLine($"[ProbeMC] [货叉] STEP1 尝试TCP连接 {forkIp}:9000 (timeout=5s)...");
                     using var cts = new CancellationTokenSource(5000);
-                    try { await forkClient.ConnectAsync(cts.Token); }
+                    Console.WriteLine($"[ProbeMC] [货叉] STEP1 获取共享MC连接 {forkIp}:9000 (timeout=5s)...");
+                    MitsubishiMcClient forkClient;
+                    try { forkClient = await _mcCache.GetOrCreateAsync(forkIp, 9000, cts.Token); }
                     catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [货叉] ✘ TCP连接超时(5s) — PLC离线或IP/端口不对"); throw; }
-                    Console.WriteLine($"[ProbeMC] [货叉] STEP2 TCP连接成功 ✓ IsConnected={forkClient.IsConnected}");
+                    Console.WriteLine($"[ProbeMC] [货叉] STEP2 共享MC连接可用 ✓ IsConnected={forkClient.IsConnected}");
 
                     // FX系列M区按字读必须16点对齐; M900所在字为M896~M911。
                     ReadResult result;
@@ -2668,24 +2659,17 @@ public sealed class HomeViewModel : ObservableObject
                     Console.WriteLine($"[ProbeMC] [货叉] ✘ 失败: {ex.GetType().Name} — {ex.Message}");
                     if (cards.TryGetValue("ST011", out var c)) { c.ConnectedBrush = Brushes.Red; c.Status1 = "无法连接"; c.Status2 = ex.Message.Length > 30 ? ex.Message[..30] : ex.Message; }
                 }
-                finally
-                {
-                    try { await forkClient.DisconnectAsync(); Console.WriteLine("[ProbeMC] [货叉] 已断开 ✓"); }
-                    catch (Exception ex) { Console.WriteLine($"[ProbeMC] [货叉] 断开异常: {ex.Message}"); }
-                }
             }
         }
 
         // ── 3. 探测 192.168.2.64:9000 (研磨下料架 ST710) ─────
         {
-            var client = new MitsubishiMcClient("192.168.2.64", 9000, MitsubishiMcClient.DeviceM,
-                frameType: MitsubishiMcClient.McFrameType.A1E);
             try
             {
-                Console.WriteLine("[ProbeMC] [2.64下料架] 尝试 TCP 连接...");
                 using var cts = new CancellationTokenSource(5000);
-                await client.ConnectAsync(cts.Token);
-                Console.WriteLine("[ProbeMC] [2.64下料架] TCP连接成功 ✓");
+                Console.WriteLine("[ProbeMC] [2.64下料架] 获取共享MC连接...");
+                var client = await _mcCache.GetOrCreateAsync("192.168.2.64", 9000, cts.Token);
+                Console.WriteLine("[ProbeMC] [2.64下料架] 共享MC连接可用 ✓");
 
                 // 与GrindingFlowEngine保持一致: MC64下料架按对齐字读 M720起1字, M720=1允许放版, M730=1安全位置。
                 var result = await client.ReadMAlignedWordAsync(720, 1, cts.Token);
@@ -2712,19 +2696,16 @@ public sealed class HomeViewModel : ObservableObject
                 if (cards.TryGetValue("ST013", out var c)) { c.ConnectedBrush = Brushes.Red; c.Status1 = "无法连接"; }
                 if (cards.TryGetValue("ST710", out var c2)) { c2.ConnectedBrush = Brushes.Red; c2.Status1 = "无法连接"; }
             }
-            finally { try { await client.DisconnectAsync(); } catch { } }
         }
 
         // ── 4. 探测 192.168.2.65:9000 (研磨机上料架 ST709 + 动平衡) ────
         {
-            var client = new MitsubishiMcClient("192.168.2.65", 9000, MitsubishiMcClient.DeviceM,
-                frameType: MitsubishiMcClient.McFrameType.A1E);
             try
             {
-                Console.WriteLine("[ProbeMC] [2.65上料架] 尝试 TCP 连接...");
                 using var cts = new CancellationTokenSource(5000);
-                await client.ConnectAsync(cts.Token);
-                Console.WriteLine("[ProbeMC] [2.65上料架] TCP连接成功 ✓");
+                Console.WriteLine("[ProbeMC] [2.65上料架] 获取共享MC连接...");
+                var client = await _mcCache.GetOrCreateAsync("192.168.2.65", 9000, cts.Token);
+                Console.WriteLine("[ProbeMC] [2.65上料架] 共享MC连接可用 ✓");
 
                 // 与Balancing/Grinding引擎保持一致: FX按字读M区必须16点对齐。
                 var r688 = await client.ReadMAlignedWordAsync(688, 1, cts.Token); // M700 = M688 bit12
@@ -2758,7 +2739,6 @@ public sealed class HomeViewModel : ObservableObject
                 Console.WriteLine($"[ProbeMC] [2.65上料架] ✘ 失败: {ex.GetType().Name} — {ex.Message}");
                 if (cards.TryGetValue("ST709", out var c)) { c.ConnectedBrush = Brushes.Red; c.Status1 = "无法连接"; }
             }
-            finally { try { await client.DisconnectAsync(); } catch { } }
         }
 
         Console.WriteLine("[ProbeMC] ═══════ MC 设备探测结束（4路: 2.63✓ 货叉✓ 2.64✓ 2.65✓）═══════");
