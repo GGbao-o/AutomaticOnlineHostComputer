@@ -353,6 +353,36 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public Task SetCraneUnloadDoneAsync(CancellationToken ct = default) => WriteMacroBoolAsync(FanucSkewBedAddress.CraneUnloadDone, true, ct);
         public Task StopTailstockAsync(CancellationToken ct = default) => WriteMacroBoolAsync(FanucSkewBedAddress.TailstockStop, true, ct);
 
+        /// <summary>
+        /// 应急清零：清掉上位机下发过的加工参数和握手信号。
+        /// 仅用于人工确认现场已处理后的应急恢复，不控制天车/机床动作。
+        /// </summary>
+        public Task ClearEmergencyRegistersAsync(CancellationToken ct = default)
+        {
+            return SafeCallAsync(() =>
+            {
+                int[] addrs =
+                {
+                    FanucSkewBedAddress.RollerLength,
+                    FanucSkewBedAddress.RollerDiameter,
+                    FanucSkewBedAddress.BorePlugSize,
+                    FanucSkewBedAddress.MachiningMode,
+                    FanucSkewBedAddress.DataSentDone,
+                    FanucSkewBedAddress.CraneLoadInPlace,
+                    FanucSkewBedAddress.CraneLoadDone,
+                    FanucSkewBedAddress.CraneUnloadInPlace,
+                    FanucSkewBedAddress.CraneUnloadDone
+                };
+                foreach (var addr in addrs)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    _sdk.SetMacro(addr, 0.0);
+                }
+                Console.WriteLine("[FANUC-SDK] 应急清零: #800/#801/#802/#909/#1101~#1105 → 0");
+                return Task.CompletedTask;
+            }, "FANUC应急清零", ct);
+        }
+
         // ─── 调试 ─────────────────────────────────────────────────
 
         public Task<string> TestPmcAsync(CancellationToken ct = default)

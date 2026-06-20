@@ -15,6 +15,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
     /// </summary>
     public sealed class PlcGrinderService : IDisposable
     {
+        private const int MaxIoAttempts = 3;
+
         public enum GrinderType { TypeA, TypeB }
 
         private readonly ModbusTcpClient _client;
@@ -87,12 +89,12 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// </summary>
         public async Task<bool> IsHeartbeatOkAsync(CancellationToken ct = default)
         {
-            int di1 = await _client.ReadIntAsync(_diRegAddr, ct);
+            int di1 = await ReadIntSafeAsync(_diRegAddr, "读TypeA DI心跳(第一次)", ct);
             bool bit1 = (di1 & (1 << Addr.Bit_Heartbeat)) != 0;
 
             await Task.Delay(500, ct);
 
-            int di2 = await _client.ReadIntAsync(_diRegAddr, ct);
+            int di2 = await ReadIntSafeAsync(_diRegAddr, "读TypeA DI心跳(第二次)", ct);
             bool bit2 = (di2 & (1 << Addr.Bit_Heartbeat)) != 0;
 
             bool ok = bit1 != bit2; // 1Hz 方波，500ms 内应翻转
@@ -170,7 +172,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             int count = includeOutputRegisters
                 ? Addr.TypeAToModbus(Addr.RegDO_RollerLength) - _diRegAddr + 1
                 : 1;
-            var result = await _client.ReadAsync(_diRegAddr, count, ct);
+            var result = await SafeIoAsync(token => _client.ReadAsync(_diRegAddr, count, token), $"读TypeA状态快照 addr={_diRegAddr} count={count}", ct);
 
             int At(int modbusAddress)
             {
@@ -220,7 +222,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
             int start = Addr.RToModbus(Addr.R_RequestData);      // R7301 -> 14603
             int end = Addr.RToModbus(Addr.R_MachineStatus);      // R7308 -> 14617
-            var result = await _client.ReadAsync(start, end - start + 1, ct);
+            var result = await SafeIoAsync(token => _client.ReadAsync(start, end - start + 1, token), $"读TypeB状态快照 addr={start} count={end - start + 1}", ct);
 
             int At(int rNumber)
             {
@@ -313,7 +315,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             if (_type == GrinderType.TypeA)
                 return await ReadBitAsync(_diRegAddr, Addr.Bit_Alarm, ct);
             else
-                return (await _client.ReadIntAsync(Addr.RToModbus(Addr.R_MachineStatus), ct)) == 2;
+                return (await ReadIntSafeAsync(Addr.RToModbus(Addr.R_MachineStatus), "读TypeB设备状态", ct)) == 2;
         }
 
         /// <summary>设备状态码：TypeA=加工中 bit 判定 0空闲/1忙碌，TypeB=R7308 0空闲/1忙碌/2报警。</summary>
@@ -322,7 +324,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             if (_type == GrinderType.TypeA)
                 return await ReadBitAsync(_diRegAddr, Addr.Bit_Machining, ct) ? 1 : 0;
             else
-                return await _client.ReadIntAsync(Addr.RToModbus(Addr.R_MachineStatus), ct);
+                return await ReadIntSafeAsync(Addr.RToModbus(Addr.R_MachineStatus), "读TypeB设备状态", ct);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -335,18 +337,21 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             int d = (int)Math.Round(rollerDiameter);
             int l = (int)Math.Round(rollerLength);
             Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 下发加工参数 直径={d}mm(原{rollerDiameter}) 版孔={(boreType == 1 ? "大孔" : "小孔")} 长度={l}mm(原{rollerLength})");
-            if (_type == GrinderType.TypeA)
+            await SafeIoAsync(async token =>
             {
-                await _client.WriteAsync(Addr.RegDO_RollerDiameter - 40001, d,  ct);
-                await _client.WriteAsync(Addr.RegDO_BoreType      - 40001, boreType, ct);
-                await _client.WriteAsync(Addr.RegDO_RollerLength  - 40001, l,  ct);
-            }
-            else
-            {
-                await _client.WriteAsync(Addr.RToModbus(Addr.R_RollerDiameter), d,  ct);
-                await _client.WriteAsync(Addr.RToModbus(Addr.R_MachiningMode),  boreType, ct);
-                await _client.WriteAsync(Addr.RToModbus(Addr.R_RollerLength),   l,  ct);
-            }
+                if (_type == GrinderType.TypeA)
+                {
+                    await _client.WriteAsync(Addr.RegDO_RollerDiameter - 40001, d, token);
+                    await _client.WriteAsync(Addr.RegDO_BoreType - 40001, boreType, token);
+                    await _client.WriteAsync(Addr.RegDO_RollerLength - 40001, l, token);
+                }
+                else
+                {
+                    await _client.WriteAsync(Addr.RToModbus(Addr.R_RollerDiameter), d, token);
+                    await _client.WriteAsync(Addr.RToModbus(Addr.R_MachiningMode), boreType, token);
+                    await _client.WriteAsync(Addr.RToModbus(Addr.R_RollerLength), l, token);
+                }
+            }, "写研磨加工参数", ct);
             Console.WriteLine($"[GrinderSvc] [{_name}] ✔ 加工参数已下发");
         }
 
@@ -399,7 +404,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             if (_type == GrinderType.TypeA)
             {
                 // 西门子: 40011 写0 清所有bit (读-改-写保护其他寄存器)
-                await _client.WriteAsync(_doRegAddr, 0, ct);
+                await WriteIntSafeAsync(_doRegAddr, 0, "清空TypeA输出40011", ct);
                 Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 清空输出 40011→0");
             }
             else
@@ -413,8 +418,31 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     Addr.RToModbus(Addr.R_UnloadDone),       // R7315 → 14631
                 };
                 foreach (var addr in addrs)
-                    await _client.WriteAsync(addr, 0, ct);
+                    await WriteIntSafeAsync(addr, 0, $"清空TypeB输出addr={addr}", ct);
                 Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 清空输出 R7311~R7315→0");
+            }
+        }
+
+        /// <summary>
+        /// 应急清零：清掉上位机写入的研磨参数和握手输出。
+        /// TypeA: 40011~40014 → 0; TypeB: R7311~R7318 → 0。
+        /// </summary>
+        public async Task ClearEmergencyRegistersAsync(CancellationToken ct = default)
+        {
+            await ClearAllOutputsAsync(ct);
+            if (_type == GrinderType.TypeA)
+            {
+                await WriteIntSafeAsync(Addr.RegDO_RollerDiameter - 40001, 0, "应急清零TypeA直径", ct);
+                await WriteIntSafeAsync(Addr.RegDO_BoreType - 40001, 0, "应急清零TypeA孔型", ct);
+                await WriteIntSafeAsync(Addr.RegDO_RollerLength - 40001, 0, "应急清零TypeA长度", ct);
+                Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 应急清零参数 40012~40014→0");
+            }
+            else
+            {
+                await WriteIntSafeAsync(Addr.RToModbus(Addr.R_RollerDiameter), 0, "应急清零TypeB直径", ct);
+                await WriteIntSafeAsync(Addr.RToModbus(Addr.R_MachiningMode), 0, "应急清零TypeB模式", ct);
+                await WriteIntSafeAsync(Addr.RToModbus(Addr.R_RollerLength), 0, "应急清零TypeB长度", ct);
+                Console.WriteLine($"[GrinderSvc] [{_name}] ▶ 应急清零参数 R7316~R7318→0");
             }
         }
 
@@ -433,7 +461,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 await SetBitAsync(_doRegAddr, typeABit, true, ct);
 
                 // ── 读回验证：确认寄存器确实被写入了 ────────────────
-                int verify = await _client.ReadIntAsync(_doRegAddr, ct);
+                int verify = await ReadIntSafeAsync(_doRegAddr, $"验证TypeA长信号bit{typeABit}", ct);
                 bool confirmed = (verify & (1 << typeABit)) != 0;
                 Console.WriteLine($"[GrinderSvc] [{_name}]   DO bit{typeABit}=1（开始3s长信号） 读回验证={(confirmed ? "✔ 已置位" : "✘ 写入失败！当前0x" + verify.ToString("X4"))}");
                 if (!confirmed)
@@ -446,25 +474,25 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             else
             {
                 int addr = Addr.RToModbus(typeBRAddr);
-                await _client.WriteAsync(addr, 1, ct);
+                await WriteIntSafeAsync(addr, 1, $"写TypeB长信号R{typeBRAddr}=1", ct);
 
-                int verify = await _client.ReadIntAsync(addr, ct);
+                int verify = await ReadIntSafeAsync(addr, $"验证TypeB长信号R{typeBRAddr}", ct);
                 Console.WriteLine($"[GrinderSvc] [{_name}]   R{typeBRAddr}=1（开始3s长信号） 读回验证={(verify == 1 ? "✔" : "✘ 当前值=" + verify)}");
 
                 await Task.Delay(3000, ct);
-                await _client.WriteAsync(addr, 0, ct);
+                await WriteIntSafeAsync(addr, 0, $"写TypeB长信号R{typeBRAddr}=0", ct);
                 Console.WriteLine($"[GrinderSvc] [{_name}]   R{typeBRAddr}=0（3s长信号结束）");
             }
         }
 
         /// <summary>TypeB：读 R 区 BOOL 信号。非零为 true。</summary>
         private async Task<bool> ReadBoolAsync(int rAddr, CancellationToken ct)
-            => (await _client.ReadIntAsync(Addr.RToModbus(rAddr), ct)) != 0;
+            => (await ReadIntSafeAsync(Addr.RToModbus(rAddr), $"读TypeB R{rAddr}", ct)) != 0;
 
         /// <summary>TypeA：读 DI 寄存器的指定位。FC03 读整字后按位提取。</summary>
         private async Task<bool> ReadBitAsync(int regAddr, int bitIndex, CancellationToken ct)
         {
-            int val = await _client.ReadIntAsync(regAddr, ct) & 0xFFFF;
+            int val = await ReadIntSafeAsync(regAddr, $"读TypeA bit{bitIndex}", ct) & 0xFFFF;
             return (val & (1 << bitIndex)) != 0;
         }
 
@@ -474,13 +502,56 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// </summary>
         private async Task SetBitAsync(int regAddr, int bitIndex, bool value, CancellationToken ct)
         {
-            int cur = await _client.ReadIntAsync(regAddr, ct) & 0xFFFF;
+            int cur = await ReadIntSafeAsync(regAddr, $"读TypeA输出字bit{bitIndex}", ct) & 0xFFFF;
             int next = value
                 ? cur | (1 << bitIndex)
                 : cur & ~(1 << bitIndex);
-            await _client.WriteAsync(regAddr, next, ct);
+            await WriteIntSafeAsync(regAddr, next, $"写TypeA输出字bit{bitIndex}", ct);
             Console.WriteLine($"[GrinderSvc] [{_name}]   SetBit reg={regAddr} bit{bitIndex}={(value ? 1 : 0)} (0x{cur:X4}→0x{next:X4})");
         }
+
+        private Task<int> ReadIntSafeAsync(int address, string desc, CancellationToken ct)
+            => SafeIoAsync(token => _client.ReadIntAsync(address, token), $"{desc} addr={address}", ct);
+
+        private Task WriteIntSafeAsync(int address, int value, string desc, CancellationToken ct)
+            => SafeIoAsync(token => _client.WriteAsync(address, value, token), $"{desc} addr={address}", ct);
+
+        private async Task<T> SafeIoAsync<T>(Func<CancellationToken, Task<T>> action, string desc, CancellationToken ct)
+        {
+            Exception? last = null;
+            for (int attempt = 1; attempt <= MaxIoAttempts; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    if (!_client.IsConnected)
+                        await ConnectAsync(ct);
+
+                    return await action(ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    if (attempt >= MaxIoAttempts) break;
+                    Console.WriteLine($"[GrinderSvc] [{_name}] {desc} 通信异常 attempt={attempt}/{MaxIoAttempts}: {ex.Message} → 重连后重试");
+                    try { await DisconnectAsync(); } catch { }
+                    await Task.Delay(200, ct);
+                }
+            }
+
+            throw new InvalidOperationException($"{desc} {MaxIoAttempts}次重连重试仍失败: {last?.Message}", last);
+        }
+
+        private Task SafeIoAsync(Func<CancellationToken, Task> action, string desc, CancellationToken ct)
+            => SafeIoAsync(async token =>
+            {
+                await action(token);
+                return true;
+            }, desc, ct);
 
         public void Dispose()
         {

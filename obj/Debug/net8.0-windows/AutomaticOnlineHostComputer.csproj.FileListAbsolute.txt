@@ -98,3 +98,5 @@ D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\ref\AutomaticOnlineHostComputer.dll
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\SkewBedEmergencyDialog.baml
 D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\SkewBedEmergencyDialog.g.cs
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\EmergencyCenterDialog.baml
+D:\BSH\hateshujukejicode\自动线上位机\V4.4.0 - DIS-0928-1\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Home\Dialogs\EmergencyCenterDialog.g.cs

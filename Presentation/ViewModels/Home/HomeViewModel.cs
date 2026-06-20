@@ -225,6 +225,7 @@ public sealed class HomeViewModel : ObservableObject
         TestRearPickup2Command = new AsyncRelayCommand(TestRearPickup2Async, nameof(TestRearPickup2Command));
         TestBalancingRackPlacedCommand = new AsyncRelayCommand(TestBalancingRackPlacedAsync, nameof(TestBalancingRackPlacedCommand));
         ErpTaskImportToggleCommand = new AsyncRelayCommand(ErpTaskImportToggleAsync, nameof(ErpTaskImportToggleCommand));
+        AutoStartTasksCommand = new AsyncRelayCommand(AutoStartTasksAsync, nameof(AutoStartTasksCommand));
 
         // 测试动平衡默认值
         BalancingTestDiameter = 147;
@@ -1058,6 +1059,31 @@ public sealed class HomeViewModel : ObservableObject
         };
     }
 
+    public Task<string> EmergencyClearSkewBedAsync(int line, string bedCode, bool skipDeviceClear, CancellationToken ct = default)
+    {
+        return line switch
+        {
+            1 => _line1RearEngine?.EmergencyClearSkewBedAsync(bedCode, skipDeviceClear, IsLine1Running, ct)
+                 ?? Task.FromResult("1号线后端引擎未初始化"),
+            2 => _line2RearEngine?.EmergencyClearSkewBedAsync(bedCode, skipDeviceClear, IsLine2Running, ct)
+                 ?? Task.FromResult("2号线后端引擎未初始化"),
+            _ => Task.FromResult($"无效线体: {line}")
+        };
+    }
+
+    public string GetBalancingEmergencyInfo(string position)
+        => _line1BalancingEngine?.GetBalancingEmergencyInfo(position) ?? "动平衡引擎未初始化";
+
+    public Task<string> EmergencyClearBalancingPositionAsync(string position, CancellationToken ct = default)
+        => _line1BalancingEngine?.EmergencyClearBalancingPositionAsync(position, IsBalancingRunning, ct)
+           ?? Task.FromResult("动平衡引擎未初始化");
+
+    public string GetGrindingEmergencyInfo(string target)
+        => _grindingEngine?.GetGrindingEmergencyInfo(target) ?? "研磨引擎未初始化";
+
+    public Task<string> EmergencyClearGrindingAsync(string target, bool skipDeviceClear, CancellationToken ct = default)
+        => _grindingEngine?.EmergencyClearGrindingAsync(target, skipDeviceClear, ct) ?? Task.FromResult("研磨引擎未初始化");
+
     public ICommand Line1ToggleCommand { get; }
     /// <summary>2号线启动/暂停</summary>
     public ICommand Line2ToggleCommand { get; }
@@ -1073,6 +1099,21 @@ public sealed class HomeViewModel : ObservableObject
     public ICommand TestBalancingRackPlacedCommand { get; }
     /// <summary>启动/停止ERP任务文件监听。只导入到任务列表, 不自动启动任务。</summary>
     public ICommand ErpTaskImportToggleCommand { get; }
+    /// <summary>一键启动当前任务列表, 并让后续新增任务自动启动。</summary>
+    public ICommand AutoStartTasksCommand { get; }
+
+    private bool _autoStartTasks;
+    public bool AutoStartTasks
+    {
+        get => _autoStartTasks;
+        private set
+        {
+            if (SetField(ref _autoStartTasks, value))
+                OnPropertyChanged(nameof(AutoStartTasksText));
+        }
+    }
+
+    public string AutoStartTasksText => AutoStartTasks ? "停止自动启动" : "一键启动";
 
     /// <summary>
     /// 主页面任务表数据源（左侧DataGrid绑定）。
@@ -1431,9 +1472,9 @@ public sealed class HomeViewModel : ObservableObject
         OnPropertyChanged(nameof(IpMap));
         Console.WriteLine("[HomeViewModel] 缓存全部就绪，页面已显示。后台开始连接...");
 
-        // ── 一次性探测：MC 设备 / Syntec 双头镗 — 连→读→写卡片→断开 ──
+        // ── 一次性探测：仅使用共享MC缓存的料架PLC。
+        // 货叉、双头镗、斜床全部由各自引擎连接并同步卡片，页面不再建第二条连接。
         _ = ProbeMcDevicesAsync();
-        _ = ProbeSyntecDevicesAsync();
 
         
         _ = Task.Run(async () =>
@@ -1457,6 +1498,8 @@ public sealed class HomeViewModel : ObservableObject
         var engineManagedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "ST007", "ST711", "ST103", "ST107", "ST901", "ST002", "ST401", "ST501", "ST605",
+            // 1号线Modbus斜床也由后端引擎持有唯一连接，页面只读DeviceStatus。
+            "ST108", "ST109", "ST110", "ST111",
             // 后端FANUC斜床由LineRear引擎的FanucSkewBedService独立Worker读取缓存。
             // 页面不能再直接FOCAS探测, 避免Task.Run阻塞线程池并覆盖引擎状态。
             "ST112", "ST606", "ST607", "ST608", "ST609", "ST610"
@@ -1736,6 +1779,11 @@ public sealed class HomeViewModel : ObservableObject
             {
                 row.Step = step;
                 row.State = state;
+                if (IsTaskDisplayTerminal(step, state))
+                {
+                    if (TaskRows.Remove(row))
+                        Console.WriteLine($"[HomeViewModel] 自动清除任务显示：版号={row.PlateNo} 序号={row.Sequence} 终点={step}/{state}");
+                }
             }
 
             var dispatcher = System.Windows.Application.Current?.Dispatcher;
@@ -1747,6 +1795,13 @@ public sealed class HomeViewModel : ObservableObject
             // 进度显示是旁路能力, 失败绝不能影响现场流程。
             Console.WriteLine($"[HomeViewModel] ⚠ 更新任务进度失败 版号={row.PlateNo} 序号={row.Sequence}: {ex.Message}");
         }
+    }
+
+    private static bool IsTaskDisplayTerminal(string step, string state)
+    {
+        return string.Equals(step, "动平衡加工中 ST008/M710", StringComparison.Ordinal)
+            || string.Equals(step, "已完成", StringComparison.Ordinal)
+            || string.Equals(state, "已完成", StringComparison.Ordinal);
     }
 
     private void StartFrontDispatchLoop()
@@ -2492,52 +2547,79 @@ public sealed class HomeViewModel : ObservableObject
         });
     }
 
+    private async Task AutoStartTasksAsync()
+    {
+        if (AutoStartTasks)
+        {
+            AutoStartTasks = false;
+            Console.WriteLine("[HomeViewModel] ⏹ 已停止任务自动启动。已入队/已派发任务不受影响。");
+            await Task.CompletedTask;
+            return;
+        }
+
+        AutoStartTasks = true;
+        int started = 0;
+        foreach (var row in TaskRows.ToList())
+        {
+            if (row.IsRunning) continue;
+            row.RequestStart();
+            if (row.IsRunning) started++;
+        }
+
+        Console.WriteLine($"[HomeViewModel] ▶ 一键启动完成: 本次启动{started}个任务, 后续新增任务将自动启动");
+        await Task.CompletedTask;
+    }
+
     public void AddTask(TaskRowViewModel row)
     {
-        // 删除只处理尚未启动、尚未写入任何线路缓存的任务行。
-        // 已启动任务的 WorkpieceCache 可能已进入引擎流程，不能仅删除 UI，避免现场仍在跑但页面看不到。
-        row.OnDeleteRequested = DeleteTaskRow;
+        row.OnDeleteRequested = ClearTaskRow;
 
         // 设置启动回调：用户点任务行的「启动」→ 分配工件到对应线路
-        row.OnStartRequested = taskRow =>
-        {
-            if (taskRow.AssignedLine > 0)
-            {
-                taskRow.State = "运行中";
-                Console.WriteLine($"[HomeViewModel] {taskRow.PlateNo}/{taskRow.Sequence} 已分配到{taskRow.AssignedLine}号线, 忽略重复启动入队");
-                return;
-            }
-
-            // 先构建完整工件数据；无论从总上料架还是人工中转架开始, 后续缓存都保存同一份WorkpieceCache。
-            var wp = BuildWorkpieceCache(taskRow);
-            if (taskRow.ProcessType == "省去双头镗工艺") Console.WriteLine($"[HomeViewModel] ⚡ 工件跳过双头镗工艺");
-
-            if (taskRow.StartFromTransferRack)
-            {
-                TryStartFromTransferRack(taskRow, wp);
-                return;
-            }
-
-            // 总上料架是1/2号线共用的唯一物理入口。
-            // 任务先进入全局FIFO, 等M800=1确认当前物理板到位后, 再由唯一调度器按线路能力和运行状态派发。
-            taskRow.AssignedLine = 0;
-            EnqueueFrontDispatch(taskRow, wp);
-        };
+        row.OnStartRequested = taskRow => StartTaskRow(taskRow);
 
         TaskRows.Add(row);
         Console.WriteLine($"[HomeViewModel] 新增任务：版号={row.PlateNo} 序号={row.Sequence} 版长={row.Length}mm");
+        if (AutoStartTasks)
+            row.RequestStart();
     }
 
-    private void DeleteTaskRow(TaskRowViewModel row)
+    private void StartTaskRow(TaskRowViewModel taskRow)
     {
-        if (!row.CanDelete)
+        if (taskRow.AssignedLine > 0)
         {
-            System.Windows.MessageBox.Show(
-                "任务已经启动或已经分配线路，不能直接从列表删除。请保留该行用于现场状态追踪。",
-                "不能删除任务",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Warning);
+            taskRow.State = "运行中";
+            Console.WriteLine($"[HomeViewModel] {taskRow.PlateNo}/{taskRow.Sequence} 已分配到{taskRow.AssignedLine}号线, 忽略重复启动入队");
             return;
+        }
+
+        // 先构建完整工件数据；无论从总上料架还是人工中转架开始, 后续缓存都保存同一份WorkpieceCache。
+        var wp = BuildWorkpieceCache(taskRow);
+        if (taskRow.ProcessType == "省去双头镗工艺") Console.WriteLine($"[HomeViewModel] ⚡ 工件跳过双头镗工艺");
+
+        if (taskRow.StartFromTransferRack)
+        {
+            TryStartFromTransferRack(taskRow, wp);
+            return;
+        }
+
+        // 总上料架是1/2号线共用的唯一物理入口。
+        // 任务先进入全局FIFO, 等M800=1确认当前物理板到位后, 再由唯一调度器按线路能力和运行状态派发。
+        taskRow.AssignedLine = 0;
+        EnqueueFrontDispatch(taskRow, wp);
+    }
+
+    private void ClearTaskRow(TaskRowViewModel row)
+    {
+        bool activeOrAssigned = row.IsRunning || row.AssignedLine > 0;
+        if (activeOrAssigned)
+        {
+            var result = System.Windows.MessageBox.Show(
+                "清除只会把任务从页面列表隐藏。\n\n不会停止设备、不会清线路缓存、不会清斜床/动平衡/研磨缓存、不会释放锁。\n如果该任务尚未派发到线路, 会同时从总上料架待派发队列移除。\n\n确认清除这行任务吗？",
+                "确认清除任务显示",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning);
+            if (result != System.Windows.MessageBoxResult.Yes)
+                return;
         }
 
         bool removedFromDispatch = RemoveFrontDispatch(row);
@@ -2545,7 +2627,12 @@ public sealed class HomeViewModel : ObservableObject
             OnPropertyChanged(nameof(FrontDispatchCachedCount));
 
         if (TaskRows.Remove(row))
-            Console.WriteLine($"[HomeViewModel] 删除未启动任务：版号={row.PlateNo} 序号={row.Sequence}");
+        {
+            string effect = removedFromDispatch
+                ? "已从页面和总上料架待派发FIFO清除"
+                : "仅从页面隐藏, 不影响现场流程/缓存";
+            Console.WriteLine($"[HomeViewModel] 清除任务显示：版号={row.PlateNo} 序号={row.Sequence} {effect}");
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -2553,9 +2640,9 @@ public sealed class HomeViewModel : ObservableObject
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 开始页面只连接一次
-    /// 一次性通过共享MC缓存探测设备（总上料架 192.168.2.63:9000 + 货叉 ST711 IP:9000），
-    /// 读 M800/M900 状态写入 StationCards。页面探测不另建连接, 避免和引擎读写抢PLC连接。
+    /// 页面加载时只探测共享MC缓存中的料架PLC（2.63/2.64/2.65）。
+    /// 货叉、双头镗和斜床由生产引擎持有唯一连接，页面只消费引擎同步的状态，避免双连接。
+
     /// </summary>
     private async Task ProbeMcDevicesAsync()
     {
@@ -2613,56 +2700,7 @@ public sealed class HomeViewModel : ObservableObject
             }
         }
 
-        // ── 2. 探测货叉 (从 IpMap 取 ST711 的 IP) ─────────────────────
-        {
-            string? forkIp = null;
-            if (IpMap.TryGetValue("ST711", out var ip) && !string.IsNullOrWhiteSpace(ip) && ip != "未配置IP")
-                forkIp = ip;
-
-            if (string.IsNullOrEmpty(forkIp))
-            {
-                Console.WriteLine("[ProbeMC] [货叉] ⚠ IpMap 中未找到 ST711 的IP，跳过");
-                if (cards.TryGetValue("ST011", out var c)) { c.Status1 = "等待IP"; c.Status2 = "ST711未配置IP"; }
-            }
-            else
-            {
-                try
-                {
-                    using var cts = new CancellationTokenSource(5000);
-                    Console.WriteLine($"[ProbeMC] [货叉] STEP1 获取共享MC连接 {forkIp}:9000 (timeout=5s)...");
-                    MitsubishiMcClient forkClient;
-                    try { forkClient = await _mcCache.GetOrCreateAsync(forkIp, 9000, cts.Token); }
-                    catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [货叉] ✘ TCP连接超时(5s) — PLC离线或IP/端口不对"); throw; }
-                    Console.WriteLine($"[ProbeMC] [货叉] STEP2 共享MC连接可用 ✓ IsConnected={forkClient.IsConnected}");
-
-                    // FX系列M区按字读必须16点对齐; M900所在字为M896~M911。
-                    ReadResult result;
-                    try { result = await forkClient.ReadMAlignedWordAsync(896, 1, cts.Token); }
-                    catch (OperationCanceledException) { Console.WriteLine("[ProbeMC] [货叉] ✘ MC读超时(5s)"); throw; }
-                    ushort raw = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
-                    Console.WriteLine($"[ProbeMC] [货叉] ✔ M896~M911=0x{raw:X4}");
-
-                    // ── 更新卡片 ──
-                    bool hasPlate = (raw & (1 << 4)) != 0; // M900
-                    bool atStdby = (raw & (1 << 5)) != 0;  // M901
-                    bool atPos1  = (raw & (1 << 6)) != 0;  // M902
-                    bool atPos2  = (raw & (1 << 7)) != 0;  // M903
-                    bool atPos3  = (raw & (1 << 8)) != 0;  // M904
-                    string pos = atStdby ? "待机位" : atPos1 ? "1号位" : atPos2 ? "2号位" : atPos3 ? "3号位" : "待机位";
-
-                    if (cards.TryGetValue("ST011", out var c2))
-                    { c2.ConnectedBrush = Brushes.LimeGreen; c2.Status1 = hasPlate ? "有版" : "无版"; c2.Status1Brush = hasPlate ? Brushes.Orange : Brushes.Green; c2.Status2 = pos; c2.IpText = $"{forkIp}:9000"; }
-                    Console.WriteLine($"[ProbeMC] [货叉] 卡片已更新: ST011✓ 有版={hasPlate} 位置={pos}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[ProbeMC] [货叉] ✘ 失败: {ex.GetType().Name} — {ex.Message}");
-                    if (cards.TryGetValue("ST011", out var c)) { c.ConnectedBrush = Brushes.Red; c.Status1 = "无法连接"; c.Status2 = ex.Message.Length > 30 ? ex.Message[..30] : ex.Message; }
-                }
-            }
-        }
-
-        // ── 3. 探测 192.168.2.64:9000 (研磨下料架 ST710) ─────
+        // ── 2. 探测 192.168.2.64:9000 (研磨下料架 ST710) ─────
         {
             try
             {
@@ -2698,7 +2736,7 @@ public sealed class HomeViewModel : ObservableObject
             }
         }
 
-        // ── 4. 探测 192.168.2.65:9000 (研磨机上料架 ST709 + 动平衡) ────
+        // ── 3. 探测 192.168.2.65:9000 (研磨机上料架 ST709 + 动平衡) ────
         {
             try
             {
@@ -2741,57 +2779,9 @@ public sealed class HomeViewModel : ObservableObject
             }
         }
 
-        Console.WriteLine("[ProbeMC] ═══════ MC 设备探测结束（4路: 2.63✓ 货叉✓ 2.64✓ 2.65✓）═══════");
+        Console.WriteLine("[ProbeMC] ═══════ MC 设备探测结束（3路: 2.63✓ 2.64✓ 2.65✓）═══════");
     }
 
-    /// <summary>
-    /// 一次性探测 Syntec 双头镗 (ST401 192.168.2.66)。
-    /// 连→读 R6101 请求数据信号→写 ST401 卡片→断开。
-    /// </summary>
-    private async Task ProbeSyntecDevicesAsync()
-    {
-        Console.WriteLine("[ProbeSyntec] ═══════ Syntec 双头镗探测 ═══════");
-        var cards = StationCards;
 
-        // ST401(XAML显示码)→DB站号ST103 192.168.2.66
-        string? ip = null;
-        if (IpMap.TryGetValue("ST103", out var st103Ip) && !string.IsNullOrWhiteSpace(st103Ip) && st103Ip != "未配置IP")
-            ip = st103Ip;
-
-        if (string.IsNullOrEmpty(ip))
-        {
-            Console.WriteLine("[ProbeSyntec] [双头镗] ⚠ IpMap 中未找到 ST103 IP，跳过");
-            if (cards.TryGetValue("ST401", out var c)) { c.Status1 = "等待IP"; c.Status2 = "ST103未配置IP"; }
-            return;
-        }
-
-        try
-        {
-            Console.WriteLine($"[ProbeSyntec] [双头镗] 尝试连接 {ip}:502...");
-            using var svc = new SyntecBoringService(ip);
-            using var cts = new CancellationTokenSource(5000);
-            await svc.ConnectAsync(cts.Token);
-            Console.WriteLine("[ProbeSyntec] [双头镗] 连接成功 ✓");
-
-            var sig = await svc.ReadAllSignalsAsync(cts.Token);
-            Console.WriteLine($"[ProbeSyntec] [双头镗] ✔ {BuildBoringSignalText(sig.r6101, sig.r6103, sig.r6105, sig.r6107, sig.r6109)}");
-
-            if (cards.TryGetValue("ST401", out var c))
-            {
-                c.ConnectedBrush = Brushes.LimeGreen;
-                c.Status1 = BuildBoringOverviewState(sig.r6101, sig.r6103, sig.r6105, sig.r6107, sig.r6109);
-                c.Status1Brush = GetSignalStateBrush(c.Status1);
-                c.Status2 = $"{BuildBoringSignalText(sig.r6101, sig.r6103, sig.r6105, sig.r6107, sig.r6109)} {ip}:502";
-                c.IpText = $"{ip}:502";
-            }
-            Console.WriteLine("[ProbeSyntec] [双头镗] 卡片已更新: ST401✓");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[ProbeSyntec] [双头镗] ✘ 失败: {ex.GetType().Name} — {ex.Message}");
-            if (cards.TryGetValue("ST401", out var c)) { c.ConnectedBrush = Brushes.Red; c.Status1 = "无法连接"; c.Status2 = "Syntec SDK?"; }
-        }
-        Console.WriteLine("[ProbeSyntec] ═══════ 结束 ═══════");
-    }
 }
 

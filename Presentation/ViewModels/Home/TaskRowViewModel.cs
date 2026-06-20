@@ -6,7 +6,7 @@ namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 /// <summary>
 /// 主页面任务表格单行模型。
 /// 点击「启动」按钮 → 触发 OnStartRequested 回调 → HomeViewModel 将工件分配到对应线路。
-/// 点击「删除」按钮 → 触发 OnDeleteRequested 回调 → HomeViewModel 只允许删除未启动、未入缓存的行。
+/// 点击「清除」按钮 → 触发 OnDeleteRequested 回调 → HomeViewModel 只隐藏页面行; 未派发任务会同时取消全局FIFO等待。
 /// </summary>
 public sealed class TaskRowViewModel : ObservableObject
 {
@@ -78,16 +78,13 @@ public sealed class TaskRowViewModel : ObservableObject
     /// <summary>当前任务行是否处于启动态。全局派发队列用它判断队头是否允许继续派发。</summary>
     public bool IsRunning => _isRunning;
 
-    /// <summary>
-    /// 只有还没启动、还没分配线路的任务才允许从页面删除。
-    /// 已启动任务可能已经进入前端缓存/中转架缓存，不能只删 UI 行，避免现场状态被隐藏。
-    /// </summary>
-    public bool CanDelete => !_isRunning && AssignedLine == 0;
+    /// <summary>清除按钮始终可用。已进入现场流程的任务只隐藏页面行, 不清任何现场缓存。</summary>
+    public bool CanDelete => true;
 
     /// <summary>用户点击「启动」时触发，参数为本行数据，HomeViewModel 订阅此回调</summary>
     public Action<TaskRowViewModel>? OnStartRequested { get; set; }
 
-    /// <summary>用户点击「删除」时触发，HomeViewModel 做最终安全判断并移除行</summary>
+    /// <summary>用户点击「清除」时触发，HomeViewModel 做最终确认并移除页面行</summary>
     public Action<TaskRowViewModel>? OnDeleteRequested { get; set; }
 
     public ICommand ToggleRunCommand { get; }
@@ -99,36 +96,42 @@ public sealed class TaskRowViewModel : ObservableObject
         DeleteCommand = new RelayCommand(Delete, () => CanDelete);
     }
 
+    public void RequestStart()
+    {
+        if (_isRunning) return;
+
+        // 启动 → 通知 HomeViewModel 分配工件到线路
+        _isRunning = true;
+        State = "运行中";
+        OnPropertyChanged(nameof(ActionText));
+        OnPropertyChanged(nameof(IsRunning));
+        OnPropertyChanged(nameof(CanDelete));
+        RaiseDeleteCanExecuteChanged();
+        Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 启动 → 通知分配线路");
+        OnStartRequested?.Invoke(this);
+    }
+
     private void ToggleRun()
     {
         if (!_isRunning)
         {
-            // 启动 → 通知 HomeViewModel 分配工件到线路
-            _isRunning = true;
-            State = "运行中";
-            OnPropertyChanged(nameof(ActionText));
-            OnPropertyChanged(nameof(IsRunning));
-            OnPropertyChanged(nameof(CanDelete));
-            RaiseDeleteCanExecuteChanged();
-            Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 启动 → 通知分配线路");
-            OnStartRequested?.Invoke(this);
+            RequestStart();
+            return;
         }
-        else
-        {
-            // 暂停（暂不支持恢复，留作扩展）
-            _isRunning = false;
-            State = "已暂停";
-            OnPropertyChanged(nameof(ActionText));
-            OnPropertyChanged(nameof(IsRunning));
-            OnPropertyChanged(nameof(CanDelete));
-            RaiseDeleteCanExecuteChanged();
-            Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 已暂停");
-        }
+
+        // 暂停（暂不支持恢复，留作扩展）
+        _isRunning = false;
+        State = "已暂停";
+        OnPropertyChanged(nameof(ActionText));
+        OnPropertyChanged(nameof(IsRunning));
+        OnPropertyChanged(nameof(CanDelete));
+        RaiseDeleteCanExecuteChanged();
+        Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 已暂停");
     }
 
     private void Delete()
     {
-        Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 请求删除");
+        Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 请求清除显示");
         OnDeleteRequested?.Invoke(this);
     }
 

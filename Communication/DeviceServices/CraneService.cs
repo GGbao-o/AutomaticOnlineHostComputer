@@ -33,6 +33,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
     /// </summary>
     public class CraneService
     {
+        private const int MaxIoAttempts = 3;
+
         // ── 字段 ─────────────────────────────────────────────────────
         private readonly ModbusTcpClient _client;
         private readonly string _name; // 天车名称，调试输出用
@@ -105,7 +107,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             try
             {
                 // 使用公共 ReadAsync：读 D5000 起 30 个寄存器，返回 int[]
-                var result = await _client.ReadAsync(Addr.D_RequestData, 30, ct);
+                var result = await SafeIoAsync(token => _client.ReadAsync(Addr.D_RequestData, 30, token), "读取状态 D5000~D5029", ct);
                 var r = result.IntValues; // int[] 长度 30
 
                 var status = new CraneStatus
@@ -397,30 +399,15 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         {
             try
             {
-                if (!_client.IsConnected)
-                {
-                    await ConnectAsync(ct);
-                }
-
-                return await _client.ReadCoilAsync(address, ct);
+                return await SafeIoAsync(token => _client.ReadCoilAsync(address, token), $"X区读取 D{address}", ct);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[CraneService] [{_name}] X区读失败 D{address}：{ex.Message}，尝试重连后重读一次");
-                try
-                {
-                    await DisconnectAsync();
-                    await ConnectAsync(ct);
-                    return await _client.ReadCoilAsync(address, ct);
-                }
-                catch (Exception retryEx)
-                {
-                    Console.WriteLine($"[CraneService] [{_name}] X区重读失败 D{address}：{retryEx.Message}");
-                    // X区信号通常用于X11有板、X2下压、X6/X7磁铁反馈等安全判断。
-                    // 读取失败不能等价为false；false会被上层理解成“无板/未下压/未反馈”，
-                    // 生产上会把“通信未知”误判成“安全”，所以必须抛出让动作流程进入异常/暂停分支。
-                    throw new InvalidOperationException($"X区读取失败 D{address}, 状态未知, 禁止按0处理", retryEx);
-                }
+                Console.WriteLine($"[CraneService] [{_name}] X区读取最终失败 D{address}：{ex.Message}");
+                // X区信号通常用于X11有板、X2下压、X6/X7磁铁反馈等安全判断。
+                // 读取失败不能等价为false；false会被上层理解成“无板/未下压/未反馈”，
+                // 生产上会把“通信未知”误判成“安全”，所以必须抛出让动作流程进入异常/暂停分支。
+                throw new InvalidOperationException($"X区读取失败 D{address}, 状态未知, 禁止按0处理", ex);
             }
         }
 
@@ -997,7 +984,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// </summary>
         private async Task WriteDintAsync(int startAddr, int value, string label, CancellationToken ct)
         {
-            await _client.WriteInt32Async(startAddr, value, ct);
+            await SafeIoAsync(token => _client.WriteInt32Async(startAddr, value, token), $"{label} D{startAddr}~D{startAddr + 1}", ct);
             Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{startAddr}~D{startAddr + 1}={value}");
         }
 
@@ -1009,7 +996,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             try
             {
                 // 使用公共 WriteAsync（FC06 单寄存器写入）
-                await _client.WriteAsync(address, value, ct);
+                await SafeIoAsync(token => _client.WriteAsync(address, value, token), $"{label} D{address}", ct);
                 Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{address}={value}");
             }
             catch (Exception ex)
@@ -1018,6 +1005,43 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 throw;
             }
         }
+
+        private async Task<T> SafeIoAsync<T>(Func<CancellationToken, Task<T>> action, string desc, CancellationToken ct)
+        {
+            Exception? last = null;
+            for (int attempt = 1; attempt <= MaxIoAttempts; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    if (!_client.IsConnected)
+                        await ConnectAsync(ct);
+
+                    return await action(ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    if (attempt >= MaxIoAttempts) break;
+                    Console.WriteLine($"[CraneService] [{_name}] {desc} 通信异常 attempt={attempt}/{MaxIoAttempts}: {ex.Message} → 重连后重试");
+                    try { await DisconnectAsync(); } catch { }
+                    await Task.Delay(200, ct);
+                }
+            }
+
+            throw new InvalidOperationException($"{desc} {MaxIoAttempts}次重连重试仍失败: {last?.Message}", last);
+        }
+
+        private Task SafeIoAsync(Func<CancellationToken, Task> action, string desc, CancellationToken ct)
+            => SafeIoAsync(async token =>
+            {
+                await action(token);
+                return true;
+            }, desc, ct);
     }
 
     // ═══════════════════════════════════════════════════════════════

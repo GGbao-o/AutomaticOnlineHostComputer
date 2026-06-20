@@ -69,12 +69,12 @@ public partial class HomeView : UserControl
     }
 
     /// <summary>
-    /// 斜床应急作废 — 清上位机斜床缓存/状态并释放软件锁。
-    /// <para>⚠ 不控制天车动作, 不退磁, 不写CNC/PLC; 执行前必须人工确认现场安全。</para>
+    /// 应急处理中心 — 斜床/动平衡/研磨特殊故障后的软件状态和锁清理。
+    /// <para>⚠ 不控制天车动作, 不退磁; 执行前必须人工确认现场安全。</para>
     /// </summary>
-    private void SkewBedEmergency_Click(object sender, RoutedEventArgs e)
+    private void EmergencyCenter_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new SkewBedEmergencyDialog(_viewModel) { Owner = Window.GetWindow(this) };
+        var dialog = new EmergencyCenterDialog(_viewModel) { Owner = Window.GetWindow(this) };
         dialog.ShowDialog();
     }
 
