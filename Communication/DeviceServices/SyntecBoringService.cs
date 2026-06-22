@@ -17,7 +17,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
         public SyntecBoringService(string ip, int port = 502)
         {
-            _client = new SyntecCncClient(ip, port);
+            _client = new SyntecCncClient(ip, timeoutMs: 5000);
         }
 
         public Task ConnectAsync(CancellationToken ct = default) => _client.ConnectAsync(ct);
@@ -108,7 +108,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         {
             if (_disposed) return;
             _disposed = true;
-            Task.Run(async () => await _client.DisconnectAsync()).GetAwaiter().GetResult();
+            _client.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 }

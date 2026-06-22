@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -30,64 +31,105 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
     /// </summary>
     public sealed class SyntecCncClient : IDeviceClient
     {
-        // ── 配置 ────────────────────────────────────────────────────────
         private readonly string _ip;
-        private readonly int    _timeoutMs;
+        private readonly int _timeoutMs;
+        private volatile bool _isConnected;
+        private volatile bool _workerUnavailable;
+        private int _workerExecuting;
+        private int _disposed;
 
-        // ── 连接状态 ──────────────────────────────────────────────────
-        private bool _isConnected;
+        // Syntec OpenCNC调用是同步SDK。每台CNC固定使用一个后台线程串行调用，
+        // 不能再把阻塞调用扔进.NET线程池，否则半开连接会拖慢UI和其它引擎。
+        private readonly BlockingCollection<IWorkItem> _workQueue = new();
+        private readonly Thread _workerThread;
 
-        // Syntec SDK 中实际通过静态方法/全局句柄管理连接，此处用 IP 标识
-        private readonly SemaphoreSlim _lock = new(1, 1);
+        private interface IWorkItem
+        {
+            void Execute();
+            void Abandon(CancellationToken cancellationToken);
+        }
 
-        // ── 构造 ─────────────────────────────────────────────────────
+        private sealed class WorkItem<T> : IWorkItem
+        {
+            private readonly Func<T> _action;
+            private readonly TaskCompletionSource<T> _completion =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+            private int _state; // 0=排队, 1=执行中, 2=结束, 3=排队时已取消
 
-        /// <param name="ip">CNC 控制器 IP 地址</param>
-        /// <param name="timeoutMs">超时（毫秒），默认 5000</param>
+            public WorkItem(Func<T> action) => _action = action;
+            public Task<T> Completion => _completion.Task;
+
+            public void Execute()
+            {
+                if (Interlocked.CompareExchange(ref _state, 1, 0) != 0) return;
+                try
+                {
+                    _completion.TrySetResult(_action());
+                }
+                catch (Exception ex)
+                {
+                    _completion.TrySetException(ex);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _state, 2);
+                }
+            }
+
+            public void Abandon(CancellationToken cancellationToken)
+            {
+                // 只阻止尚未开始的旧命令。同步SDK一旦进入就无法安全强停；
+                // 调用超时后客户端会进入隔离状态，禁止后续命令与旧调用并发。
+                if (Interlocked.CompareExchange(ref _state, 3, 0) == 0)
+                    _completion.TrySetCanceled(cancellationToken);
+            }
+        }
+
         public SyntecCncClient(string ip, int timeoutMs = 5000)
         {
-            _ip        = ip;
-            _timeoutMs = timeoutMs;
-        }
-
-        // ── IDeviceClient ────────────────────────────────────────────
-
-        /// <inheritdoc/>
-        public bool IsConnected => _isConnected;
-
-        /// <inheritdoc/>
-        public Task ConnectAsync(CancellationToken ct = default)
-        {
-            return Task.Run(() =>
+            _ip = ip;
+            _timeoutMs = Math.Max(timeoutMs, 1000);
+            _workerThread = new Thread(WorkerLoop)
             {
-                // SyntecRemoteCNC 构造即连接（SDK 内部建立 TCP）
-                // 通过调用一次读取验证连通性
-                short ret = SyntecApi.READ_macro_single(_ip, 740, out _);
-                // ret == 0 成功；ret 非0 表示连接或读取失败
-                if (ret != 0)
-                    throw new InvalidOperationException($"Syntec CNC 连接失败，错误码：{ret}（IP={_ip}）");
-                _isConnected = true;
-            }, ct);
+                IsBackground = true,
+                Name = $"SyntecWorker-{ip}"
+            };
+            _workerThread.Start();
         }
 
-        /// <inheritdoc/>
+        public bool IsConnected => _isConnected && !_workerUnavailable;
+
+        public async Task ConnectAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                await InvokeWorkerAsync(() =>
+                {
+                    short ret = SyntecApi.READ_macro_single(_ip, 740, out _);
+                    if (ret != 0)
+                        throw new InvalidOperationException($"Syntec CNC 连接失败，错误码：{ret}（IP={_ip}）");
+                    return true;
+                }, "连接验证", ct).ConfigureAwait(false);
+                _isConnected = true;
+            }
+            catch
+            {
+                _isConnected = false;
+                throw;
+            }
+        }
+
         public Task DisconnectAsync()
         {
-            // Syntec SDK 无需显式断开（无持久连接对象）
+            // SDK按IP维护内部实例，没有公开的可中断断开接口。这里只撤销业务可用状态。
             _isConnected = false;
             return Task.CompletedTask;
         }
 
-        /// <inheritdoc/>
-        /// <remarks>
-        /// 读取宏变量，返回浮点型 <see cref="ReadResult"/>。
-        /// count > 1 时读取 address ~ address+count-1 的连续宏变量。
-        /// </remarks>
-        public Task<ReadResult> ReadAsync(int address, int count = 1, CancellationToken ct = default)
+        public async Task<ReadResult> ReadAsync(int address, int count = 1, CancellationToken ct = default)
         {
-            return Task.Run(() =>
+            return await ExecuteConnectedAsync(() =>
             {
-                EnsureConnected();
                 var values = new double[count];
                 for (int i = 0; i < count; i++)
                 {
@@ -97,115 +139,179 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                     values[i] = val;
                 }
                 return new ReadResult(values);
-            }, ct);
+            }, $"读取宏变量@{address}", ct).ConfigureAwait(false);
         }
 
-        /// <inheritdoc/>
         public async Task<double> ReadDoubleAsync(int address, CancellationToken ct = default)
-        {
-            var result = await ReadAsync(address, 1, ct);
-            return result.FirstDouble;
-        }
+            => (await ReadAsync(address, 1, ct).ConfigureAwait(false)).FirstDouble;
 
-        /// <inheritdoc/>
         public async Task<int> ReadIntAsync(int address, CancellationToken ct = default)
-        {
-            var result = await ReadAsync(address, 1, ct);
-            return result.FirstInt;
-        }
+            => (await ReadAsync(address, 1, ct).ConfigureAwait(false)).FirstInt;
 
-        /// <inheritdoc/>
         public Task WriteAsync(int address, int value, CancellationToken ct = default)
             => WriteAsync(address, (double)value, ct);
 
-        /// <inheritdoc/>
-        public Task WriteAsync(int address, double value, CancellationToken ct = default)
+        public async Task WriteAsync(int address, double value, CancellationToken ct = default)
         {
-            return Task.Run(() =>
+            await ExecuteConnectedAsync(() =>
             {
-                EnsureConnected();
                 short ret = SyntecApi.WRITE_macro_single(_ip, address, value);
                 if (ret != 0)
                     throw new IOException($"Syntec 写宏变量 @{address} 失败，错误码：{ret}");
-            }, ct);
+                return true;
+            }, $"写宏变量@{address}", ct).ConfigureAwait(false);
         }
 
-        /// <inheritdoc/>
         public async Task WriteBatchAsync(int[] addresses, int[] values, CancellationToken ct = default)
         {
             if (addresses.Length != values.Length)
                 throw new ArgumentException("addresses 与 values 数组长度不一致");
-            // 转成 double 数组，复用批量写接口
-            var dbl = Array.ConvertAll(values, v => (double)v);
-            await WriteBatchAsync(addresses, dbl, ct);
+            await WriteBatchAsync(addresses, Array.ConvertAll(values, v => (double)v), ct).ConfigureAwait(false);
         }
 
-        /// <inheritdoc/>
-        public Task WriteBatchAsync(int[] addresses, double[] values, CancellationToken ct = default)
+        public async Task WriteBatchAsync(int[] addresses, double[] values, CancellationToken ct = default)
         {
-            return Task.Run(() =>
+            if (addresses.Length != values.Length)
+                throw new ArgumentException("addresses 与 values 数组长度不一致");
+
+            await ExecuteConnectedAsync(() =>
             {
-                EnsureConnected();
                 short ret = SyntecApi.WRITE_macro_all(_ip, addresses, values);
                 if (ret != 0)
                     throw new IOException($"Syntec 批量写宏变量失败，错误码：{ret}");
-            }, ct);
+                return true;
+            }, "批量写宏变量", ct).ConfigureAwait(false);
         }
 
-        /// <inheritdoc/>
-        public async ValueTask DisposeAsync()
+        public async Task<int[]> ReadRAsync(int startAddr, int count, CancellationToken ct = default)
         {
-            await DisconnectAsync();
-            _lock.Dispose();
-        }
-
-        // ── Syntec 扩展：R 区读写 ─────────────────────────────────────
-
-        /// <summary>
-        /// 读取 PLC R 区寄存器（整数型，dataType=2）。
-        /// 例：ReadRAsync(6101, 10) 读取 R6101~R6110。
-        /// </summary>
-        /// <param name="startAddr">起始 R 区地址</param>
-        /// <param name="count">读取点数</param>
-        /// <param name="ct">取消令牌</param>
-        public Task<int[]> ReadRAsync(int startAddr, int count, CancellationToken ct = default)
-        {
-            return Task.Run(() =>
+            return await ExecuteConnectedAsync(() =>
             {
-                EnsureConnected();
                 short ret = SyntecApi.READ_plc_r(_ip, startAddr, startAddr + count - 1, out int[] vals);
                 if (ret != 0)
                     throw new IOException($"Syntec 读 R 区 R{startAddr} 失败，错误码：{ret}");
                 return vals;
-            }, ct);
+            }, $"读取R{startAddr}~R{startAddr + count - 1}", ct).ConfigureAwait(false);
         }
 
-        /// <summary>
-        /// 写入 PLC R 区单个寄存器（整数型，dataType=2）。
-        /// 例：WriteRAsync(6102, 1) 写 R6102=1（下发完成信号）。
-        /// </summary>
-        /// <param name="addr">R 区地址</param>
-        /// <param name="value">要写入的整数值</param>
-        /// <param name="ct">取消令牌</param>
-        public Task WriteRAsync(int addr, int value, CancellationToken ct = default)
+        public async Task WriteRAsync(int addr, int value, CancellationToken ct = default)
         {
-            return Task.Run(() =>
+            await ExecuteConnectedAsync(() =>
             {
-                EnsureConnected();
                 short ret = SyntecApi.WRITE_plc_r(_ip, addr, addr, new[] { value });
                 if (ret != 0)
                     throw new IOException($"Syntec 写 R 区 R{addr} 失败，错误码：{ret}");
-            }, ct);
+                return true;
+            }, $"写R{addr}", ct).ConfigureAwait(false);
         }
 
-        // ── 私有 ─────────────────────────────────────────────────────
+        private async Task<T> ExecuteConnectedAsync<T>(
+            Func<T> action, string operation, CancellationToken ct)
+        {
+            EnsureConnected();
+            try
+            {
+                return await InvokeWorkerAsync(action, operation, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                _isConnected = false;
+                throw;
+            }
+        }
+
+        private async Task<T> InvokeWorkerAsync<T>(
+            Func<T> action, string operation, CancellationToken ct)
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            if (_workerUnavailable)
+                throw new IOException($"Syntec {_ip} 通信Worker已隔离，拒绝{operation}；请重启上位机恢复该CNC通信");
+
+            var item = new WorkItem<T>(action);
+            try
+            {
+                _workQueue.Add(item, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new ObjectDisposedException(nameof(SyntecCncClient), ex.Message);
+            }
+
+            try
+            {
+                return await item.Completion
+                    .WaitAsync(TimeSpan.FromMilliseconds(_timeoutMs), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                item.Abandon(ct);
+                throw;
+            }
+            catch (TimeoutException ex)
+            {
+                item.Abandon(CancellationToken.None);
+                _isConnected = false;
+                _workerUnavailable = true;
+                // 若任务在真正开始前就已超时，Worker没有被同步SDK占住，可立即允许下一轮重连。
+                if (Volatile.Read(ref _workerExecuting) == 0) _workerUnavailable = false;
+                Console.WriteLine($"[SyntecWorker] {_ip} {operation} 超时({_timeoutMs}ms)，已隔离该Worker，防止阻塞扩散");
+                throw new TimeoutException(
+                    $"Syntec {_ip} {operation} 超时({_timeoutMs}ms)，通信Worker已隔离；本线路停止使用该CNC，另一线路不受影响", ex);
+            }
+        }
+
+        private void WorkerLoop()
+        {
+            try
+            {
+                foreach (var item in _workQueue.GetConsumingEnumerable())
+                {
+                    Interlocked.Exchange(ref _workerExecuting, 1);
+                    try
+                    {
+                        item.Execute();
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref _workerExecuting, 0);
+                        if (_workerUnavailable)
+                        {
+                            // 超时只能隔离正在执行的同步调用。若SDK后来返回，允许现有后台重连重新验证；
+                            // _isConnected仍为false，业务不会直接沿用这次迟到结果。
+                            _workerUnavailable = false;
+                            Console.WriteLine($"[SyntecWorker] {_ip} 阻塞调用已返回，解除隔离并等待重新连接验证");
+                        }
+                    }
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // 应用退出期间正常收尾。
+            }
+        }
 
         private void EnsureConnected()
         {
-            if (!_isConnected)
+            if (!IsConnected)
                 throw new InvalidOperationException("Syntec CNC 未连接，请先调用 ConnectAsync()。");
         }
 
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return ValueTask.CompletedTask;
+
+            _isConnected = false;
+            _workQueue.CompleteAdding();
+            if (_workerThread.Join(200))
+                _workQueue.Dispose();
+            return ValueTask.CompletedTask;
+        }
         // ── Syntec SDK P/Invoke 绑定 ──────────────────────────────────
         // Syntec.OpenCNC.dll 内部使用托管 API，下方通过反射/动态调用封装。
         // 若 Syntec SDK 已提供托管 DLL（.NET），可直接添加项目引用后调用；
@@ -221,10 +327,10 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             /// <summary>获取或创建指定 IP 的 CNC 实例 (延迟加载+缓存)</summary>
             private static object GetInstance(string ip)
             {
-                if (_instances.TryGetValue(ip, out var inst)) return inst;
+                // 两台双头镗的专用Worker可能同时首次连接；普通Dictionary的读写必须全部受同一把锁保护。
                 lock (_initLock)
                 {
-                    if (_instances.TryGetValue(ip, out inst)) return inst;
+                    if (_instances.TryGetValue(ip, out var inst)) return inst;
                     if (_cncType == null)
                     {
                         var asm = System.Reflection.Assembly.LoadFrom("Syntec.OpenCNC.dll");
@@ -236,7 +342,6 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                     return inst;
                 }
             }
-
             private static object Invoke(string ip, string methodName, object[] args)
             {
                 try
