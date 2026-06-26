@@ -238,7 +238,7 @@ public sealed class HomeViewModel : ObservableObject
     public Dictionary<string, string> IpMap { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// 全厂状态总览卡片字典。key = 站号（如 ST401），value = 该站位的卡片 ViewModel。
+    /// 全厂状态总览卡片字典。key = 站号（如 ST103），value = 该站位的卡片 ViewModel。
     /// LoadAsync 时从数据库 machine 表填充全新字典替换，触发 WPF 刷新所有站卡绑定。
     /// </summary>
     private Dictionary<string, StationCardViewModel> _stationCards = new(StringComparer.OrdinalIgnoreCase);
@@ -400,7 +400,7 @@ public sealed class HomeViewModel : ObservableObject
     private async Task SyncLine1StatusToCardsAsync(CancellationToken ct)
     {
         // XAML 显示码 → 数据来源:
-        //   引擎托管(仅运行时刷): ST001→ST007, ST002→ST002, ST011→ST711, ST401→ST401, ST501→ST501, ST901→ST901, ST105/ST101/ST106→M811~M813
+        //   引擎托管(仅运行时刷): ST001→ST007, ST002→ST002, ST011→ST711, ST103→1号双头镗, ST501→ST501, ST901→ST901, ST105/ST101/ST106→M811~M813
         //   第三部分镜像(一直刷): ST005→机械手2VM, ST006→机械手3VM
         //   研磨机(独立线程刷): ST701~ST704→GrinderPollLoop
         while (!ct.IsCancellationRequested)
@@ -426,7 +426,7 @@ public sealed class HomeViewModel : ObservableObject
                     EnsureCard("ST002", "机械手1");
                     EnsureCard("ST011", "货叉1");
                     EnsureCard("ST901", "1号线天车前");
-                    EnsureCard("ST401", "一号双头镗");
+                    EnsureCard("ST103", "一号双头镗");
                     EnsureCard("ST501", "一号打号机");
                     EnsureCard("ST105", "1号线中转架1");
                     EnsureCard("ST101", "1号线中转架2");
@@ -455,15 +455,15 @@ public sealed class HomeViewModel : ObservableObject
                     if (cards.TryGetValue("ST011", out var c3))
                     { c3.ConnectedBrush = ds.ForkConnected ? Brushes.LimeGreen : Brushes.Gray;
                       c3.Status1 = ds.ForkConnected ? (ds.ForkHasPlate ? "有版" : "无版") : "断开";
-                      c3.Status1Brush = ds.ForkHasPlate ? Brushes.Orange : Brushes.Green;
+                      c3.Status1Brush = ds.ForkConnected ? (ds.ForkHasPlate ? Brushes.Orange : Brushes.Green) : Brushes.Gray;
                       c3.Status2 = ds.ForkConnected ? $"{ds.ForkPosition} {ds.ForkCommand}" : "—"; }
 
-                    // ── 双头镗 ST401 (Modbus R区: R*2+1) ──
-                    if (cards.TryGetValue("ST401", out var c4))
+                    // ── 双头镗 ST103 (Modbus R区: R*2+1) ──
+                    if (cards.TryGetValue("ST103", out var c4))
                     {
                         c4.ConnectedBrush = ds.BoringConnected ? Brushes.LimeGreen : Brushes.Gray;
                         c4.Status1 = ds.BoringConnected
-                            ? BuildBoringOverviewState(ds.Boring_R6101, ds.Boring_R6103, ds.Boring_R6107)
+                            ? BuildBoringOverviewState(ds.Boring_R6101, ds.Boring_R6102, ds.Boring_R6103, ds.Boring_R6104, ds.Boring_R6107, ds.Boring_R6108)
                             : "断开";
                         c4.Status1Brush = GetSignalStateBrush(c4.Status1);
                         c4.Status2 = ds.BoringConnected
@@ -496,7 +496,7 @@ public sealed class HomeViewModel : ObservableObject
                 {
                     if (_line2Engine?.IsRunning != true)
                         MarkCardsNotStarted(cards, "ST001", "ST002");
-                    MarkCardsNotStarted(cards, "ST011", "ST401", "ST501", "ST901", "ST105", "ST101", "ST106");
+                    MarkCardsNotStarted(cards, "ST011", "ST103", "ST501", "ST901", "ST105", "ST101", "ST106");
                 }
 
                 // ═══════════════════════════════════════════════════════
@@ -575,14 +575,14 @@ public sealed class HomeViewModel : ObservableObject
                     if (cards.TryGetValue("ST712", out var c3))
                     { c3.ConnectedBrush = ds.ForkConnected ? Brushes.LimeGreen : Brushes.Gray;
                       c3.Status1 = ds.ForkConnected ? (ds.ForkHasPlate ? "有版" : "无版") : "断开";
-                      c3.Status1Brush = ds.ForkHasPlate ? Brushes.Orange : Brushes.Green;
+                      c3.Status1Brush = ds.ForkConnected ? (ds.ForkHasPlate ? Brushes.Orange : Brushes.Green) : Brushes.Gray;
                       c3.Status2 = ds.ForkConnected ? $"{ds.ForkPosition} {ds.ForkCommand}" : "—"; }
 
                     // 双头镗 ST402
                     if (cards.TryGetValue("ST402", out var c4))
                     { c4.ConnectedBrush = ds.BoringConnected ? Brushes.LimeGreen : Brushes.Gray;
                       c4.Status1 = ds.BoringConnected
-                          ? BuildBoringOverviewState(ds.Boring_R6101, ds.Boring_R6103, ds.Boring_R6107)
+                          ? BuildBoringOverviewState(ds.Boring_R6101, ds.Boring_R6102, ds.Boring_R6103, ds.Boring_R6104, ds.Boring_R6107, ds.Boring_R6108)
                           : "断开";
                       c4.Status1Brush = GetSignalStateBrush(c4.Status1);
                       c4.Status2 = ds.BoringConnected
@@ -693,10 +693,13 @@ public sealed class HomeViewModel : ObservableObject
         return machineStatus is > 0 ? $"忙碌中({machineStatus})" : "空闲";
     }
 
-    private static string BuildBoringOverviewState(bool reqData, bool reqLoad, bool reqUnload)
+    private static string BuildBoringOverviewState(bool reqData, bool dataDone, bool reqLoad, bool loadDone, bool reqUnload, bool unloadDone)
     {
         if (reqUnload) return "请求下料";
+        if (unloadDone) return "下料完成";
         if (reqLoad) return "请求上料";
+        if (loadDone) return "加工中";
+        if (dataDone) return "数据已下发";
         if (reqData) return "请求数据";
         return "加工中/等待";
     }
@@ -1498,7 +1501,7 @@ public sealed class HomeViewModel : ObservableObject
         EnsureNewCard("ST001", "总上料架");        // → ST007 MC:192.168.2.63
         EnsureNewCard("ST002", "机械手1");          // → ST002 Modbus:192.168.2.85 (引擎托管)
         EnsureNewCard("ST011", "货叉1");            // → ST711 MC:192.168.2.88
-        EnsureNewCard("ST401", "一号双头镗");       // → ST401 Syntec:192.168.2.66 (引擎托管)
+        EnsureNewCard("ST103", "一号双头镗");       // → ST103 双头镗:192.168.2.66 (引擎托管)
         EnsureNewCard("ST501", "一号打号机");       // → ST501 文件:D:\1 (引擎托管)
         EnsureNewCard("ST901", "1号线天车前");      // → ST901 Modbus:192.168.2.81 (引擎托管)
         EnsureNewCard("ST902", "1号线天车后");      // → 2号天车 Modbus:192.168.2.82 (引擎托管)
@@ -1569,7 +1572,10 @@ public sealed class HomeViewModel : ObservableObject
         // 后端FANUC斜床不做页面直连探测, 只显示后端引擎Worker缓存的状态。
         var engineManagedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "ST007", "ST711", "ST103", "ST107", "ST901", "ST002", "ST401", "ST501", "ST605",
+            "ST007", "ST711", "ST103", "ST107", "ST901", "ST002", "ST501", "ST605", "ST402",
+            // 2号线后端下料架使用M818/M819/M823/M824、M820/M821/M825/M826组合握手,
+            // 不能再由单个M818/M821直连探测解释成"有板/无板"。
+            "ST020", "ST021",
             // 1号线Modbus斜床也由后端引擎持有唯一连接，页面只读DeviceStatus。
             "ST108", "ST109", "ST110", "ST111",
             // 后端FANUC斜床由LineRear引擎的FanucSkewBedService独立Worker读取缓存。
