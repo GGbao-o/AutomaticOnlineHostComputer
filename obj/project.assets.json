@@ -701,11 +701,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\BSH\\hateshujukejicode\\自动线上位机\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\AutomaticOnlineHostComputer.csproj",
+      "projectUniqueName": "D:\\BSH\\c#\\Automatic Online Host Computer\\AutomaticOnlineHostComputer.csproj",
       "projectName": "AutomaticOnlineHostComputer",
-      "projectPath": "D:\\BSH\\hateshujukejicode\\自动线上位机\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\AutomaticOnlineHostComputer.csproj",
+      "projectPath": "D:\\BSH\\c#\\Automatic Online Host Computer\\AutomaticOnlineHostComputer.csproj",
       "packagesPath": "C:\\Users\\30935\\.nuget\\packages\\",
-      "outputPath": "D:\\BSH\\hateshujukejicode\\自动线上位机\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\obj\\",
+      "outputPath": "D:\\BSH\\c#\\Automatic Online Host Computer\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\30935\\AppData\\Roaming\\NuGet\\NuGet.Config",

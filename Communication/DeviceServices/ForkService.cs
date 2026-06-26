@@ -9,8 +9,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
 /// <summary>
 /// 货叉通信服务（三菱 MC 协议，M 寄存器，端口 9000）。
 /// <para>
-/// 货叉由独立三菱 FX3G PLC 控制，4 个工位：待机位 / 1号位 / 2号位 / 3号位。
-/// M900~M904 为输入信号（货叉→中控），M911~M914 为输出信号（中控→货叉）。
+/// 新货叉协议: M900/M901/M902 为输入反馈，M911~M914 为中控动作命令。
+/// 所有动作命令都按“清其它动作位→置目标动作位”写入，避免旧命令位残留叠加。
 /// </para>
 /// </summary>
 public sealed class ForkService : IDisposable
@@ -42,7 +42,7 @@ public sealed class ForkService : IDisposable
     //  批量读取状态
     // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>一次性读取全部货叉状态（M900~M915），输出到控制台。</summary>
+    /// <summary>一次性读取全部货叉状态（M900~M914），输出到控制台。</summary>
     public async Task<ForkStatus> ReadAllStatusAsync(CancellationToken ct = default)
     {
         var result = await _client.ReadAsync(Addr.ReadStartAddr, Addr.ReadWordCount, ct);
@@ -50,24 +50,23 @@ public sealed class ForkService : IDisposable
 
         var status = new ForkStatus
         {
-            // M900~M904: 输入信号（货叉→中控）
+            // M900~M902: 输入信号（货叉→中控）
             HasPlate      = (raw & (1 << 0)) != 0,  // M900 bit0
             AtStandbyPos  = (raw & (1 << 1)) != 0,  // M901 bit1
-            AtPos1        = (raw & (1 << 2)) != 0,  // M902 bit2
-            AtPos2        = (raw & (1 << 3)) != 0,  // M903 bit3
-            AtPos3        = (raw & (1 << 4)) != 0,  // M904 bit4
+            AtPos3        = (raw & (1 << 2)) != 0,  // M902 bit2
 
             // M911~M914: 输出信号（中控→货叉）
-            GoStandby     = (raw & (1 << 11)) != 0, // M911 bit11
-            GoPos1        = (raw & (1 << 12)) != 0, // M912 bit12
-            GoPos2        = (raw & (1 << 13)) != 0, // M913 bit13
-            GoPos3        = (raw & (1 << 14)) != 0, // M914 bit14
+            GoStandby        = (raw & (1 << 11)) != 0, // M911 bit11
+            FeedToBoring     = (raw & (1 << 12)) != 0, // M912 bit12
+            PickFromBoring   = (raw & (1 << 13)) != 0, // M913 bit13
+            StandbyToPos3    = (raw & (1 << 14)) != 0, // M914 bit14
 
             RawValue      = raw,
         };
 
-        Console.WriteLine($"[ForkSvc] [{_name}] 状态 M900~M915=0x{raw:X4} " +
-            $"有版={status.HasPlate} 待机位={status.AtStandbyPos} 1号位={status.AtPos1} 2号位={status.AtPos2} 3号位={status.AtPos3}");
+        Console.WriteLine($"[ForkSvc] [{_name}] 状态 M900~M914=0x{raw:X4} " +
+            $"有版={status.HasPlate} 待机={status.AtStandbyPos} Pos3={status.AtPos3} " +
+            $"命令[M911={status.GoStandby},M912={status.FeedToBoring},M913={status.PickFromBoring},M914={status.StandbyToPos3}]");
         return status;
     }
 
@@ -86,31 +85,35 @@ public sealed class ForkService : IDisposable
         Console.WriteLine($"[ForkSvc] [{_name}] 写 M{mAddr}={(value ? 1 : 0)} (word 0x{current:X4}→0x{next:X4})");
     }
 
-    /// <summary>货叉回待机位（先清M913/M914, 再写M911=1）</summary>
-    public async Task GoStandbyAsync(CancellationToken ct = default)
+    /// <summary>写一个货叉动作命令。M911~M914 同一时刻只保留一个动作位。</summary>
+    private async Task WriteMotionCommandAsync(int commandAddr, string actionName, CancellationToken ct)
     {
-        await WriteMBitAsync(Addr.M_GoPos2, false, ct);  // 清2号气缸
-        await WriteMBitAsync(Addr.M_GoPos3, false, ct);  // 清3号气缸
-        await WriteMBitAsync(Addr.M_GoStandby, true, ct);
+        var result = await _client.ReadAsync(Addr.ReadStartAddr, Addr.ReadWordCount, ct);
+        int current = result.IntValues.Length > 0 ? result.IntValues[0] : 0;
+        int commandMask = 0;
+        for (int m = Addr.M_GoStandby; m <= Addr.M_StandbyToPos3; m++)
+            commandMask |= 1 << (m - Addr.ReadStartAddr);
+
+        int next = (current & ~commandMask) | (1 << (commandAddr - Addr.ReadStartAddr));
+        await _client.WriteAsync(Addr.ReadStartAddr, next, ct);
+        Console.WriteLine($"[ForkSvc] [{_name}] {actionName}: M{commandAddr}=1 (清M911~M914, word 0x{current:X4}→0x{next:X4})");
     }
 
-    /// <summary>货叉去1号位（M912=1）</summary>
-    public Task GoPos1Async(CancellationToken ct = default) => WriteMBitAsync(Addr.M_GoPos1, true, ct);
+    /// <summary>货叉回待机位/原点（M911=1）。</summary>
+    public Task GoStandbyAsync(CancellationToken ct = default) =>
+        WriteMotionCommandAsync(Addr.M_GoStandby, "回待机位", ct);
 
-    /// <summary>货叉去2号位（先清M911/M914, 再写M913=1）</summary>
-    public async Task GoPos2Async(CancellationToken ct = default)
-    {
-        await WriteMBitAsync(Addr.M_GoStandby, false, ct);  // 清待机位
-        await WriteMBitAsync(Addr.M_GoPos3, false, ct);     // 清3号气缸
-        await WriteMBitAsync(Addr.M_GoPos2, true, ct);
-    }
+    /// <summary>货叉去双头镗送料，并由PLC自动回待机位（M912=1）。</summary>
+    public Task GoFeedToBoringAsync(CancellationToken ct = default) =>
+        WriteMotionCommandAsync(Addr.M_FeedToBoring, "去双头镗送料并回待机", ct);
 
-    /// <summary>货叉去3号位（先清M913, 再写M914=1）</summary>
-    public async Task GoPos3Async(CancellationToken ct = default)
-    {
-        await WriteMBitAsync(Addr.M_GoPos2, false, ct);  // 清2号气缸
-        await WriteMBitAsync(Addr.M_GoPos3, true, ct);
-    }
+    /// <summary>货叉去双头镗取料（M913=1）。</summary>
+    public Task GoPickFromBoringAsync(CancellationToken ct = default) =>
+        WriteMotionCommandAsync(Addr.M_PickFromBoring, "去双头镗取料", ct);
+
+    /// <summary>货叉从待机位直接送 Pos3 天车位（M914=1，跳过双头镗）。</summary>
+    public Task GoStandbyToPos3Async(CancellationToken ct = default) =>
+        WriteMotionCommandAsync(Addr.M_StandbyToPos3, "待机位直接送Pos3", ct);
 
     public void Dispose()
     {
@@ -121,7 +124,7 @@ public sealed class ForkService : IDisposable
     }
 }
 
-/// <summary>货叉状态快照（一次读取 M900~M915 的结果）。</summary>
+/// <summary>货叉状态快照（一次读取 M900~M914 的结果）。</summary>
 public sealed class ForkStatus
 {
     // ── 输入信号（货叉→中控）─────────────────────────────────────
@@ -129,31 +132,30 @@ public sealed class ForkStatus
     public bool HasPlate      { get; set; }
     /// <summary>M901  货叉在待机位状态</summary>
     public bool AtStandbyPos  { get; set; }
-    /// <summary>M902  货叉在1号位状态</summary>
-    public bool AtPos1        { get; set; }
-    /// <summary>M903  货叉在2号位状态</summary>
-    public bool AtPos2        { get; set; }
-    /// <summary>M904  货叉在3号位状态</summary>
+    /// <summary>M902  货叉在 Pos3 天车取料位</summary>
     public bool AtPos3        { get; set; }
-
     // ── 输出信号（中控→货叉）─────────────────────────────────────
     /// <summary>M911  货叉回待机位控制</summary>
-    public bool GoStandby     { get; set; }
-    /// <summary>M912  货叉去1号位置控制</summary>
-    public bool GoPos1        { get; set; }
-    /// <summary>M913  货叉去2号位置控制</summary>
-    public bool GoPos2        { get; set; }
-    /// <summary>M914  货叉去3号位置控制</summary>
-    public bool GoPos3        { get; set; }
-
+    public bool GoStandby        { get; set; }
+    /// <summary>M912  去双头镗送料并回待机</summary>
+    public bool FeedToBoring     { get; set; }
+    /// <summary>M913  去双头镗取料</summary>
+    public bool PickFromBoring   { get; set; }
+    /// <summary>M914  待机位直接送 Pos3</summary>
+    public bool StandbyToPos3    { get; set; }
     /// <summary>原始字值（调试用）</summary>
     public ushort RawValue    { get; set; }
 
     /// <summary>当前所在工位描述</summary>
     public string CurrentPosition =>
         AtStandbyPos ? "待机位" :
-        AtPos1       ? "1号位" :
-        AtPos2       ? "2号位" :
-        AtPos3       ? "3号位" :
-        "待机位";
+        AtPos3       ? "Pos3天车位" :
+        "未知位";
+
+    public string CommandText =>
+        GoStandby ? "M911回待机" :
+        FeedToBoring ? "M912送料" :
+        PickFromBoring ? "M913取料" :
+        StandbyToPos3 ? "M914直送Pos3" :
+        "无命令";
 }

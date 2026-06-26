@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "aLdxw0aPwyM=",
+  "dgSpecHash": "tCl/z15rKGI=",
   "success": true,
-  "projectFilePath": "D:\\BSH\\hateshujukejicode\\自动线上位机\\V4.4.0 - DIS-0928-1\\Automatic Online Host Computer\\AutomaticOnlineHostComputer.csproj",
+  "projectFilePath": "D:\\BSH\\c#\\Automatic Online Host Computer\\AutomaticOnlineHostComputer.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\30935\\.nuget\\packages\\bouncycastle.cryptography\\2.6.2\\bouncycastle.cryptography.2.6.2.nupkg.sha512",
     "C:\\Users\\30935\\.nuget\\packages\\google.protobuf\\3.32.0\\google.protobuf.3.32.0.nupkg.sha512",

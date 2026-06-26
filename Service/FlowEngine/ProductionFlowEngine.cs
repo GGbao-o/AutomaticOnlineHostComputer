@@ -619,9 +619,9 @@ public sealed class ProductionFlowEngine : IDisposable
 
         // ═══════════════════════════════════════════════════════════
         // TODO: 等设备 IP 到位后替换为真实逻辑
-        // SyntecBoringService 已封装好所有方法：
+        // BoringModbusService 已封装好新双头镗方法：
         //
-        //   var boringSvc = new SyntecBoringService(ip);
+        //   var boringSvc = new BoringModbusService("双头镗", ip);
         //   await boringSvc.ConnectAsync(ct);
         //
         //   // 1. 等 CNC 请求数据（R6101=1）
@@ -643,16 +643,16 @@ public sealed class ProductionFlowEngine : IDisposable
         //   // if (ctx.LoadMethod == "货叉") { 通知货叉送入 } else { 前天车送入 }
         //   // 上料到位 → 写 R6104=1
         //
-        //   // 5. 等卡钳夹紧（R6105=1）→ 上料退出 → 写 R6106=1
+        //   // 5. 货叉送料自动回待机且无板 → 写 R6104=1，双头镗开始加工
         //
         //   // 6. 等加工完成请求下料（R6107=1）
         //   while (!await boringSvc.IsRequestUnloadAsync(ct))
         //       await Task.Delay(500, ct);
         //
-        //   // 7. 通知货叉取料 → 下料完成 → 写 R6110=1
+        //   // 7. 通知货叉取料到Pos3 → 写 R6108=1
         // ═══════════════════════════════════════════════════════════
 
-        Console.WriteLine($"[FlowEngine]   [占位] 双头镗加工模拟（等 R6101~R6110 真实信号）...");
+        Console.WriteLine($"[FlowEngine]   [占位] 双头镗加工模拟（等 R6101/R6103/R6107 真实信号）...");
         await Task.Delay(2000, ct); // 模拟加工时间
     }
 
