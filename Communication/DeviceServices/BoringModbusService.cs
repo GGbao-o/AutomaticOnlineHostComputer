@@ -8,7 +8,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
 
 /// <summary>
 /// 双头镗 Modbus TCP 服务。
-/// <para>R 区地址统一通过 R*2+1 转换；正常握手输出只写 1，不做脉冲和自动清零。</para>
+/// <para>R 区地址统一通过 R*2+1 转换；下料完成时按协议写R6108=1后立即清R6102/R6104/R6108。</para>
 /// </summary>
 public sealed class BoringModbusService : IDisposable
 {
@@ -102,7 +102,20 @@ public sealed class BoringModbusService : IDisposable
     public Task SetUnloadDoneAsync(CancellationToken ct = default)
         => WriteRAsync(Addr.R_UnloadDone, 1, ct);
 
-    /// <summary>直接写 R 区寄存器。仅供人工清理/诊断使用，正常握手不要用它清零。</summary>
+    /// <summary>
+    /// 通知本轮下料完成，并立即清除本轮全部上位机握手位。
+    /// 顺序固定为 R6108=1 → R6102=0 → R6104=0 → R6108=0，不等待设备反馈。
+    /// </summary>
+    public async Task SetUnloadDoneAndClearCycleAsync(CancellationToken ct = default)
+    {
+        await WriteRAsync(Addr.R_UnloadDone, 1, ct);
+        await WriteRAsync(Addr.R_DataSentDone, 0, ct);
+        await WriteRAsync(Addr.R_LoadDone, 0, ct);
+        await WriteRAsync(Addr.R_UnloadDone, 0, ct);
+        Console.WriteLine($"[BoringModbusSvc] [{_name}] R6108=1后已清零 R6102/R6104/R6108");
+    }
+
+    /// <summary>直接写 R 区寄存器，供协议封装及人工清理/诊断使用。</summary>
     public Task WriteRAsync(int rNumber, int value, CancellationToken ct = default)
         => _client.WriteAsync(Addr.RToModbus(rNumber), value, ct);
 

@@ -842,7 +842,10 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                     }
                                     catch (Exception ex)
                                     {
-                                        PauseForkBoringHandshake("等待R6101读取异常", ex);
+                                        // 被动等信号期间的偶发读失败不改变物理状态；保留阶段，让下一轮后台重连后继续读取。
+                                        ds.BoringSnapshotValid = false;
+                                        ds.BoringConnected = _boringSvc.IsConnected;
+                                        Console.WriteLine($"[Line2Front] [货叉] 等待R6101读取异常: {ex.GetType().Name} - {ex.Message} → 保持阶段等待重连");
                                         break;
                                     }
 
@@ -899,7 +902,10 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                     }
                                     catch (Exception ex)
                                     {
-                                        PauseForkBoringHandshake("等待R6103读取异常", ex);
+                                        // R6102已经写出，但读取R6103失败不代表设备执行状态发生变化；保留阶段等待通信恢复。
+                                        ds.BoringSnapshotValid = false;
+                                        ds.BoringConnected = _boringSvc.IsConnected;
+                                        Console.WriteLine($"[Line2Front] [货叉] 等待R6103读取异常: {ex.GetType().Name} - {ex.Message} → 保持阶段等待重连");
                                     }
                                 }
                                 break;
@@ -988,7 +994,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                         Console.WriteLine("[Line2Front] [货叉] Pos3已到位 工件在叉上 → R6108=1 下料完成");
                                         try
                                         {
-                                            await _boringSvc.SetUnloadDoneAsync(ct);
+                                            await _boringSvc.SetUnloadDoneAndClearCycleAsync(ct);
                                             boringCycleReadTask = null; // R6108写入后重新读取显示/观察状态
                                         }
                                         catch (Exception ex)
@@ -999,7 +1005,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
                                         _boringUnloadDoneSent = true;
                                         _forkPhase = ForkBoringPhase.WaitingForkReturnFromBoring;
-                                        Console.WriteLine($"[Line2Front] [货叉] R6108=1 下料完成 ✓ → 工件入天车队列 {_currentWp?.IdentityText}");
+                                        Console.WriteLine($"[Line2Front] [货叉] 下料完成已发送，R6102/R6104/R6108已清零 ✓ → 工件入天车队列 {_currentWp?.IdentityText}");
                                         _craneQueue.Enqueue(_currentWp!.Value);
                                         lock (_wpLock) { _currentWp = null; }
                                     }
@@ -1062,6 +1068,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                             {
                                 Console.WriteLine($"[Line2Front] [天车调度] ▶ 出队 {craneWp.IdentityText} d={craneWp.Diameter} L={craneWp.Length} 队列剩余={_craneQueue.Count}");
                                 await ProcessCraneFrontAsync(craneWp, ct);
+                                if (_paused) break; // 当前任务已进入人工确认状态，禁止继续消费后续天车任务。
                             }
                             Console.WriteLine("[Line2Front] [天车调度] 队列空, 天车归位");
                         }

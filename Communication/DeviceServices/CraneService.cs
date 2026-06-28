@@ -817,7 +817,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                         await Task.Delay(500, ct);
                         await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
                     }
-                    await PollAxesAsync(-1, -1, zTarget, tolerance, timeoutMs / 2, ct);
+                    await PollAxesAsync(-1, -1, zTarget, tolerance, timeoutMs / 2, ct, monitorPressure: false);
                     if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
                     if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
                     await Task.Delay(500, ct);
@@ -837,7 +837,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 }
 
                 // ── 4. 轮询等待所有轴到位 ──────────────────────────────────
-                await PollAxesAsync(xTarget, yTarget, zTarget, tolerance, timeoutMs, ct);
+                await PollAxesAsync(xTarget, yTarget, zTarget, tolerance, timeoutMs, ct, monitorPressure: zGoingDown);
             }
             finally
             {
@@ -905,9 +905,10 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <summary>
         /// 轮询等待指定轴到位（-1 表示跳过该轴）。
         /// 超时后抛异常，由上层按工件物理状态决定暂停或人工处理。
+        /// <param name="monitorPressure">仅 Z 下降时检测 X2 下压信号；Z 上升时不检测，防止回升途中 X2 延迟释放导致误急停。</param>
         /// </summary>
         private async Task PollAxesAsync(int xTarget, int yTarget, int zTarget,
-            int tolerance, int timeoutMs, CancellationToken ct)
+            int tolerance, int timeoutMs, CancellationToken ct, bool monitorPressure = false)
         {
             var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
             while (DateTime.UtcNow < deadline)
@@ -918,9 +919,11 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 await Task.Delay(pollDelay, ct);
 
                 // ── 磁铁下压限位检测：X2=63490 线圈=1 → 下压急停 ──
+                //    仅 Z 下降（monitorPressure=true）时检测。Z 上升时不检测，
+                //    防止吸住工件后回升途中 X2 延迟释放导致误急停。
                 //    X2（FC01 Read Coil）是磁铁物理下压限位开关，PLC 无法直接停止伺服，
                 //    上位机检测到 X2=1 后主动写 D4523=2→0（下压急停触发）、D4518=2→0（伺服急停）。
-                if (zTarget != -1)
+                if (monitorPressure)
                 {
                     bool x2Pressed = await ReadXBitAsync(Addr.D_X2_MagnetLimit, ct);
                     if (x2Pressed)

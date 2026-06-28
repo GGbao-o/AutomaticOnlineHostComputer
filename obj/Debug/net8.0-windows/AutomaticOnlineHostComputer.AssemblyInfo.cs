@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AutomaticOnlineHostComputer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ea50fcd1095a86af6f1e93430e78aa67ab31913c")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+25526db9355c336d73bf7b2e0fcf68a2020e89ae")]
 [assembly: System.Reflection.AssemblyProductAttribute("AutomaticOnlineHostComputer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AutomaticOnlineHostComputer")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
