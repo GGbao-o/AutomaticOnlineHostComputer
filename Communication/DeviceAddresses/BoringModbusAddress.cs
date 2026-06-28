@@ -7,7 +7,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses;
 public static class BoringModbusAddress
 {
     // ── 加工参数（上位机 → 双头镗）────────────────────────────────
-    /// <summary>R2041 长度，浮点数，ERP 下发多少写多少。</summary>
+    /// <summary>R2041 长度，32位无符号整数，ERP 下发多少写多少。</summary>
     public const int R_RollerLength = 2041;
 
     /// <summary>R2043 直径，整数，ERP 值 * 100。</summary>

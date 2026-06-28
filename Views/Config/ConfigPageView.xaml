@@ -418,7 +418,8 @@
                                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
                                                     <TextBlock Width="62" Text="{Binding StationCode}" Style="{StaticResource StationLabelStyle}" />
                                                     <TextBlock Width="110" Text="{Binding StationName}" Style="{StaticResource ParamLabelStyle}" />
-                                                    <TextBox Text="{Binding OffsetMm, UpdateSourceTrigger=PropertyChanged}"
+                                                    <!-- 小数输入必须在编辑完成后提交；逐字符回写会把中间态“1.”格式化为“1”，随后输入5就变成15。 -->
+                                                    <TextBox Text="{Binding OffsetMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"
                                                              Style="{StaticResource ParamTextBoxStyle}" Width="60" />
                                                     <TextBlock Text="mm" Style="{StaticResource ParamLabelStyle}" />
                                                 </StackPanel>
