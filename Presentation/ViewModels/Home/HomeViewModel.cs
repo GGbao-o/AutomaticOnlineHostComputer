@@ -467,10 +467,10 @@ public sealed class HomeViewModel : ObservableObject
 
                     // ── 打号机 ST501 (文件握手:D:\1\ A/B/3) ──
                     if (cards.TryGetValue("ST501", out var c5))
-                    { c5.ConnectedBrush = ds.MarkerConnected ? Brushes.LimeGreen : Brushes.Gray;
-                      c5.Status1 = ds.MarkerConnected ? "就绪" : "断开";
-                      c5.Status1Brush = ds.MarkerConnected ? Brushes.Green : Brushes.Gray;
-                      c5.Status2 = ds.MarkerConnected ? @"\\192.168.2.67\1" : "—"; }
+                    { c5.ConnectedBrush = ds.MarkerConnected ? Brushes.LimeGreen : Brushes.IndianRed;
+                      c5.Status1 = ds.MarkerConnected ? "就绪" : "共享不可访问";
+                      c5.Status1Brush = ds.MarkerConnected ? Brushes.Green : Brushes.IndianRed;
+                      c5.Status2 = ds.MarkerStatusText; }
 
                     // ── 1号线天车前 ST901 (Modbus:192.168.2.81:502) ──
                     if (cards.TryGetValue("ST901", out var c6))
@@ -568,10 +568,10 @@ public sealed class HomeViewModel : ObservableObject
 
                     // 打号机 ST502
                     if (cards.TryGetValue("ST502", out var c5))
-                    { c5.ConnectedBrush = ds.MarkerConnected ? Brushes.LimeGreen : Brushes.Gray;
-                      c5.Status1 = ds.MarkerConnected ? "就绪" : "断开";
-                      c5.Status1Brush = ds.MarkerConnected ? Brushes.Green : Brushes.Gray;
-                      c5.Status2 = ds.MarkerConnected ? @"\\192.168.2.74\1" : "—"; }
+                    { c5.ConnectedBrush = ds.MarkerConnected ? Brushes.LimeGreen : Brushes.IndianRed;
+                      c5.Status1 = ds.MarkerConnected ? "就绪" : "共享不可访问";
+                      c5.Status1Brush = ds.MarkerConnected ? Brushes.Green : Brushes.IndianRed;
+                      c5.Status2 = ds.MarkerStatusText; }
 
                     // 天车前 ST104
                     if (cards.TryGetValue("ST104", out var c6))

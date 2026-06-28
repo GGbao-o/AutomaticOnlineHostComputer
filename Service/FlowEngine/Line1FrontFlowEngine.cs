@@ -124,7 +124,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
     private ForkService? _forkSvc;              // 货叉 (MC协议, UseBitReadForM=true)
     private CenteringRackService? _rackSvc; // 总上料架+中转架 (共享连接,可重连)
     private BoringModbusService? _boringSvc;    // 双头镗 (Modbus TCP, R区地址=R*2+1)
-    private readonly MarkerShareMonitor _markerMonitor = new("1号线打号机", MarkerSharePath);
+    private readonly MarkerShareMonitor _markerMonitor = new("1号线打号机", MarkerSharePath, "ggbao", "123456");
     private int _forkReconnectInProgress;       // 货叉后台重连占坑, 防止断线时每轮重复创建连接任务
     private int _boringReconnectInProgress;     // 双头镗后台重连占坑, 防止断线时堆积SDK连接任务
 
@@ -182,6 +182,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
         public bool Boring_R6107 { get; set; } // 请求下料
         public bool Boring_R6108 { get; set; } // 下料完成
         public bool MarkerConnected { get; set; }
+        public string MarkerStatusText { get; set; } = "尚未探测";
 
         public int CycleCount { get; set; }
         public int CacheCount { get; set; }
@@ -1096,7 +1097,11 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     catch { }
                 }
                 // UNC探测由独立线程隔离；这里只读取新鲜快照，不能让共享目录离线拖慢主循环。
+                var markerSnapshot = _markerMonitor.LatestSnapshot;
                 ds.MarkerConnected = _markerMonitor.IsFreshAndConnected;
+                ds.MarkerStatusText = ds.MarkerConnected
+                    ? MarkerSharePath
+                    : markerSnapshot.Error ?? "共享目录不可访问";
 
                 // ── 等待下一轮 ──
                 LogSlowCycleIfNeeded(System.Diagnostics.Stopwatch.GetElapsedTime(cycleIoStarted));

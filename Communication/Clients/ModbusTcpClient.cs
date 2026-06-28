@@ -194,17 +194,6 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             await WriteMultipleRegistersAsync((ushort)startAddr, new[] { lo, hi }, ct);
         }
 
-        /// <summary>
-        /// 原子写入一个 UInt32 值到两个连续 Modbus 寄存器（FC16）。
-        /// 新代 R 区使用高字在前：startAddr=高16位，startAddr+1=低16位。
-        /// </summary>
-        public async Task WriteUInt32Async(int startAddr, uint value, CancellationToken ct = default)
-        {
-            ushort hi = (ushort)(value >> 16);
-            ushort lo = (ushort)(value & 0xFFFF);
-            await WriteMultipleRegistersAsync((ushort)startAddr, new[] { hi, lo }, ct);
-        }
-
         /// <inheritdoc/>
         public async ValueTask DisposeAsync()
         {

@@ -12,6 +12,9 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
 /// </summary>
 public sealed class BoringModbusService : IDisposable
 {
+    private const double DefaultInnerTaper = 10;
+    private const double DefaultCornerSize = 8;
+
     private readonly string _name;
     private readonly ModbusTcpClient _client;
     private bool _disposed;
@@ -65,7 +68,8 @@ public sealed class BoringModbusService : IDisposable
 
     /// <summary>
     /// 下发双头镗加工参数。
-    /// 长度按32位无符号整数写ERP原值；直径/堵厚/版孔按协议乘100写整数。R2046/R2048仅保留地址，当前不写。
+    /// 长度按16位无符号整数写ERP原值；直径/堵厚/版孔按协议乘100写整数。
+    /// 内孔锥度固定10并写1000，圆角固定8并写800。
     /// </summary>
     public async Task SendMachiningParamsAsync(
         double rollerLength,
@@ -75,14 +79,18 @@ public sealed class BoringModbusService : IDisposable
         double boreType,
         CancellationToken ct = default)
     {
-        uint rollerLengthUInt32 = ToUInt32(rollerLength, nameof(rollerLength));
-        await _client.WriteUInt32Async(Addr.RToModbus(Addr.R_RollerLength), rollerLengthUInt32, ct);
+        ushort rollerLengthUInt16 = ToUInt16(rollerLength, nameof(rollerLength));
+        await _client.WriteAsync(Addr.RToModbus(Addr.R_RollerLength), rollerLengthUInt16, ct);
         await _client.WriteAsync(Addr.RToModbus(Addr.R_OuterDiameter), Scale100(outerDiameter), ct);
         await _client.WriteAsync(Addr.RToModbus(Addr.R_LeftPlugThickness), Scale100(leftPlugThickness), ct);
         await _client.WriteAsync(Addr.RToModbus(Addr.R_RightPlugThickness), Scale100(rightPlugThickness), ct);
+        await _client.WriteAsync(Addr.RToModbus(Addr.R_InnerTaper), Scale100(DefaultInnerTaper), ct);
         await _client.WriteAsync(Addr.RToModbus(Addr.R_BoreType), Scale100(boreType), ct);
+        await _client.WriteAsync(Addr.RToModbus(Addr.R_CornerSize), Scale100(DefaultCornerSize), ct);
         Console.WriteLine(
-            $"[BoringModbusSvc] [{_name}] 参数已写 R2041={rollerLengthUInt32}(uint32,ERP={rollerLength}) R2043={Scale100(outerDiameter)} R2044={Scale100(leftPlugThickness)} R2045={Scale100(rightPlugThickness)} R2047={Scale100(boreType)}");
+            $"[BoringModbusSvc] [{_name}] 参数已写 R2041={rollerLengthUInt16}(uint16,ERP={rollerLength}) " +
+            $"R2043={Scale100(outerDiameter)} R2044={Scale100(leftPlugThickness)} R2045={Scale100(rightPlugThickness)} " +
+            $"R2046={Scale100(DefaultInnerTaper)} R2047={Scale100(boreType)} R2048={Scale100(DefaultCornerSize)}");
     }
 
     public Task SetDataSentDoneAsync(CancellationToken ct = default)
@@ -107,11 +115,11 @@ public sealed class BoringModbusService : IDisposable
     private static int Scale100(double value)
         => (int)Math.Round(value * 100, MidpointRounding.AwayFromZero);
 
-    private static uint ToUInt32(double value, string paramName)
+    private static ushort ToUInt16(double value, string paramName)
     {
-        if (!double.IsFinite(value) || value < 0 || value > uint.MaxValue)
-            throw new ArgumentOutOfRangeException(paramName, value, "双头镗长度必须是有效的32位无符号整数范围。");
-        return checked((uint)Math.Round(value, MidpointRounding.AwayFromZero));
+        if (!double.IsFinite(value) || value < 0 || value > ushort.MaxValue)
+            throw new ArgumentOutOfRangeException(paramName, value, "双头镗长度必须是有效的16位无符号整数范围。");
+        return checked((ushort)Math.Round(value, MidpointRounding.AwayFromZero));
     }
 
     public void Dispose()

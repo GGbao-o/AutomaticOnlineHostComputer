@@ -7,7 +7,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses;
 public static class BoringModbusAddress
 {
     // ── 加工参数（上位机 → 双头镗）────────────────────────────────
-    /// <summary>R2041 长度，32位无符号整数，ERP 下发多少写多少。</summary>
+    /// <summary>R2041 长度，16位无符号整数，ERP 下发多少写多少。</summary>
     public const int R_RollerLength = 2041;
 
     /// <summary>R2043 直径，整数，ERP 值 * 100。</summary>
@@ -19,13 +19,13 @@ public static class BoringModbusAddress
     /// <summary>R2045 右堵厚，整数，ERP 值 * 100。</summary>
     public const int R_RightPlugThickness = 2045;
 
-    /// <summary>R2046 内孔锥度，ERP 暂未下发；仅定义地址，当前交互不写。</summary>
+    /// <summary>R2046 内孔锥度，固定10并按*100写入1000。</summary>
     public const int R_InnerTaper = 2046;
 
     /// <summary>R2047 内孔成活/版孔，整数，ERP 值 * 100。</summary>
     public const int R_BoreType = 2047;
 
-    /// <summary>R2048 圆角大小，ERP 暂未下发；仅定义地址，当前交互不写。</summary>
+    /// <summary>R2048 圆角大小，固定8并按*100写入800。</summary>
     public const int R_CornerSize = 2048;
 
     // ── 握手信号 ─────────────────────────────────────────────────

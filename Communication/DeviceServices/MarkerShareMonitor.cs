@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 
@@ -11,23 +12,30 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
 public sealed class MarkerShareMonitor : IDisposable
 {
     private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan AuthenticationRetryInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SnapshotMaxAge = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan LogHeartbeat = TimeSpan.FromSeconds(30);
 
     private readonly string _name;
     private readonly string _sharePath;
+    private readonly string? _username;
+    private readonly string? _password;
     private readonly object _sync = new();
     private CancellationTokenSource? _cts;
     private Thread? _worker;
     private MarkerShareSnapshot _snapshot = MarkerShareSnapshot.Disconnected("尚未探测");
     private bool? _lastLoggedConnected;
     private DateTime _lastLogAtUtc;
+    private DateTime _nextAuthenticationAtUtc = DateTime.MinValue;
+    private bool _shareSessionEstablished;
     private bool _disposed;
 
-    public MarkerShareMonitor(string name, string sharePath)
+    public MarkerShareMonitor(string name, string sharePath, string? username = null, string? password = null)
     {
         _name = name;
         _sharePath = sharePath;
+        _username = username;
+        _password = password;
     }
 
     /// <summary>最近一次探测成功且快照未过期时返回true。</summary>
@@ -72,8 +80,23 @@ public sealed class MarkerShareMonitor : IDisposable
             string? error = null;
             try
             {
+                if (!_shareSessionEstablished && DateTime.UtcNow >= _nextAuthenticationAtUtc)
+                {
+                    error = TryEstablishShareSession();
+                    _nextAuthenticationAtUtc = DateTime.UtcNow + AuthenticationRetryInterval;
+                }
+
                 connected = Directory.Exists(_sharePath);
-                if (!connected) error = "共享目录不可访问";
+                if (connected)
+                {
+                    _shareSessionEstablished = true;
+                    error = null;
+                }
+                else
+                {
+                    _shareSessionEstablished = false;
+                    error ??= "共享目录不可访问";
+                }
             }
             catch (Exception ex)
             {
@@ -83,6 +106,51 @@ public sealed class MarkerShareMonitor : IDisposable
 
             Publish(new MarkerShareSnapshot(connected, DateTime.UtcNow, error));
             if (ct.WaitHandle.WaitOne(ProbeInterval)) break;
+        }
+    }
+
+    /// <summary>
+    /// 建立Windows共享会话。该同步调用只在本类专用后台线程执行，不会阻塞生产主循环或UI线程。
+    /// </summary>
+    private string? TryEstablishShareSession()
+    {
+        if (string.IsNullOrWhiteSpace(_username)) return null;
+
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo("net")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                }
+            };
+            process.StartInfo.ArgumentList.Add("use");
+            process.StartInfo.ArgumentList.Add(_sharePath);
+            process.StartInfo.ArgumentList.Add($"/user:{_username}");
+            process.StartInfo.ArgumentList.Add(_password ?? string.Empty);
+
+            if (!process.Start()) return "无法启动共享认证命令";
+            if (!process.WaitForExit(5000))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                return "共享认证超时";
+            }
+
+            if (process.ExitCode == 0) return null;
+            string detail = process.StandardError.ReadToEnd().Trim();
+            if (string.IsNullOrWhiteSpace(detail)) detail = process.StandardOutput.ReadToEnd().Trim();
+            return string.IsNullOrWhiteSpace(detail)
+                ? $"共享认证失败（退出码{process.ExitCode}）"
+                : $"共享认证失败（退出码{process.ExitCode}）：{detail}";
+        }
+        catch (Exception ex)
+        {
+            return $"共享认证异常：{ex.Message}";
         }
     }
 
