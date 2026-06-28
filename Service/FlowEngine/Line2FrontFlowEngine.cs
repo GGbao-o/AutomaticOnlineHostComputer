@@ -79,7 +79,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
     {
         Idle,
         // ── 上料 ──
-        Load_WriteParams,    // 货叉在待机位: 等R6101→写R2041/R2043/R2044/R2045/R2047→R6102=1→等R6103
+        Load_WriteParams,    // 货叉在待机位: 等R6101→写参数→R6102=1
+        WaitingRequestLoad,  // 参数已下发: 持续等R6103，不设置业务超时
         GoingToBoring,       // R6103=1后: M912=1送料并回待机 → 等M901=1且M900=0
         Load_WriteDone,      // 货叉已回待机且无板: R6104=1, 双头镗开始加工
         // ── 加工 ──
@@ -830,30 +831,42 @@ public sealed class Line2FrontFlowEngine : IDisposable
                         {
                             // ══════════ 上料阶段 ══════════
 
-                            // ① Load_WriteParams: 货叉在待机位 → 等R6101→写参数→R6102=1→等R6103→准备写M912送料
+                            // ① Load_WriteParams: 货叉在待机位 → 等R6101→写参数→R6102=1
                             case ForkBoringPhase.Load_WriteParams:
                                 if (_boringSvc != null && _boringSvc.IsConnected && !_forkHandshakeInProgress)
                                 {
+                                    BoringModbusStatusSnapshot snapshot;
+                                    try
+                                    {
+                                        snapshot = await (boringCycleReadTask ??= _boringSvc.ReadAllSignalsAsync(ct));
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        PauseForkBoringHandshake("等待R6101读取异常", ex);
+                                        break;
+                                    }
+
+                                    if (!snapshot.RequestData)
+                                    {
+                                        if (_cycleCount % 10 == 1)
+                                            Console.WriteLine("[Line2Front] [货叉] ① 等R6101=1请求数据（无业务超时）...");
+                                        break;
+                                    }
+
                                     _forkHandshakeInProgress = true;
                                     _ = Task.Run(async () =>
                                     {
                                         try
                                         {
-                                            Console.WriteLine("[Line2Front] [货叉] ① 等R6101=1请求数据...");
-                                            await WaitForBoringSignalAsync(
-                                                async () => await _boringSvc!.IsRequestDataAsync(ct), "R6101请求数据", ct);
                                             var wp = _currentWp!.Value;
                                             double boringD = wp.Diameter + _cfg.GetDiameterOffset("boring2");
                                             Console.WriteLine(
-                                                $"[Line2Front] [货叉] ② 写Modbus参数 R2041={wp.Length} R2043={boringD}*100 R2044={wp.LeftPlugThickness}*100 R2045={wp.RightPlugThickness}*100 R2047={wp.BoreType}*100");
+                                                $"[Line2Front] [货叉] ② R6101=1，写Modbus参数 R2041={wp.Length} R2043={boringD}*100 R2044={wp.LeftPlugThickness}*100 R2045={wp.RightPlugThickness}*100 R2046=1000 R2047={wp.BoreType}*100 R2048=800");
                                             await _boringSvc.SendMachiningParamsAsync(wp.Length, boringD,
                                                 wp.LeftPlugThickness, wp.RightPlugThickness, wp.BoreType, ct);
                                             await _boringSvc.SetDataSentDoneAsync(ct);
-                                            Console.WriteLine("[Line2Front] [货叉] ③ R6102=1 数据下发完成 ✓ → 等R6103=1...");
-                                            await WaitForBoringSignalAsync(
-                                                async () => await _boringSvc.IsRequestLoadAsync(ct), "R6103请求上料", ct);
-                                            Console.WriteLine("[Line2Front] [货叉] ④ R6103=1 CNC请求上料 → 准备写M912送料并回待机");
-                                            _forkPhase = ForkBoringPhase.GoingToBoring;
+                                            Console.WriteLine("[Line2Front] [货叉] ③ R6102=1 数据下发完成 ✓ → 持续等R6103=1（无业务超时）");
+                                            _forkPhase = ForkBoringPhase.WaitingRequestLoad;
                                         }
                                         catch (Exception ex)
                                         {
@@ -867,7 +880,31 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                 }
                                 break;
 
-                            // ② GoingToBoring: R6103=1后 → 写M912送料并自动回待机 → 等M901=1且M900=0
+                            // ② WaitingRequestLoad: 参数已下发，持续等R6103；信号未到不暂停引擎。
+                            case ForkBoringPhase.WaitingRequestLoad:
+                                if (_boringSvc != null && _boringSvc.IsConnected && !_forkHandshakeInProgress)
+                                {
+                                    try
+                                    {
+                                        var snapshot = await (boringCycleReadTask ??= _boringSvc.ReadAllSignalsAsync(ct));
+                                        if (snapshot.RequestLoad)
+                                        {
+                                            Console.WriteLine("[Line2Front] [货叉] ④ R6103=1 CNC请求上料 → 准备写M912送料并回待机");
+                                            _forkPhase = ForkBoringPhase.GoingToBoring;
+                                        }
+                                        else if (_cycleCount % 10 == 1)
+                                        {
+                                            Console.WriteLine("[Line2Front] [货叉] 等R6103=1请求上料（无业务超时）...");
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        PauseForkBoringHandshake("等待R6103读取异常", ex);
+                                    }
+                                }
+                                break;
+
+                            // ③ GoingToBoring: R6103=1后 → 写M912送料并自动回待机 → 等M901=1且M900=0
                             case ForkBoringPhase.GoingToBoring:
                                 if (!_forkHandshakeInProgress)
                                 {
@@ -1112,7 +1149,11 @@ public sealed class Line2FrontFlowEngine : IDisposable
                         ds.Boring_R6108 = v.UnloadDone;
                         ds.BoringSnapshotValid = true;
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        if (_cycleCount % 10 == 1)
+                            Console.WriteLine($"[Line2Front] ⚠ 双头镗状态快照失败: {ex.GetType().Name} - {ex.Message}");
+                    }
                 }
                 // UNC探测由独立线程隔离；这里只读取新鲜快照，不能让共享目录离线拖慢主循环。
                 var markerSnapshot = _markerMonitor.LatestSnapshot;
@@ -1812,17 +1853,6 @@ public sealed class Line2FrontFlowEngine : IDisposable
         int z = rackZ - descent;
         Console.WriteLine($"[Line2Front]   Z公式: {rackZ} - [({d}/2/{_cfg.Grinding.ZFactor1})+({d}/2/{_cfg.Grinding.ZFactor2})] = {rackZ}-{descent}={z}");
         return z;
-    }
-
-    /// <summary>轮询等待双头镗信号 — 间隔/超时从 _cfg 读取。
-    /// 超时抛 TimeoutException 被上层 catch 捕获。</summary>
-    private async Task WaitForBoringSignalAsync(Func<Task<bool>> check, string name, CancellationToken ct)
-    {
-        int timeoutMs = _cfg.Grinding.HandshakeTimeoutMs;
-        int pollMs = _cfg.Grinding.SignalPollIntervalMs; // 紧轮询(默认50ms)
-        var dl = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (DateTime.UtcNow < dl) { ct.ThrowIfCancellationRequested(); if (await check()) return; await Task.Delay(pollMs, ct); }
-        throw new TimeoutException($"双头镗信号超时({timeoutMs / 1000}s)：{name}");
     }
 
     /// <summary>初始化设备连接 — 引擎启动时执行一次。
