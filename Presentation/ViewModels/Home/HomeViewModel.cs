@@ -428,6 +428,9 @@ public sealed class HomeViewModel : ObservableObject
                 // ═══════════════════════════════════════════════════════
                 SyncManipulatorMirror(cards, "ST005", Manipulator2, "机械手2");
                 SyncManipulatorMirror(cards, "ST006", Manipulator3, "机械手3");
+                // ST001/ST002是两条线共享的同一批物理设备，由一个确定性入口合并显示，
+                // 避免双线各自刷新时同一张卡片在两套文本之间来回覆盖。
+                SyncSharedFrontCards(cards);
 
                 // ═══════════════════════════════════════════════════════
                 //  B. 引擎托管卡片 — 仅在1号线运行时刷新
@@ -450,20 +453,6 @@ public sealed class HomeViewModel : ObservableObject
                     EnsureCard("ST110", "四号斜床");
                     EnsureCard("ST112", "五号斜床");
 
-                    // ── 总上料架 ST001 (MC:192.168.2.63:9000 M800~M816+D100) ──
-                    if (cards.TryGetValue("ST001", out var c))
-                    { c.ConnectedBrush = ds.RackConnected ? Brushes.LimeGreen : Brushes.Gray;
-                      c.Status1 = ds.RackConnected ? (ds.RackRequestPickup ? "请求取料" : "空闲") : "断开";
-                      c.Status1Brush = ds.RackRequestPickup ? Brushes.Orange : Brushes.Green;
-                      c.Status2 = ds.RackConnected ? $"板长={ds.RackPlateLength}mm 中1={(ds.TransferRack1Free?"空":"满")} 2={(ds.TransferRack2Free?"空":"满")} 3={(ds.TransferRack3Free?"空":"满")}" : "—"; }
-
-                    // ── 机械手1 ST002 (Modbus:192.168.2.85:502 D5000~D4522) ──
-                    if (cards.TryGetValue("ST002", out var c2))
-                    { c2.ConnectedBrush = ds.Manipulator1Connected ? Brushes.LimeGreen : Brushes.Gray;
-                      c2.Status1 = ds.Manipulator1Connected ? (ds.Manipulator1Safe ? "安全位" : $"Y={ds.Manipulator1Y}") : "断开";
-                      c2.Status1Brush = ds.Manipulator1Safe ? Brushes.Green : Brushes.Orange;
-                      c2.Status2 = ds.Manipulator1Connected ? $"安全Y={_cfg.SkewBed.Manipulator1SafeY}" : "—"; }
-
                     // ── 货叉1 ST011 (MC:192.168.2.88:9000 M900~M914) ──
                     if (cards.TryGetValue("ST011", out var c3))
                     { c3.ConnectedBrush = ds.ForkConnected ? Brushes.LimeGreen : Brushes.Gray;
@@ -472,17 +461,9 @@ public sealed class HomeViewModel : ObservableObject
                       c3.Status2 = ds.ForkConnected ? $"{ds.ForkPosition} {ds.ForkCommand}" : "—"; }
 
                     // ── 双头镗 ST103 (Modbus R区: R*2+1) ──
-                    if (cards.TryGetValue("ST103", out var c4))
-                    {
-                        c4.ConnectedBrush = ds.BoringConnected ? Brushes.LimeGreen : Brushes.Gray;
-                        c4.Status1 = ds.BoringConnected
-                            ? BuildBoringOverviewState(ds.Boring_R6101, ds.Boring_R6102, ds.Boring_R6103, ds.Boring_R6104, ds.Boring_R6107, ds.Boring_R6108)
-                            : "断开";
-                        c4.Status1Brush = GetSignalStateBrush(c4.Status1);
-                        c4.Status2 = ds.BoringConnected
-                            ? BuildBoringSignalText(ds.Boring_R6101, ds.Boring_R6102, ds.Boring_R6103, ds.Boring_R6104, ds.Boring_R6107, ds.Boring_R6108)
-                            : "—";
-                    }
+                    SetBoringCard(cards, "ST103", ds.BoringConnected, ds.BoringSnapshotValid,
+                        ds.Boring_R6101, ds.Boring_R6102, ds.Boring_R6103,
+                        ds.Boring_R6104, ds.Boring_R6107, ds.Boring_R6108);
 
                     // ── 打号机 ST501 (文件握手:D:\1\ A/B/3) ──
                     if (cards.TryGetValue("ST501", out var c5))
@@ -501,14 +482,9 @@ public sealed class HomeViewModel : ObservableObject
                     SetPlateCard(cards, "ST105", ds.RackConnected, !ds.TransferRack1Free, "M811", "192.168.2.63:9000");
                     SetPlateCard(cards, "ST101", ds.RackConnected, !ds.TransferRack2Free, "M812", "192.168.2.63:9000");
                     SetPlateCard(cards, "ST106", ds.RackConnected, !ds.TransferRack3Free, "M813", "192.168.2.63:9000");
-                    SetPlateCard(cards, "ST019", ds.RackConnected && ds.M817SnapshotValid, ds.M817_HasPlate,
-                        ds.M817SnapshotValid ? "M817" : "M817快照失败", "192.168.2.63:9000");
-
                 }
                 else
                 {
-                    if (_line2Engine?.IsRunning != true)
-                        MarkCardsNotStarted(cards, "ST001", "ST002");
                     MarkCardsNotStarted(cards, "ST011", "ST103", "ST501", "ST901", "ST105", "ST101", "ST106");
                 }
 
@@ -538,8 +514,15 @@ public sealed class HomeViewModel : ObservableObject
                 }
 
                 SyncBalancingCards(cards);
+                // 三个计数属性由引擎实时计算，定时通知可覆盖自动出队等非UI命令触发的变化。
+                OnPropertyChanged(nameof(Line1CachedCount));
+                OnPropertyChanged(nameof(Line2CachedCount));
+                OnPropertyChanged(nameof(GrindingCachedCount));
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[HomeViewModel] 1号线状态卡同步异常: {ex.GetType().Name} - {ex.Message}");
+            }
             await Task.Delay(1500, ct);
         }
     }
@@ -571,19 +554,6 @@ public sealed class HomeViewModel : ObservableObject
                     EnsureCard("ST609", "2号线斜床4");
                     EnsureCard("ST610", "2号线斜床5");
 
-                    // 共享总上料架/机械手1: 只启动2号线时也必须刷新, 不能依赖1号线同步循环。
-                    if (cards.TryGetValue("ST001", out var c1))
-                    { c1.ConnectedBrush = ds.RackConnected ? Brushes.LimeGreen : Brushes.Gray;
-                      c1.Status1 = ds.RackConnected ? (ds.RackRequestPickup ? "请求取料" : "空闲") : "断开";
-                      c1.Status1Brush = ds.RackConnected ? (ds.RackRequestPickup ? Brushes.Orange : Brushes.Green) : Brushes.Gray;
-                      c1.Status2 = ds.RackConnected ? $"板长={ds.RackPlateLength}mm 中4={(ds.TransferRack4Free?"空":"满")} 5={(ds.TransferRack5Free?"空":"满")} 6={(ds.TransferRack6Free?"空":"满")}" : "—"; }
-
-                    if (cards.TryGetValue("ST002", out var c2))
-                    { c2.ConnectedBrush = ds.Manipulator1Connected ? Brushes.LimeGreen : Brushes.Gray;
-                      c2.Status1 = ds.Manipulator1Connected ? (ds.Manipulator1Safe ? "安全位" : $"Y={ds.Manipulator1Y}") : "断开";
-                      c2.Status1Brush = ds.Manipulator1Connected ? (ds.Manipulator1Safe ? Brushes.Green : Brushes.Orange) : Brushes.Gray;
-                      c2.Status2 = ds.Manipulator1Connected ? $"安全Y={_cfg.SkewBed.Manipulator1SafeY}" : "—"; }
-
                     // 货叉2 ST712
                     if (cards.TryGetValue("ST712", out var c3))
                     { c3.ConnectedBrush = ds.ForkConnected ? Brushes.LimeGreen : Brushes.Gray;
@@ -592,15 +562,9 @@ public sealed class HomeViewModel : ObservableObject
                       c3.Status2 = ds.ForkConnected ? $"{ds.ForkPosition} {ds.ForkCommand}" : "—"; }
 
                     // 双头镗 ST402
-                    if (cards.TryGetValue("ST402", out var c4))
-                    { c4.ConnectedBrush = ds.BoringConnected ? Brushes.LimeGreen : Brushes.Gray;
-                      c4.Status1 = ds.BoringConnected
-                          ? BuildBoringOverviewState(ds.Boring_R6101, ds.Boring_R6102, ds.Boring_R6103, ds.Boring_R6104, ds.Boring_R6107, ds.Boring_R6108)
-                          : "断开";
-                      c4.Status1Brush = GetSignalStateBrush(c4.Status1);
-                      c4.Status2 = ds.BoringConnected
-                          ? BuildBoringSignalText(ds.Boring_R6101, ds.Boring_R6102, ds.Boring_R6103, ds.Boring_R6104, ds.Boring_R6107, ds.Boring_R6108)
-                          : "—"; }
+                    SetBoringCard(cards, "ST402", ds.BoringConnected, ds.BoringSnapshotValid,
+                        ds.Boring_R6101, ds.Boring_R6102, ds.Boring_R6103,
+                        ds.Boring_R6104, ds.Boring_R6107, ds.Boring_R6108);
 
                     // 打号机 ST502
                     if (cards.TryGetValue("ST502", out var c5))
@@ -620,21 +584,9 @@ public sealed class HomeViewModel : ObservableObject
                     SetPlateCard(cards, "ST016", ds.RackConnected, !ds.TransferRack4Free, "M814", "192.168.2.63:9000");
                     SetPlateCard(cards, "ST017", ds.RackConnected, !ds.TransferRack5Free, "M815", "192.168.2.63:9000");
                     SetPlateCard(cards, "ST018", ds.RackConnected, !ds.TransferRack6Free, "M816", "192.168.2.63:9000");
-                    SetLine2DropRackHandshakeCard(cards, "ST020",
-                        ds.RackConnected && ds.DropRackSnapshotValid,
-                        ds.M818CanPlace, ds.M819PlaceDone, ds.M823CanPick, ds.M824PickDone,
-                        _line1BalancingEngine?.M818CachePresent == true,
-                        "M818", "M819", "M823", "M824", "192.168.2.63:9000");
-                    SetLine2DropRackHandshakeCard(cards, "ST021",
-                        ds.RackConnected && ds.DropRackSnapshotValid,
-                        ds.M820CanPlace, ds.M821PlaceDone, ds.M825CanPick, ds.M826PickDone,
-                        _line1BalancingEngine?.M821CachePresent == true,
-                        "M820", "M821", "M825", "M826", "192.168.2.63:9000");
                 }
                 else
                 {
-                    if (_line1Engine?.IsRunning != true)
-                        MarkCardsNotStarted(cards, "ST001", "ST002");
                     MarkCardsNotStarted(cards, "ST712", "ST402", "ST502", "ST104", "ST016", "ST017", "ST018");
                 }
 
@@ -659,9 +611,11 @@ public sealed class HomeViewModel : ObservableObject
                     MarkCardsNotStarted(cards, "ST904", "ST606", "ST607", "ST608", "ST609", "ST610");
                 }
 
-                SyncBalancingCards(cards);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[HomeViewModel] 2号线状态卡同步异常: {ex.GetType().Name} - {ex.Message}");
+            }
             await Task.Delay(1500, ct);
         }
     }
@@ -720,6 +674,34 @@ public sealed class HomeViewModel : ObservableObject
     private static string BuildBoringSignalText(bool reqData, bool dataDone, bool reqLoad, bool loadDone, bool reqUnload, bool unloadDone)
         => $"R6101={To01(reqData)} R6102={To01(dataDone)} R6103={To01(reqLoad)} R6104={To01(loadDone)} R6107={To01(reqUnload)} R6108={To01(unloadDone)}";
 
+    private static void SetBoringCard(Dictionary<string, StationCardViewModel> cards, string code,
+        bool connected, bool snapshotValid, bool reqData, bool dataDone, bool reqLoad,
+        bool loadDone, bool reqUnload, bool unloadDone)
+    {
+        if (!cards.TryGetValue(code, out var card)) return;
+
+        card.ConnectedBrush = connected ? Brushes.LimeGreen : Brushes.Gray;
+        if (!connected)
+        {
+            card.Status1 = "断开";
+            card.Status1Brush = Brushes.Gray;
+            card.Status2 = "—";
+            return;
+        }
+
+        if (!snapshotValid)
+        {
+            card.Status1 = "读取失败";
+            card.Status1Brush = Brushes.Red;
+            card.Status2 = "R6101/R6102/R6103/R6104/R6107/R6108快照失败";
+            return;
+        }
+
+        card.Status1 = BuildBoringOverviewState(reqData, dataDone, reqLoad, loadDone, reqUnload, unloadDone);
+        card.Status1Brush = GetSignalStateBrush(card.Status1);
+        card.Status2 = BuildBoringSignalText(reqData, dataDone, reqLoad, loadDone, reqUnload, unloadDone);
+    }
+
     private static Brush GetSignalStateBrush(string state)
     {
         return state switch
@@ -739,6 +721,66 @@ public sealed class HomeViewModel : ObservableObject
         sc.Status1 = manipVm.Line1;          // "已连接，就绪" / "未连接" / "故障"
         sc.Status1Brush = manipVm.Line1Brush;
         sc.Status2 = $"{manipVm.Line5}";     // Y/Z 坐标
+    }
+
+    /// <summary>
+    /// ST001和ST002是两条前端共用的物理设备。统一合并两个只读快照，避免两个UI循环交替覆盖同一张卡片。
+    /// </summary>
+    private void SyncSharedFrontCards(Dictionary<string, StationCardViewModel> cards)
+    {
+        var line1 = _line1Engine is { IsRunning: true } ? _line1Engine.DeviceStatus : null;
+        var line2 = _line2Engine is { IsRunning: true } ? _line2Engine.DeviceStatus : null;
+        if (line1 == null && line2 == null)
+        {
+            MarkCardsNotStarted(cards, "ST001", "ST002");
+            return;
+        }
+
+        if (cards.TryGetValue("ST001", out var rackCard))
+        {
+            bool line1RackOk = line1?.RackConnected == true;
+            bool line2RackOk = line2?.RackConnected == true;
+            bool connected = line1RackOk || line2RackOk;
+            bool requestPickup = line1RackOk
+                ? line1!.RackRequestPickup
+                : line2RackOk && line2!.RackRequestPickup;
+            int plateLength = line1RackOk ? line1!.RackPlateLength : line2?.RackPlateLength ?? 0;
+
+            rackCard.ConnectedBrush = connected ? Brushes.LimeGreen : Brushes.Gray;
+            rackCard.Status1 = connected ? (requestPickup ? "请求取料" : "空闲") : "断开";
+            rackCard.Status1Brush = connected
+                ? (requestPickup ? Brushes.Orange : Brushes.Green)
+                : Brushes.Gray;
+
+            var rackStates = new List<string> { $"板长={plateLength}mm" };
+            if (line1RackOk)
+            {
+                rackStates.Add($"中1={(line1!.TransferRack1Free ? "空" : "满")}");
+                rackStates.Add($"2={(line1.TransferRack2Free ? "空" : "满")}");
+                rackStates.Add($"3={(line1.TransferRack3Free ? "空" : "满")}");
+            }
+            if (line2RackOk)
+            {
+                rackStates.Add($"中4={(line2!.TransferRack4Free ? "空" : "满")}");
+                rackStates.Add($"5={(line2.TransferRack5Free ? "空" : "满")}");
+                rackStates.Add($"6={(line2.TransferRack6Free ? "空" : "满")}");
+            }
+            rackCard.Status2 = connected ? string.Join(" ", rackStates) : "—";
+        }
+
+        if (cards.TryGetValue("ST002", out var manipulatorCard))
+        {
+            bool useLine1 = line1?.Manipulator1Connected == true;
+            bool useLine2 = !useLine1 && line2?.Manipulator1Connected == true;
+            bool connected = useLine1 || useLine2;
+            bool safe = useLine1 ? line1!.Manipulator1Safe : useLine2 && line2!.Manipulator1Safe;
+            int y = useLine1 ? line1!.Manipulator1Y : useLine2 ? line2!.Manipulator1Y : 0;
+
+            manipulatorCard.ConnectedBrush = connected ? Brushes.LimeGreen : Brushes.Gray;
+            manipulatorCard.Status1 = connected ? (safe ? "安全位" : $"Y={y}") : "断开";
+            manipulatorCard.Status1Brush = connected ? (safe ? Brushes.Green : Brushes.Orange) : Brushes.Gray;
+            manipulatorCard.Status2 = connected ? $"安全Y={_cfg.SkewBed.Manipulator1SafeY}" : "—";
+        }
     }
 
     private static void SetPlateCard(Dictionary<string, StationCardViewModel> cards,
@@ -847,21 +889,53 @@ public sealed class HomeViewModel : ObservableObject
     private void SyncBalancingCards(Dictionary<string, StationCardViewModel> cards)
     {
         var engine = _line1BalancingEngine;
-        if (engine?.IsRunning != true) return;
+        if (engine?.IsRunning == true)
+        {
+            bool mc63 = engine.Mc63Connected && engine.Mc63SnapshotValid;
+            SetPlateCard(cards, "ST019", mc63, engine.M817HasPlate, $"M817 M2={(engine.M2Busy ? "忙" : "闲")}", "192.168.2.63:9000");
+            SetLine2DropRackHandshakeCard(cards, "ST020", mc63,
+                engine.M818CanPlace, engine.M819PlaceDone, engine.M823CanPick, engine.M824PickDone,
+                engine.M818CachePresent, "M818", "M819", "M823", "M824", "192.168.2.63:9000");
+            SetLine2DropRackHandshakeCard(cards, "ST021", mc63,
+                engine.M820CanPlace, engine.M821PlaceDone, engine.M825CanPick, engine.M826PickDone,
+                engine.M821CachePresent, "M820", "M821", "M825", "M826", "192.168.2.63:9000");
 
-        bool mc63 = engine.Mc63Connected;
-        SetPlateCard(cards, "ST019", mc63, engine.M817HasPlate, $"M817 M2={(engine.M2Busy ? "忙" : "闲")}", "192.168.2.63:9000");
-        SetLine2DropRackHandshakeCard(cards, "ST020", mc63,
-            engine.M818CanPlace, engine.M819PlaceDone, engine.M823CanPick, engine.M824PickDone,
-            engine.M818CachePresent, "M818", "M819", "M823", "M824", "192.168.2.63:9000");
-        SetLine2DropRackHandshakeCard(cards, "ST021", mc63,
-            engine.M820CanPlace, engine.M821PlaceDone, engine.M825CanPick, engine.M826PickDone,
-            engine.M821CachePresent, "M820", "M821", "M825", "M826", "192.168.2.63:9000");
+            bool mc65 = engine.Mc65Connected && engine.Mc65SnapshotValid;
+            SetReadyCard(cards, "ST008", mc65, engine.M710CanPlace, "可放料", "不可放料", $"M710 M2={(engine.M2Busy ? "忙" : "闲")}", "192.168.2.65:9000");
+            SetPlateCard(cards, "ST009", mc65, engine.M700HasPlate, $"M700 M3={(engine.M3Busy ? "忙" : "闲")}", "192.168.2.65:9000");
+            SetReadyCard(cards, "ST010", mc65, engine.M720CanPlace, "可放料", "不可放料", $"M720 M3={(engine.M3Busy ? "忙" : "闲")}", "192.168.2.65:9000");
+            return;
+        }
 
-        bool mc65 = engine.Mc65Connected;
-        SetReadyCard(cards, "ST008", mc65, engine.M710CanPlace, "可放料", "不可放料", $"M710 M2={(engine.M2Busy ? "忙" : "闲")}", "192.168.2.65:9000");
-        SetPlateCard(cards, "ST009", mc65, engine.M700HasPlate, $"M700 M3={(engine.M3Busy ? "忙" : "闲")}", "192.168.2.65:9000");
-        SetReadyCard(cards, "ST010", mc65, engine.M720CanPlace, "可放料", "不可放料", $"M720 M3={(engine.M3Busy ? "忙" : "闲")}", "192.168.2.65:9000");
+        // 动平衡引擎未运行时，MC65三张卡没有新鲜来源，必须清掉旧状态。
+        MarkCardsNotStarted(cards, "ST008", "ST009", "ST010");
+
+        var line1 = _line1Engine is { IsRunning: true } ? _line1Engine.DeviceStatus : null;
+        if (line1 != null)
+        {
+            SetPlateCard(cards, "ST019", line1.RackConnected && line1.M817SnapshotValid,
+                line1.M817_HasPlate, line1.M817SnapshotValid ? "M817" : "M817快照失败", "192.168.2.63:9000");
+        }
+        else
+        {
+            MarkCardsNotStarted(cards, "ST019");
+        }
+
+        var line2 = _line2Engine is { IsRunning: true } ? _line2Engine.DeviceStatus : null;
+        if (line2 != null)
+        {
+            bool dropRackSnapshotOk = line2.RackConnected && line2.DropRackSnapshotValid;
+            SetLine2DropRackHandshakeCard(cards, "ST020", dropRackSnapshotOk,
+                line2.M818CanPlace, line2.M819PlaceDone, line2.M823CanPick, line2.M824PickDone,
+                engine?.M818CachePresent == true, "M818", "M819", "M823", "M824", "192.168.2.63:9000");
+            SetLine2DropRackHandshakeCard(cards, "ST021", dropRackSnapshotOk,
+                line2.M820CanPlace, line2.M821PlaceDone, line2.M825CanPick, line2.M826PickDone,
+                engine?.M821CachePresent == true, "M820", "M821", "M825", "M826", "192.168.2.63:9000");
+        }
+        else
+        {
+            MarkCardsNotStarted(cards, "ST020", "ST021");
+        }
     }
 
     /// <summary>研磨上下料架状态变化快，独立刷新到大屏卡片，避免只停留在页面加载时探测值。</summary>
