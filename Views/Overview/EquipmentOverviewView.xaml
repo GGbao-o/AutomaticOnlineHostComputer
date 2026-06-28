@@ -1,0 +1,626 @@
+<UserControl
+    x:Class="AutomaticOnlineHostComputer.Views.Overview.EquipmentOverviewView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="clr-namespace:AutomaticOnlineHostComputer.Views.Home.Controls"
+    Background="#E8EDF3">
+    <UserControl.Resources>
+        <Style TargetType="{x:Type controls:OverviewDeviceCard}">
+            <Setter Property="Margin" Value="4" />
+        </Style>
+    </UserControl.Resources>
+    <Grid Margin="10">
+        <!--  第三部分  -->
+        <Border
+            Margin="0"
+            Background="White"
+            BorderBrush="#C6D0DE"
+            BorderThickness="1"
+            CornerRadius="6">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <StackPanel
+                    MinWidth="1400"
+                    MinHeight="560"
+                    Margin="0">
+                    <Border
+                        Margin="0,0,0,10"
+                        Padding="14,10"
+                        Background="#26323F"
+                        CornerRadius="6,6,0,0">
+                        <StackPanel>
+                            <TextBlock
+                                FontSize="17"
+                                FontWeight="SemiBold"
+                                Foreground="White"
+                                Text="设备总览" />
+                            <TextBlock
+                                Margin="0,3,0,0"
+                                FontSize="12"
+                                Foreground="#B8C4D1"
+                                Text="天车、机械手、研磨机状态与手动操作入口" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock
+                        Margin="10,0,10,8"
+                        FontSize="15"
+                        FontWeight="SemiBold"
+                        Foreground="#1F2933"
+                        Text="天车 / 机械手" />
+                    <!--  自定义控件  -->
+                    <UniformGrid Margin="6,0,6,8" Columns="5">
+                        <!--  1号线天车前   绑定的HomeViewModel的数据  -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Crane1F.CraneName}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Crane1F.EStopCommand}"
+                            Btn2="伺服断电"
+                            Btn2Command="{Binding Crane1F.ServoPowerOffCommand}"
+                            Btn3="伺服通电"
+                            Btn3Command="{Binding Crane1F.ServoPowerOnCommand}"
+                            Btn4="清除报警"
+                            Btn4Command="{Binding Crane1F.ClearAlarmCommand}"
+                            Btn5="充磁"
+                            Btn5Command="{Binding Crane1F.MagnetOnCommand}"
+                            Btn6="退磁"
+                            Btn6Command="{Binding Crane1F.MagnetOffCommand}"
+                            Btn7="开液盘"
+                            Btn7Command="{Binding Crane1F.DrainOpenCommand}"
+                            Btn8="关液盘"
+                            Btn8Command="{Binding Crane1F.DrainCloseCommand}"
+                            ConnectedBrush="{Binding Crane1F.ConnectedBrush}"
+                            Line1="{Binding Crane1F.Line1}"
+                            Line1Brush="{Binding Crane1F.Line1Brush}"
+                            Line2="{Binding Crane1F.Line2}"
+                            Line2Brush="{Binding Crane1F.Line2Brush}"
+                            Line3="{Binding Crane1F.Line3}"
+                            Line3Brush="{Binding Crane1F.Line3Brush}"
+                            Line4="{Binding Crane1F.Line4}"
+                            Line4Brush="{Binding Crane1F.Line4Brush}"
+                            Line5="{Binding Crane1F.Line5}"
+                            Line5Brush="{Binding Crane1F.Line5Brush}" />
+                        <!--  1号线天车后  -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Crane1R.CraneName}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Crane1R.EStopCommand}"
+                            Btn2="伺服断电"
+                            Btn2Command="{Binding Crane1R.ServoPowerOffCommand}"
+                            Btn3="伺服通电"
+                            Btn3Command="{Binding Crane1R.ServoPowerOnCommand}"
+                            Btn4="清除报警"
+                            Btn4Command="{Binding Crane1R.ClearAlarmCommand}"
+                            Btn5="充磁"
+                            Btn5Command="{Binding Crane1R.MagnetOnCommand}"
+                            Btn6="退磁"
+                            Btn6Command="{Binding Crane1R.MagnetOffCommand}"
+                            Btn7="开液盘"
+                            Btn7Command="{Binding Crane1R.DrainOpenCommand}"
+                            Btn8="关液盘"
+                            Btn8Command="{Binding Crane1R.DrainCloseCommand}"
+                            ConnectedBrush="{Binding Crane1R.ConnectedBrush}"
+                            Line1="{Binding Crane1R.Line1}"
+                            Line1Brush="{Binding Crane1R.Line1Brush}"
+                            Line2="{Binding Crane1R.Line2}"
+                            Line2Brush="{Binding Crane1R.Line2Brush}"
+                            Line3="{Binding Crane1R.Line3}"
+                            Line3Brush="{Binding Crane1R.Line3Brush}"
+                            Line4="{Binding Crane1R.Line4}"
+                            Line4Brush="{Binding Crane1R.Line4Brush}"
+                            Line5="{Binding Crane1R.Line5}"
+                            Line5Brush="{Binding Crane1R.Line5Brush}" />
+                        <!--  2号线天车前  -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Crane2F.CraneName}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Crane2F.EStopCommand}"
+                            Btn2="伺服断电"
+                            Btn2Command="{Binding Crane2F.ServoPowerOffCommand}"
+                            Btn3="伺服通电"
+                            Btn3Command="{Binding Crane2F.ServoPowerOnCommand}"
+                            Btn4="清除报警"
+                            Btn4Command="{Binding Crane2F.ClearAlarmCommand}"
+                            Btn5="充磁"
+                            Btn5Command="{Binding Crane2F.MagnetOnCommand}"
+                            Btn6="退磁"
+                            Btn6Command="{Binding Crane2F.MagnetOffCommand}"
+                            Btn7="开液盘"
+                            Btn7Command="{Binding Crane2F.DrainOpenCommand}"
+                            Btn8="关液盘"
+                            Btn8Command="{Binding Crane2F.DrainCloseCommand}"
+                            ConnectedBrush="{Binding Crane2F.ConnectedBrush}"
+                            Line1="{Binding Crane2F.Line1}"
+                            Line1Brush="{Binding Crane2F.Line1Brush}"
+                            Line2="{Binding Crane2F.Line2}"
+                            Line2Brush="{Binding Crane2F.Line2Brush}"
+                            Line3="{Binding Crane2F.Line3}"
+                            Line3Brush="{Binding Crane2F.Line3Brush}"
+                            Line4="{Binding Crane2F.Line4}"
+                            Line4Brush="{Binding Crane2F.Line4Brush}"
+                            Line5="{Binding Crane2F.Line5}"
+                            Line5Brush="{Binding Crane2F.Line5Brush}" />
+                        <!--  2号线天车后  -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Crane2R.CraneName}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Crane2R.EStopCommand}"
+                            Btn2="伺服断电"
+                            Btn2Command="{Binding Crane2R.ServoPowerOffCommand}"
+                            Btn3="伺服通电"
+                            Btn3Command="{Binding Crane2R.ServoPowerOnCommand}"
+                            Btn4="清除报警"
+                            Btn4Command="{Binding Crane2R.ClearAlarmCommand}"
+                            Btn5="充磁"
+                            Btn5Command="{Binding Crane2R.MagnetOnCommand}"
+                            Btn6="退磁"
+                            Btn6Command="{Binding Crane2R.MagnetOffCommand}"
+                            Btn7="开液盘"
+                            Btn7Command="{Binding Crane2R.DrainOpenCommand}"
+                            Btn8="关液盘"
+                            Btn8Command="{Binding Crane2R.DrainCloseCommand}"
+                            ConnectedBrush="{Binding Crane2R.ConnectedBrush}"
+                            Line1="{Binding Crane2R.Line1}"
+                            Line1Brush="{Binding Crane2R.Line1Brush}"
+                            Line2="{Binding Crane2R.Line2}"
+                            Line2Brush="{Binding Crane2R.Line2Brush}"
+                            Line3="{Binding Crane2R.Line3}"
+                            Line3Brush="{Binding Crane2R.Line3Brush}"
+                            Line4="{Binding Crane2R.Line4}"
+                            Line4Brush="{Binding Crane2R.Line4Brush}"
+                            Line5="{Binding Crane2R.Line5}"
+                            Line5Brush="{Binding Crane2R.Line5Brush}" />
+                        <!--  研磨机天车  -->
+                        <controls:OverviewDeviceCard
+                            Title="{Binding CraneGL.CraneName}"
+                            Btn1="急停"
+                            Btn1Command="{Binding CraneGL.EStopCommand}"
+                            Btn2="伺服断电"
+                            Btn2Command="{Binding CraneGL.ServoPowerOffCommand}"
+                            Btn3="伺服通电"
+                            Btn3Command="{Binding CraneGL.ServoPowerOnCommand}"
+                            Btn4="清除报警"
+                            Btn4Command="{Binding CraneGL.ClearAlarmCommand}"
+                            Btn5="充磁"
+                            Btn5Command="{Binding CraneGL.MagnetOnCommand}"
+                            Btn6="退磁"
+                            Btn6Command="{Binding CraneGL.MagnetOffCommand}"
+                            Btn7="开液盘"
+                            Btn7Command="{Binding CraneGL.DrainOpenCommand}"
+                            Btn8="关液盘"
+                            Btn8Command="{Binding CraneGL.DrainCloseCommand}"
+                            ConnectedBrush="{Binding CraneGL.ConnectedBrush}"
+                            Line1="{Binding CraneGL.Line1}"
+                            Line1Brush="{Binding CraneGL.Line1Brush}"
+                            Line2="{Binding CraneGL.Line2}"
+                            Line2Brush="{Binding CraneGL.Line2Brush}"
+                            Line3="{Binding CraneGL.Line3}"
+                            Line3Brush="{Binding CraneGL.Line3Brush}"
+                            Line4="{Binding CraneGL.Line4}"
+                            Line4Brush="{Binding CraneGL.Line4Brush}"
+                            Line5="{Binding CraneGL.Line5}"
+                            Line5Brush="{Binding CraneGL.Line5Brush}" />
+                    </UniformGrid>
+
+                    <UniformGrid Margin="6,2,6,8" Columns="3">
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Manipulator1.Name}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Manipulator1.EStopCommand}"
+                            Btn2="伺服通电"
+                            Btn2Command="{Binding Manipulator1.ServoPowerOnCommand}"
+                            Btn3="伺服断电"
+                            Btn3Command="{Binding Manipulator1.ServoPowerOffCommand}"
+                            Btn4="清除报警"
+                            Btn4Command="{Binding Manipulator1.ClearAlarmCommand}"
+                            Btn5="Y+"
+                            Btn5Command="{Binding Manipulator1.YPlusCommand}"
+                            Btn6="Y-"
+                            Btn6Command="{Binding Manipulator1.YMinusCommand}"
+                            Btn7="Z+"
+                            Btn7Command="{Binding Manipulator1.ZPlusCommand}"
+                            Btn8="Z-"
+                            Btn8Command="{Binding Manipulator1.ZMinusCommand}"
+                            ConnectedBrush="{Binding Manipulator1.ConnectedBrush}"
+                            Line1="{Binding Manipulator1.Line1}"
+                            Line1Brush="{Binding Manipulator1.Line1Brush}"
+                            Line2="{Binding Manipulator1.Line2}"
+                            Line2Brush="{Binding Manipulator1.Line2Brush}"
+                            Line3="{Binding Manipulator1.Line3}"
+                            Line3Brush="{Binding Manipulator1.Line3Brush}"
+                            Line4="{Binding Manipulator1.Line4}"
+                            Line4Brush="{Binding Manipulator1.Line4Brush}"
+                            Line5="{Binding Manipulator1.Line5}"
+                            Line5Brush="{Binding Manipulator1.Line5Brush}" />
+
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Manipulator2.Name}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Manipulator2.EStopCommand}"
+                            Btn2="伺服通电"
+                            Btn2Command="{Binding Manipulator2.ServoPowerOnCommand}"
+                            Btn3="伺服断电"
+                            Btn3Command="{Binding Manipulator2.ServoPowerOffCommand}"
+                            Btn4="清除报警"
+                            Btn4Command="{Binding Manipulator2.ClearAlarmCommand}"
+                            Btn5="Y+"
+                            Btn5Command="{Binding Manipulator2.YPlusCommand}"
+                            Btn6="Y-"
+                            Btn6Command="{Binding Manipulator2.YMinusCommand}"
+                            Btn7="Z+"
+                            Btn7Command="{Binding Manipulator2.ZPlusCommand}"
+                            Btn8="Z-"
+                            Btn8Command="{Binding Manipulator2.ZMinusCommand}"
+                            ConnectedBrush="{Binding Manipulator2.ConnectedBrush}"
+                            Line1="{Binding Manipulator2.Line1}"
+                            Line1Brush="{Binding Manipulator2.Line1Brush}"
+                            Line2="{Binding Manipulator2.Line2}"
+                            Line2Brush="{Binding Manipulator2.Line2Brush}"
+                            Line3="{Binding Manipulator2.Line3}"
+                            Line3Brush="{Binding Manipulator2.Line3Brush}"
+                            Line4="{Binding Manipulator2.Line4}"
+                            Line4Brush="{Binding Manipulator2.Line4Brush}"
+                            Line5="{Binding Manipulator2.Line5}"
+                            Line5Brush="{Binding Manipulator2.Line5Brush}" />
+
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Manipulator3.Name}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Manipulator3.EStopCommand}"
+                            Btn2="伺服通电"
+                            Btn2Command="{Binding Manipulator3.ServoPowerOnCommand}"
+                            Btn3="伺服断电"
+                            Btn3Command="{Binding Manipulator3.ServoPowerOffCommand}"
+                            Btn4="清除报警"
+                            Btn4Command="{Binding Manipulator3.ClearAlarmCommand}"
+                            Btn5="Y+"
+                            Btn5Command="{Binding Manipulator3.YPlusCommand}"
+                            Btn6="Y-"
+                            Btn6Command="{Binding Manipulator3.YMinusCommand}"
+                            Btn7="Z+"
+                            Btn7Command="{Binding Manipulator3.ZPlusCommand}"
+                            Btn8="Z-"
+                            Btn8Command="{Binding Manipulator3.ZMinusCommand}"
+                            ConnectedBrush="{Binding Manipulator3.ConnectedBrush}"
+                            Line1="{Binding Manipulator3.Line1}"
+                            Line1Brush="{Binding Manipulator3.Line1Brush}"
+                            Line2="{Binding Manipulator3.Line2}"
+                            Line2Brush="{Binding Manipulator3.Line2Brush}"
+                            Line3="{Binding Manipulator3.Line3}"
+                            Line3Brush="{Binding Manipulator3.Line3Brush}"
+                            Line4="{Binding Manipulator3.Line4}"
+                            Line4Brush="{Binding Manipulator3.Line4Brush}"
+                            Line5="{Binding Manipulator3.Line5}"
+                            Line5Brush="{Binding Manipulator3.Line5Brush}" />
+                    </UniformGrid>
+                    <!--    -->
+                    <!--  ~1~  研磨自动流程控制栏  @1@  -->
+                    <!--  <Border  -->
+                    <!--  Margin="0,6,0,0"  -->
+                    <!--  Padding="6"  -->
+                    <!--  Background="#1A3A5C"  -->
+                    <!--  BorderBrush="#2C86C8"  -->
+                    <!--  BorderThickness="1"  -->
+                    <!--  CornerRadius="4">  -->
+                    <!--     <UniformGrid Columns="10" Rows="1"> -->
+                    <!--  ~1~  启动/暂停  @1@  -->
+                    <!--  <Button  -->
+                    <!--  Width="100"  -->
+                    <!--  Height="30"  -->
+                    <!--  Background="#2C86C8"  -->
+                    <!--  Command="{Binding GrindingToggleCommand}"  -->
+                    <!--  Content="{Binding GrindingToggleText}"  -->
+                    <!--  FontSize="13"  -->
+                    <!--  FontWeight="Bold"  -->
+                    <!--  Foreground="White" />  -->
+                    <!--  <TextBlock  -->
+                    <!--  HorizontalAlignment="Center"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  FontSize="20"  -->
+                    <!--  Foreground="#4A6A8A"  -->
+                    <!--  Text="│" />  -->
+                    <!--  ~1~  工件缓存输入  @1@  -->
+                    <!--  <StackPanel  -->
+                    <!--  Margin="4,0"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Orientation="Horizontal">  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="0,0,3,0"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Foreground="White"  -->
+                    <!--  Text="直径:" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="50"  -->
+                    <!--  Height="24"  -->
+                    <!--  FontSize="12"  -->
+                    <!--  Text="{Binding CachedDiameter, UpdateSourceTrigger=PropertyChanged}" />  -->
+                    <!--         </StackPanel> -->
+                    <!--  <StackPanel  -->
+                    <!--  Margin="4,0"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Orientation="Horizontal">  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="0,0,3,0"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Foreground="White"  -->
+                    <!--  Text="版孔(1大2小):" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="36"  -->
+                    <!--  Height="24"  -->
+                    <!--  FontSize="12"  -->
+                    <!--  Text="{Binding CachedBoreType, UpdateSourceTrigger=PropertyChanged}" />  -->
+                    <!--         </StackPanel> -->
+                    <!--  <StackPanel  -->
+                    <!--  Margin="4,0"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Orientation="Horizontal">  -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="0,0,3,0"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Foreground="White"  -->
+                    <!--  Text="长度:" />  -->
+                    <!--  <TextBox  -->
+                    <!--  Width="50"  -->
+                    <!--  Height="24"  -->
+                    <!--  FontSize="12"  -->
+                    <!--  Text="{Binding CachedLength, UpdateSourceTrigger=PropertyChanged}" />  -->
+                    <!--         </StackPanel> -->
+                    <!--  ~1~  写入/清空缓存  @1@  -->
+                    <!--  <Button  -->
+                    <!--  Width="80"  -->
+                    <!--  Height="28"  -->
+                    <!--  Background="#FF8C00"  -->
+                    <!--  Command="{Binding WriteCacheCommand}"  -->
+                    <!--  Content="写入缓存"  -->
+                    <!--  FontWeight="Bold"  -->
+                    <!--  Foreground="White" />  -->
+                    <!--  <Button  -->
+                    <!--  Width="80"  -->
+                    <!--  Height="28"  -->
+                    <!--  Background="#8B0000"  -->
+                    <!--  Command="{Binding ClearCacheCommand}"  -->
+                    <!--  Content="清空缓存"  -->
+                    <!--  FontWeight="Bold"  -->
+                    <!--  Foreground="White" />  -->
+                    <!--  ~1~  已缓存数量  @1@  -->
+                    <!--  <Border  -->
+                    <!--  Width="36"  -->
+                    <!--  Height="28"  -->
+                    <!--  HorizontalAlignment="Center"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Background="#333"  -->
+                    <!--  CornerRadius="4">  -->
+                    <!--  <TextBlock  -->
+                    <!--  HorizontalAlignment="Center"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  FontSize="18"  -->
+                    <!--  FontWeight="Bold"  -->
+                    <!--  Foreground="#FFD700"  -->
+                    <!--  Text="{Binding CachedWorkpieceCount}" />  -->
+                    <!--         </Border> -->
+                    <!--  <TextBlock  -->
+                    <!--  Margin="4,0,0,0"  -->
+                    <!--  VerticalAlignment="Center"  -->
+                    <!--  Foreground="#AAA"  -->
+                    <!--  Text="个待处理" />  -->
+                    <!--         <Border /> -->
+                    <!--     </UniformGrid> -->
+                    <!-- </Border> -->
+
+                    <!--  4台研磨机  -->
+                    <TextBlock
+                        Margin="10,8,10,6"
+                        FontSize="15"
+                        FontWeight="SemiBold"
+                        Foreground="#1F2933"
+                        Text="研磨机总览" />
+                    <UniformGrid Margin="6,0,6,10" Columns="4">
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Grinder1.Title}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Grinder1.EStopCommand}"
+                            Btn2="清除报警"
+                            Btn2Command="{Binding Grinder1.ClearAlarmCommand}"
+                            Btn3="读状态"
+                            Btn3Command="{Binding Grinder1.ReadStatusCommand}"
+                            Btn4="数据完成"
+                            Btn4Command="{Binding Grinder1.DataSentDoneCommand}"
+                            Btn5="上料到达"
+                            Btn5Command="{Binding Grinder1.LoadInPlaceCommand}"
+                            Btn6="上料完成"
+                            Btn6Command="{Binding Grinder1.LoadDoneCommand}"
+                            Btn7="下料到达"
+                            Btn7Command="{Binding Grinder1.UnloadInPlaceCommand}"
+                            Btn8="下料完成"
+                            Btn8Command="{Binding Grinder1.UnloadDoneCommand}"
+                            ConnectedBrush="{Binding Grinder1.ConnectedBrush}"
+                            Line1="{Binding Grinder1.Line1}"
+                            Line1Brush="{Binding Grinder1.Line1Brush}"
+                            Line2="{Binding Grinder1.Line2}"
+                            Line3="{Binding Grinder1.Line3}"
+                            Line4="{Binding Grinder1.Line4}"
+                            Line4Brush="{Binding Grinder1.Line4Brush}"
+                            Line5="{Binding Grinder1.Line5}" />
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Grinder2.Title}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Grinder2.EStopCommand}"
+                            Btn2="清除报警"
+                            Btn2Command="{Binding Grinder2.ClearAlarmCommand}"
+                            Btn3="读状态"
+                            Btn3Command="{Binding Grinder2.ReadStatusCommand}"
+                            Btn4="数据完成"
+                            Btn4Command="{Binding Grinder2.DataSentDoneCommand}"
+                            Btn5="上料到达"
+                            Btn5Command="{Binding Grinder2.LoadInPlaceCommand}"
+                            Btn6="上料完成"
+                            Btn6Command="{Binding Grinder2.LoadDoneCommand}"
+                            Btn7="下料到达"
+                            Btn7Command="{Binding Grinder2.UnloadInPlaceCommand}"
+                            Btn8="下料完成"
+                            Btn8Command="{Binding Grinder2.UnloadDoneCommand}"
+                            ConnectedBrush="{Binding Grinder2.ConnectedBrush}"
+                            Line1="{Binding Grinder2.Line1}"
+                            Line1Brush="{Binding Grinder2.Line1Brush}"
+                            Line2="{Binding Grinder2.Line2}"
+                            Line3="{Binding Grinder2.Line3}"
+                            Line4="{Binding Grinder2.Line4}"
+                            Line4Brush="{Binding Grinder2.Line4Brush}"
+                            Line5="{Binding Grinder2.Line5}" />
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Grinder3.Title}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Grinder3.EStopCommand}"
+                            Btn2="清除报警"
+                            Btn2Command="{Binding Grinder3.ClearAlarmCommand}"
+                            Btn3="读状态"
+                            Btn3Command="{Binding Grinder3.ReadStatusCommand}"
+                            Btn4="数据完成"
+                            Btn4Command="{Binding Grinder3.DataSentDoneCommand}"
+                            Btn5="上料到达"
+                            Btn5Command="{Binding Grinder3.LoadInPlaceCommand}"
+                            Btn6="上料完成"
+                            Btn6Command="{Binding Grinder3.LoadDoneCommand}"
+                            Btn7="下料到达"
+                            Btn7Command="{Binding Grinder3.UnloadInPlaceCommand}"
+                            Btn8="下料完成"
+                            Btn8Command="{Binding Grinder3.UnloadDoneCommand}"
+                            ConnectedBrush="{Binding Grinder3.ConnectedBrush}"
+                            Line1="{Binding Grinder3.Line1}"
+                            Line1Brush="{Binding Grinder3.Line1Brush}"
+                            Line2="{Binding Grinder3.Line2}"
+                            Line3="{Binding Grinder3.Line3}"
+                            Line4="{Binding Grinder3.Line4}"
+                            Line4Brush="{Binding Grinder3.Line4Brush}"
+                            Line5="{Binding Grinder3.Line5}" />
+                        <controls:OverviewDeviceCard
+                            Title="{Binding Grinder4.Title}"
+                            Btn1="急停"
+                            Btn1Command="{Binding Grinder4.EStopCommand}"
+                            Btn2="清除报警"
+                            Btn2Command="{Binding Grinder4.ClearAlarmCommand}"
+                            Btn3="读状态"
+                            Btn3Command="{Binding Grinder4.ReadStatusCommand}"
+                            Btn4="数据完成"
+                            Btn4Command="{Binding Grinder4.DataSentDoneCommand}"
+                            Btn5="上料到达"
+                            Btn5Command="{Binding Grinder4.LoadInPlaceCommand}"
+                            Btn6="上料完成"
+                            Btn6Command="{Binding Grinder4.LoadDoneCommand}"
+                            Btn7="下料到达"
+                            Btn7Command="{Binding Grinder4.UnloadInPlaceCommand}"
+                            Btn8="下料完成"
+                            Btn8Command="{Binding Grinder4.UnloadDoneCommand}"
+                            ConnectedBrush="{Binding Grinder4.ConnectedBrush}"
+                            Line1="{Binding Grinder4.Line1}"
+                            Line1Brush="{Binding Grinder4.Line1Brush}"
+                            Line2="{Binding Grinder4.Line2}"
+                            Line3="{Binding Grinder4.Line3}"
+                            Line4="{Binding Grinder4.Line4}"
+                            Line4Brush="{Binding Grinder4.Line4Brush}"
+                            Line5="{Binding Grinder4.Line5}" />
+                    </UniformGrid>
+
+                    <!--~1~  研磨参数写入面板（测试用）  @1@
+                    <Border
+                        Margin="0,6,0,0"
+                        Padding="6"
+                        Background="#1A3A5C"
+                        BorderBrush="#2C86C8"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <StackPanel>
+                            <TextBlock
+                                Margin="0,0,0,6"
+                                FontSize="13"
+                                FontWeight="Bold"
+                                Foreground="#FFD700"
+                                Text="研磨参数写入（测试） — 写入版辊直径/版孔/长度到 PLC Word 寄存器" />
+                            <UniformGrid Columns="7" Rows="1">
+                                ~1~  研磨机选择  @1@
+                                <StackPanel
+                                    Margin="4,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <TextBlock
+                                        Margin="0,0,4,0"
+                                        VerticalAlignment="Center"
+                                        Foreground="White"
+                                        Text="目标：" />
+                                    <ComboBox
+                                        Width="120"
+                                        Height="26"
+                                        FontSize="12"
+                                        SelectedIndex="{Binding GrinderParamIndex}">
+                                        <ComboBoxItem Content="研磨机1(新代)" />
+                                        <ComboBoxItem Content="研磨机2(新代)" />
+                                        <ComboBoxItem Content="研磨机3(西门子)" />
+                                        <ComboBoxItem Content="研磨机4(西门子)" />
+                                    </ComboBox>
+                                </StackPanel>
+                                ~1~  直径  @1@
+                                <StackPanel
+                                    Margin="4,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <TextBlock
+                                        Margin="0,0,4,0"
+                                        VerticalAlignment="Center"
+                                        Foreground="White"
+                                        Text="直径(mm):" />
+                                    <TextBox
+                                        Width="65"
+                                        Height="24"
+                                        FontSize="12"
+                                        Text="{Binding GrinderDiameter, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                ~1~  版孔  @1@
+                                <StackPanel
+                                    Margin="4,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <TextBlock
+                                        Margin="0,0,4,0"
+                                        VerticalAlignment="Center"
+                                        Foreground="White"
+                                        Text="版孔(1大2小):" />
+                                    <TextBox
+                                        Width="40"
+                                        Height="24"
+                                        FontSize="12"
+                                        Text="{Binding GrinderBoreType, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                ~1~  长度  @1@
+                                <StackPanel
+                                    Margin="4,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <TextBlock
+                                        Margin="0,0,4,0"
+                                        VerticalAlignment="Center"
+                                        Foreground="White"
+                                        Text="长度(mm):" />
+                                    <TextBox
+                                        Width="65"
+                                        Height="24"
+                                        FontSize="12"
+                                        Text="{Binding GrinderLength, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                ~1~  写入按钮  @1@
+                                <Button
+                                    Width="90"
+                                    Height="28"
+                                    Background="#FF8C00"
+                                    Command="{Binding WriteGrinderParamsCommand}"
+                                    Content="写入参数"
+                                    FontWeight="Bold"
+                                    Foreground="White" />
+                                ~1~  占位  @1@
+                                <Border />
+                                <Border />
+                            </UniformGrid>
+                        </StackPanel>
+                    </Border>-->
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</UserControl>

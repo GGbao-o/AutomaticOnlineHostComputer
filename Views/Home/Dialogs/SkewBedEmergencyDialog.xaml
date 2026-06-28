@@ -1,0 +1,111 @@
+<Window
+    x:Class="AutomaticOnlineHostComputer.Views.Home.Dialogs.SkewBedEmergencyDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="斜床应急作废"
+    Width="560"
+    Height="520"
+    Background="{StaticResource AppBackgroundBrush}"
+    ResizeMode="CanResize"
+    WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border
+            Grid.Row="0"
+            Margin="0,0,0,12"
+            Padding="12"
+            Background="#3B2F1F"
+            CornerRadius="6">
+            <StackPanel>
+                <TextBlock
+                    FontSize="16"
+                    FontWeight="Bold"
+                    Foreground="White"
+                    Text="斜床应急作废" />
+                <TextBlock
+                    Margin="0,6,0,0"
+                    FontSize="12"
+                    Foreground="#FFF7D6"
+                    Text="先清机床参数/握手寄存器，再清上位机斜床缓存/状态并释放软件锁。执行前请先人工确认天车、磁铁、工件已处理到安全状态。"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="140" />
+                <ColumnDefinition Width="20" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="140" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                Text="线体" />
+            <ComboBox
+                x:Name="LineBox"
+                Grid.Column="1"
+                Height="30"
+                Margin="8,0,0,0"
+                SelectionChanged="LineBox_SelectionChanged" />
+            <TextBlock
+                Grid.Column="3"
+                VerticalAlignment="Center"
+                Text="斜床" />
+            <ComboBox
+                x:Name="BedBox"
+                Grid.Column="4"
+                Height="30"
+                Margin="8,0,0,0" />
+            <Button
+                Grid.Column="5"
+                Width="88"
+                Height="30"
+                Margin="12,0,0,0"
+                HorizontalAlignment="Left"
+                Click="Refresh_Click"
+                Content="刷新状态" />
+        </Grid>
+
+        <TextBox
+            x:Name="InfoBox"
+            Grid.Row="2"
+            Padding="10"
+            AcceptsReturn="True"
+            Background="White"
+            BorderBrush="#CBD5E1"
+            FontFamily="Consolas, Microsoft YaHei UI"
+            FontSize="13"
+            IsReadOnly="True"
+            TextWrapping="Wrap"
+            VerticalScrollBarVisibility="Auto" />
+
+        <StackPanel
+            Grid.Row="3"
+            Margin="0,12,0,0"
+            HorizontalAlignment="Right"
+            Orientation="Horizontal">
+            <Button
+                Width="138"
+                Height="32"
+                Margin="0,0,8,0"
+                Click="EmergencyClear_Click"
+                Content="确认应急处理"
+                Style="{StaticResource DangerButtonStyle}" />
+            <Button
+                Width="80"
+                Height="32"
+                Click="Close_Click"
+                Content="关闭" />
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,170 @@
+<Window
+    x:Class="AutomaticOnlineHostComputer.Views.Home.Dialogs.ClearMachineStatusDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="清空机器状态"
+    Width="520"
+    Height="700"
+    Background="{StaticResource AppBackgroundBrush}"
+    ResizeMode="CanResize"
+    WindowStartupLocation="CenterOwner">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!--  标题  -->
+        <Border
+            Grid.Row="0"
+            Margin="0,0,0,12"
+            Padding="12"
+            Background="#26323F"
+            CornerRadius="6">
+            <StackPanel>
+                <TextBlock
+                    FontSize="16"
+                    FontWeight="Bold"
+                    Foreground="White"
+                    Text="清空机器状态" />
+                <TextBlock
+                    Margin="0,6,0,0"
+                    FontSize="12"
+                    Foreground="#FFFBBF24"
+                    Text="将上位机写入寄存器的信号全部清零。请确认所有设备已停止运行。"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <!--  按钮区 + 日志  -->
+        <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!--  双头镗  -->
+            <GroupBox
+                Grid.Row="0"
+                Margin="0,0,0,6"
+                Padding="8"
+                Header="双头镗 (Syntec R区)">
+                <StackPanel Orientation="Horizontal">
+                    <Button
+                        x:Name="BtnBoring1"
+                        Width="140"
+                        Height="28"
+                        Margin="0,0,8,0"
+                        Click="BtnBoring1_Click"
+                        Content="清空 1号线 ST103" />
+                    <Button
+                        x:Name="BtnBoring2"
+                        Width="140"
+                        Height="28"
+                        Click="BtnBoring2_Click"
+                        Content="清空 2号线 ST402" />
+                </StackPanel>
+            </GroupBox>
+
+            <!--  斜床  -->
+            <GroupBox
+                Grid.Row="1"
+                Margin="0,0,0,6"
+                Padding="8"
+                Header="斜床 (锦州 Modbus / FANUC FOCAS)">
+                <StackPanel>
+                    <StackPanel Margin="0,0,0,6" Orientation="Horizontal">
+                        <Button
+                            x:Name="BtnSkewModbus"
+                            Width="150"
+                            Height="28"
+                            Margin="0,0,8,0"
+                            Click="BtnSkewModbus_Click"
+                            Content="清空 ST108~111 (锦州)" />
+                        <Button
+                            x:Name="BtnSkewST112"
+                            Width="150"
+                            Height="28"
+                            Click="BtnSkewST112_Click"
+                            Content="清空 ST112 (FANUC)" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,0,6" Orientation="Horizontal">
+                        <Button
+                            x:Name="BtnSkewLine2"
+                            Width="150"
+                            Height="28"
+                            Click="BtnSkewLine2_Click"
+                            Content="清空 ST606~610 (2号线 FANUC)" />
+                    </StackPanel>
+
+                </StackPanel>
+            </GroupBox>
+
+            <!--  研磨机  -->
+            <GroupBox
+                Grid.Row="2"
+                Margin="0,0,0,6"
+                Padding="8"
+                Header="研磨机 (Modbus TCP)">
+                <StackPanel Orientation="Horizontal">
+                    <Button
+                        x:Name="BtnGrinderB"
+                        Width="150"
+                        Height="28"
+                        Margin="0,0,8,0"
+                        Click="BtnGrinderB_Click"
+                        Content="清空 ST701~702 (新代)" />
+                    <Button
+                        x:Name="BtnGrinderA"
+                        Width="150"
+                        Height="28"
+                        Click="BtnGrinderA_Click"
+                        Content="清空 ST703~704 (西门子)" />
+                </StackPanel>
+            </GroupBox>
+
+            <!--  日志  -->
+            <GroupBox
+                Grid.Row="3"
+                Margin="0,8,0,0"
+                Padding="5"
+                Header="操作日志">
+                <RichTextBox
+                    x:Name="TxtLog"
+                    Height="160"
+                    Background="White"
+                    FontFamily="Consolas"
+                    FontSize="11"
+                    IsReadOnly="True"
+                    VerticalScrollBarVisibility="Auto" />
+            </GroupBox>
+        </Grid>
+
+        <!--  底部按钮  -->
+        <StackPanel
+            Grid.Row="2"
+            Margin="0,12,0,0"
+            HorizontalAlignment="Right"
+            Orientation="Horizontal">
+            <Button
+                x:Name="BtnClearAll"
+                Width="120"
+                Height="32"
+                Margin="0,0,12,0"
+                Background="#FF4444"
+                Click="BtnClearAll_Click"
+                Content="⚠ 一键清空全部"
+                FontWeight="Bold"
+                Foreground="White" />
+            <Button
+                Width="80"
+                Height="28"
+                Click="BtnClose_Click"
+                Content="关闭" />
+        </StackPanel>
+    </Grid>
+</Window>

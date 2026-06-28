@@ -1,0 +1,12 @@
+<UserControl
+    x:Class="AutomaticOnlineHostComputer.Views.Motion.MotionSettingsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="clr-namespace:AutomaticOnlineHostComputer.Views.Motion.Controls"
+    Background="#E8EDF3">
+    <Grid Margin="10">
+        <controls:ManualMotionControlPanel
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch" />
+    </Grid>
+</UserControl>

@@ -1,0 +1,1110 @@
+<UserControl
+    x:Class="AutomaticOnlineHostComputer.Views.FlowStatus.FlowStatusView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="#E9EEF5">
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="PageBgBrush" Color="#E9EEF5" />
+        <SolidColorBrush x:Key="PanelBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="BorderBrushSoft" Color="#CED8E6" />
+        <SolidColorBrush x:Key="TextBrush" Color="#172033" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#627084" />
+        <SolidColorBrush x:Key="SubtleBrush" Color="#EEF4FB" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#1677FF" />
+        <SolidColorBrush x:Key="OkBrush" Color="#16A34A" />
+        <SolidColorBrush x:Key="WarnBrush" Color="#F59E0B" />
+        <SolidColorBrush x:Key="AlarmBrush" Color="#DC2626" />
+        <SolidColorBrush x:Key="OfflineBrush" Color="#94A3B8" />
+
+        <Style x:Key="PanelStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrushSoft}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        </Style>
+
+        <Style x:Key="SectionHintStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="12,3,0,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+        </Style>
+
+        <Style x:Key="NodeTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}" />
+        </Style>
+
+        <Style x:Key="NodeSubStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}" />
+        </Style>
+
+        <Style x:Key="FlowNodeStyle" TargetType="Border">
+            <Setter Property="Width" Value="186" />
+            <Setter Property="Height" Value="124" />
+            <Setter Property="Margin" Value="0,0,9,0" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="Background" Value="{StaticResource CardBrush}" />
+            <Setter Property="BorderBrush" Value="#C9D5E4" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="7" />
+        </Style>
+
+        <Style
+            x:Key="CompactNodeStyle"
+            BasedOn="{StaticResource FlowNodeStyle}"
+            TargetType="Border">
+            <Setter Property="Width" Value="176" />
+            <Setter Property="Height" Value="108" />
+        </Style>
+
+        <Style
+            x:Key="DetailedNodeStyle"
+            BasedOn="{StaticResource FlowNodeStyle}"
+            TargetType="Border">
+            <Setter Property="Width" Value="360" />
+            <Setter Property="Height" Value="148" />
+        </Style>
+
+        <Style x:Key="ArrowStyle" TargetType="TextBlock">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Margin" Value="0,0,9,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="FontSize" Value="21" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="#7C8EA5" />
+            <Setter Property="Text" Value="&gt;" />
+        </Style>
+
+        <Style x:Key="KpiStyle" TargetType="Border">
+            <Setter Property="Height" Value="72" />
+            <Setter Property="MinWidth" Value="158" />
+            <Setter Property="Margin" Value="0,0,10,0" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Background" Value="#FFFFFF" />
+            <Setter Property="BorderBrush" Value="#C7D4E5" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+
+        <DataTemplate x:Key="StationNodeTemplate">
+            <Border Style="{StaticResource FlowNodeStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Border
+                        Grid.RowSpan="4"
+                        Width="5"
+                        Margin="0,2,9,2"
+                        Background="{Binding Status1Brush, FallbackValue=#94A3B8}"
+                        CornerRadius="3" />
+                    <DockPanel Grid.Column="1">
+                        <Border
+                            Width="11"
+                            Height="11"
+                            Margin="0,1,7,0"
+                            Background="{Binding ConnectedBrush, FallbackValue=#94A3B8}"
+                            CornerRadius="6"
+                            DockPanel.Dock="Left" />
+                        <TextBlock Style="{StaticResource NodeTitleStyle}" Text="{Binding RelativeSource={RelativeSource AncestorType=ContentControl}, Path=Tag}" />
+                    </DockPanel>
+                    <Border
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Margin="0,8,0,6"
+                        Padding="8,4"
+                        Background="{StaticResource SubtleBrush}"
+                        BorderBrush="{Binding Status1Brush, FallbackValue=#94A3B8}"
+                        BorderThickness="1"
+                        CornerRadius="6">
+                        <TextBlock
+                            FontSize="16"
+                            FontWeight="Bold"
+                            Foreground="{Binding Status1Brush, FallbackValue=#334155}"
+                            Text="{Binding Status1, FallbackValue=未知}"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTip="{Binding Status1}" />
+                    </Border>
+                    <TextBlock
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        Style="{StaticResource NodeSubStyle}"
+                        Text="{Binding Status2, FallbackValue=--}" />
+                    <TextBlock
+                        Grid.Row="3"
+                        Grid.Column="1"
+                        Margin="0,3,0,0"
+                        Style="{StaticResource NodeSubStyle}"
+                        Text="{Binding IpText, FallbackValue=--}" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="DetailedStationNodeTemplate">
+            <Border Style="{StaticResource DetailedNodeStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Border
+                        Grid.RowSpan="4"
+                        Width="5"
+                        Margin="0,2,9,2"
+                        Background="{Binding Status1Brush, FallbackValue=#94A3B8}"
+                        CornerRadius="3" />
+                    <DockPanel Grid.Column="1">
+                        <Border
+                            Width="11"
+                            Height="11"
+                            Margin="0,1,7,0"
+                            Background="{Binding ConnectedBrush, FallbackValue=#94A3B8}"
+                            CornerRadius="6"
+                            DockPanel.Dock="Left" />
+                        <TextBlock Style="{StaticResource NodeTitleStyle}" Text="{Binding RelativeSource={RelativeSource AncestorType=ContentControl}, Path=Tag}" />
+                    </DockPanel>
+                    <Border
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Margin="0,7,0,5"
+                        Padding="8,3"
+                        Background="{StaticResource SubtleBrush}"
+                        BorderBrush="{Binding Status1Brush, FallbackValue=#94A3B8}"
+                        BorderThickness="1"
+                        CornerRadius="6">
+                        <TextBlock
+                            FontSize="15"
+                            FontWeight="Bold"
+                            Foreground="{Binding Status1Brush, FallbackValue=#334155}"
+                            Text="{Binding Status1, FallbackValue=未知}"
+                            ToolTip="{Binding Status1}" />
+                    </Border>
+                    <TextBlock
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        FontSize="11"
+                        Foreground="{StaticResource MutedBrush}"
+                        Text="{Binding Status2, FallbackValue=--}"
+                        TextWrapping="Wrap"
+                        ToolTip="{Binding Status2}" />
+                    <TextBlock
+                        Grid.Row="3"
+                        Grid.Column="1"
+                        Margin="0,3,0,0"
+                        Style="{StaticResource NodeSubStyle}"
+                        Text="{Binding IpText, FallbackValue=--}" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="CompactStationNodeTemplate">
+            <Border Style="{StaticResource CompactNodeStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Border
+                        Grid.RowSpan="3"
+                        Width="5"
+                        Margin="0,2,9,2"
+                        Background="{Binding Status1Brush, FallbackValue=#94A3B8}"
+                        CornerRadius="3" />
+                    <DockPanel Grid.Column="1">
+                        <Border
+                            Width="10"
+                            Height="10"
+                            Margin="0,1,7,0"
+                            Background="{Binding ConnectedBrush, FallbackValue=#94A3B8}"
+                            CornerRadius="5"
+                            DockPanel.Dock="Left" />
+                        <TextBlock Style="{StaticResource NodeTitleStyle}" Text="{Binding RelativeSource={RelativeSource AncestorType=ContentControl}, Path=Tag}" />
+                    </DockPanel>
+                    <TextBlock
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Margin="0,8,0,0"
+                        FontSize="15"
+                        FontWeight="Bold"
+                        Foreground="{Binding Status1Brush, FallbackValue=#334155}"
+                        Text="{Binding Status1, FallbackValue=未知}"
+                        TextTrimming="CharacterEllipsis"
+                        ToolTip="{Binding Status1}" />
+                    <TextBlock
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        Style="{StaticResource NodeSubStyle}"
+                        Text="{Binding Status2, FallbackValue=--}" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <Style x:Key="NodeHostStyle" TargetType="ContentControl">
+            <Setter Property="ContentTemplate" Value="{StaticResource StationNodeTemplate}" />
+        </Style>
+
+        <Style x:Key="CompactNodeHostStyle" TargetType="ContentControl">
+            <Setter Property="ContentTemplate" Value="{StaticResource CompactStationNodeTemplate}" />
+        </Style>
+
+        <Style x:Key="DetailedNodeHostStyle" TargetType="ContentControl">
+            <Setter Property="ContentTemplate" Value="{StaticResource DetailedStationNodeTemplate}" />
+        </Style>
+
+        <Style x:Key="MotionNodeStyle" TargetType="Border">
+            <Setter Property="Width" Value="238" />
+            <Setter Property="Height" Value="96" />
+            <Setter Property="Margin" Value="0,0,9,0" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Background" Value="{StaticResource CardBrush}" />
+            <Setter Property="BorderBrush" Value="#C9D5E4" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="7" />
+        </Style>
+
+        <DataTemplate x:Key="CraneMotionNodeTemplate">
+            <Border Style="{StaticResource MotionNodeStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="5" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border
+                        Grid.RowSpan="3"
+                        Margin="0,1,9,1"
+                        Background="{Binding ConnectedBrush, FallbackValue=#94A3B8}"
+                        CornerRadius="3" />
+                    <TextBlock
+                        Grid.Column="1"
+                        Style="{StaticResource NodeTitleStyle}"
+                        Text="{Binding CraneName}" />
+                    <TextBlock
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Margin="0,6,0,2"
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Foreground="{Binding Line1Brush, FallbackValue=#334155}"
+                        Text="{Binding Line1, FallbackValue=未连接}"
+                        ToolTip="{Binding Line1}" />
+                    <TextBlock
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        Style="{StaticResource NodeSubStyle}"
+                        Text="{Binding Line5, FallbackValue=--}" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ManipulatorMotionNodeTemplate">
+            <Border Style="{StaticResource MotionNodeStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="5" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border
+                        Grid.RowSpan="3"
+                        Margin="0,1,9,1"
+                        Background="{Binding ConnectedBrush, FallbackValue=#94A3B8}"
+                        CornerRadius="3" />
+                    <TextBlock
+                        Grid.Column="1"
+                        Style="{StaticResource NodeTitleStyle}"
+                        Text="{Binding Name}" />
+                    <TextBlock
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Margin="0,6,0,2"
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Foreground="{Binding Line1Brush, FallbackValue=#334155}"
+                        Text="{Binding Line1, FallbackValue=未连接}"
+                        ToolTip="{Binding Line1}" />
+                    <TextBlock
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        Style="{StaticResource NodeSubStyle}"
+                        Text="{Binding Line5, FallbackValue=--}" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border
+            Grid.Row="0"
+            Padding="16"
+            Style="{StaticResource PanelStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel>
+                    <TextBlock
+                        FontSize="25"
+                        FontWeight="Bold"
+                        Foreground="{StaticResource TextBrush}"
+                        Text="全厂流程状态大屏" />
+                    <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                        <Border
+                            Width="10"
+                            Height="10"
+                            Background="{StaticResource OkBrush}"
+                            CornerRadius="5" />
+                        <TextBlock
+                            Margin="5,0,14,0"
+                            Foreground="{StaticResource MutedBrush}"
+                            Text="空闲/就绪" />
+                        <Border
+                            Width="10"
+                            Height="10"
+                            Background="{StaticResource WarnBrush}"
+                            CornerRadius="5" />
+                        <TextBlock
+                            Margin="5,0,14,0"
+                            Foreground="{StaticResource MutedBrush}"
+                            Text="等待/有板/加工" />
+                        <Border
+                            Width="10"
+                            Height="10"
+                            Background="{StaticResource AlarmBrush}"
+                            CornerRadius="5" />
+                        <TextBlock
+                            Margin="5,0,14,0"
+                            Foreground="{StaticResource MutedBrush}"
+                            Text="报警/异常" />
+                        <Border
+                            Width="10"
+                            Height="10"
+                            Background="{StaticResource OfflineBrush}"
+                            CornerRadius="5" />
+                        <TextBlock
+                            Margin="5,0,0,0"
+                            Foreground="{StaticResource MutedBrush}"
+                            Text="离线/未连接" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Border Style="{StaticResource KpiStyle}">
+                        <StackPanel>
+                            <TextBlock Foreground="{StaticResource MutedBrush}" Text="1号线缓存" />
+                            <TextBlock
+                                FontSize="25"
+                                FontWeight="Bold"
+                                Foreground="{StaticResource AccentBrush}"
+                                Text="{Binding Line1CachedCount, FallbackValue=0}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource KpiStyle}">
+                        <StackPanel>
+                            <TextBlock Foreground="{StaticResource MutedBrush}" Text="2号线缓存" />
+                            <TextBlock
+                                FontSize="25"
+                                FontWeight="Bold"
+                                Foreground="#7C3AED"
+                                Text="{Binding Line2CachedCount, FallbackValue=0}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource KpiStyle}">
+                        <StackPanel>
+                            <TextBlock Foreground="{StaticResource MutedBrush}" Text="研磨缓存" />
+                            <TextBlock
+                                FontSize="25"
+                                FontWeight="Bold"
+                                Foreground="{StaticResource WarnBrush}"
+                                Text="{Binding GrindingCachedCount, FallbackValue=0}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ScrollViewer
+            Grid.Row="1"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <Border Style="{StaticResource PanelStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,10">
+                            <TextBlock
+                                DockPanel.Dock="Left"
+                                Style="{StaticResource SectionTitleStyle}"
+                                Text="运动设备实时状态" />
+                            <TextBlock Style="{StaticResource SectionHintStyle}" Text="5台天车 / 3台机械手，只读显示连接、任务与坐标" />
+                        </DockPanel>
+                        <ScrollViewer
+                            Grid.Row="1"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Disabled">
+                            <StackPanel Orientation="Horizontal">
+                                <ContentControl Content="{Binding Crane1F}" ContentTemplate="{StaticResource CraneMotionNodeTemplate}" />
+                                <ContentControl Content="{Binding Crane1R}" ContentTemplate="{StaticResource CraneMotionNodeTemplate}" />
+                                <ContentControl Content="{Binding Crane2F}" ContentTemplate="{StaticResource CraneMotionNodeTemplate}" />
+                                <ContentControl Content="{Binding Crane2R}" ContentTemplate="{StaticResource CraneMotionNodeTemplate}" />
+                                <ContentControl Content="{Binding CraneGL}" ContentTemplate="{StaticResource CraneMotionNodeTemplate}" />
+                                <ContentControl Content="{Binding Manipulator1}" ContentTemplate="{StaticResource ManipulatorMotionNodeTemplate}" />
+                                <ContentControl Content="{Binding Manipulator2}" ContentTemplate="{StaticResource ManipulatorMotionNodeTemplate}" />
+                                <ContentControl Content="{Binding Manipulator3}" ContentTemplate="{StaticResource ManipulatorMotionNodeTemplate}" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Border
+                        Grid.Row="0"
+                        Grid.Column="0"
+                        Style="{StaticResource PanelStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <DockPanel Margin="0,0,0,10">
+                                <TextBlock
+                                    DockPanel.Dock="Left"
+                                    Style="{StaticResource SectionTitleStyle}"
+                                    Text="1号线主流程" />
+                                <TextBlock Style="{StaticResource SectionHintStyle}" Text="上料 -&gt; 双头镗 -&gt; 打号 -&gt; 中转 -&gt; 斜床 -&gt; 分流" />
+                            </DockPanel>
+                            <ScrollViewer
+                                Grid.Row="1"
+                                HorizontalScrollBarVisibility="Auto"
+                                VerticalScrollBarVisibility="Disabled">
+                                <StackPanel Orientation="Horizontal">
+                                    <ContentControl
+                                        Content="{Binding StationCards[ST001]}"
+                                        Style="{StaticResource DetailedNodeHostStyle}"
+                                        Tag="总上料 ST001" />
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <!--<ContentControl Style="{StaticResource NodeHostStyle}" Tag="机械手1 ST002" Content="{Binding StationCards[ST002]}" />
+                            <TextBlock Style="{StaticResource ArrowStyle}" />-->
+                                    <ContentControl
+                                        Content="{Binding StationCards[ST011]}"
+                                        Style="{StaticResource NodeHostStyle}"
+                                        Tag="1号线货叉 ST011" />
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <ContentControl
+                                        Content="{Binding StationCards[ST103]}"
+                                        Style="{StaticResource DetailedNodeHostStyle}"
+                                        Tag="双头镗1 ST103" />
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <ContentControl
+                                        Content="{Binding StationCards[ST501]}"
+                                        Style="{StaticResource NodeHostStyle}"
+                                        Tag="打号机1 ST501" />
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <Border Width="212" Style="{StaticResource FlowNodeStyle}">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <Border
+                                                    Width="11"
+                                                    Height="11"
+                                                    Margin="0,1,7,0"
+                                                    Background="{Binding StationCards[ST105].ConnectedBrush, FallbackValue=#94A3B8}"
+                                                    CornerRadius="6" />
+                                                <TextBlock Style="{StaticResource NodeTitleStyle}" Text="中转架 ST105/101/106" />
+                                            </DockPanel>
+                                            <TextBlock
+                                                Margin="0,8,0,2"
+                                                FontSize="14"
+                                                FontWeight="Bold"
+                                                Foreground="{Binding StationCards[ST105].Status1Brush, FallbackValue=#334155}"
+                                                Text="{Binding StationCards[ST105].Status1, StringFormat=架1 {0}, FallbackValue=架1 --}" />
+                                            <TextBlock Style="{StaticResource NodeSubStyle}" Text="{Binding StationCards[ST101].Status1, StringFormat=架2 {0}, FallbackValue=架2 --}" />
+                                            <TextBlock Style="{StaticResource NodeSubStyle}" Text="{Binding StationCards[ST106].Status1, StringFormat=架3 {0}, FallbackValue=架3 --}" />
+                                            <TextBlock
+                                                Margin="0,4,0,0"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="{Binding StationCards[ST105].Status2, FallbackValue=MC63}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <!--<ContentControl Style="{StaticResource NodeHostStyle}" Tag="后天车 ST902" Content="{Binding StationCards[ST902]}" />
+                            <TextBlock Style="{StaticResource ArrowStyle}" />-->
+                                    <Border
+                                        Width="500"
+                                        Height="178"
+                                        Margin="0,0,9,0"
+                                        Padding="10"
+                                        Background="{StaticResource CardBrush}"
+                                        BorderBrush="#C9D5E4"
+                                        BorderThickness="1"
+                                        CornerRadius="7">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
+                                            <DockPanel>
+                                                <Border
+                                                    Width="11"
+                                                    Height="11"
+                                                    Margin="0,1,7,0"
+                                                    Background="{Binding StationCards[ST108].ConnectedBrush, FallbackValue=#94A3B8}"
+                                                    CornerRadius="6" />
+                                                <TextBlock Style="{StaticResource NodeTitleStyle}" Text="斜床组 ST108~112" />
+                                            </DockPanel>
+                                            <Grid Grid.Row="1" Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="34" />
+                                                    <ColumnDefinition Width="74" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="20" />
+                                                    <RowDefinition Height="20" />
+                                                    <RowDefinition Height="20" />
+                                                    <RowDefinition Height="20" />
+                                                    <RowDefinition Height="20" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock
+                                                    Grid.Row="0"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="1号" />
+                                                <TextBlock
+                                                    Grid.Row="0"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST108].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST108].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="0"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST108].Status2, FallbackValue=--}" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="2号" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST109].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST109].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST109].Status2, FallbackValue=--}" />
+                                                <TextBlock
+                                                    Grid.Row="2"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="3号" />
+                                                <TextBlock
+                                                    Grid.Row="2"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST111].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST111].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="2"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST111].Status2, FallbackValue=--}" />
+                                                <TextBlock
+                                                    Grid.Row="3"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="4号" />
+                                                <TextBlock
+                                                    Grid.Row="3"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST110].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST110].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="3"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST110].Status2, FallbackValue=--}" />
+                                                <TextBlock
+                                                    Grid.Row="4"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="5号" />
+                                                <TextBlock
+                                                    Grid.Row="4"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST112].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST112].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="4"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST112].Status2, FallbackValue=--}" />
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <Border Width="202" Style="{StaticResource FlowNodeStyle}">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <Border
+                                                    Width="11"
+                                                    Height="11"
+                                                    Margin="0,1,7,0"
+                                                    Background="{Binding StationCards[ST019].ConnectedBrush, FallbackValue=#94A3B8}"
+                                                    CornerRadius="6" />
+                                                <TextBlock Style="{StaticResource NodeTitleStyle}" Text="下料分流" />
+                                            </DockPanel>
+                                            <TextBlock
+                                                Margin="0,8,0,2"
+                                                FontSize="14"
+                                                FontWeight="Bold"
+                                                Foreground="{Binding StationCards[ST019].Status1Brush, FallbackValue=#334155}"
+                                                Text="{Binding StationCards[ST019].Status1, StringFormat=ST019 {0}, FallbackValue=ST019 --}" />
+                                            <TextBlock Style="{StaticResource NodeSubStyle}" Text="{Binding StationCards[ST010].Status1, StringFormat=ST010 {0}, FallbackValue=ST010 --}" />
+                                            <TextBlock
+                                                Margin="0,4,0,0"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="动平衡 / 研磨上料" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+
+                    <Border
+                        Grid.Row="1"
+                        Grid.Column="0"
+                        Style="{StaticResource PanelStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <DockPanel Margin="0,0,0,10">
+                                <TextBlock
+                                    DockPanel.Dock="Left"
+                                    Style="{StaticResource SectionTitleStyle}"
+                                    Text="2号线主流程" />
+                                <TextBlock Style="{StaticResource SectionHintStyle}" Text="上料 -&gt; 双头镗 -&gt; 打号 -&gt; 中转 -&gt; 斜床 -&gt; 分流" />
+                            </DockPanel>
+                            <ScrollViewer
+                                Grid.Row="1"
+                                HorizontalScrollBarVisibility="Auto"
+                                VerticalScrollBarVisibility="Disabled">
+                                <StackPanel Orientation="Horizontal">
+                                    <ContentControl
+                                        Content="{Binding StationCards[ST712]}"
+                                        Style="{StaticResource NodeHostStyle}"
+                                        Tag="2号线货叉 ST712" />
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <!--<ContentControl
+                                Content="{Binding StationCards[ST104]}"
+                                Style="{StaticResource NodeHostStyle}"
+                                Tag="2号前天车 ST104" />
+                            <TextBlock Style="{StaticResource ArrowStyle}" />-->
+                                    <ContentControl
+                                        Content="{Binding StationCards[ST402]}"
+                                        Style="{StaticResource DetailedNodeHostStyle}"
+                                        Tag="双头镗2 ST402" />
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <ContentControl
+                                        Content="{Binding StationCards[ST502]}"
+                                        Style="{StaticResource NodeHostStyle}"
+                                        Tag="打号机2 ST502" />
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <Border Width="212" Style="{StaticResource FlowNodeStyle}">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <Border
+                                                    Width="11"
+                                                    Height="11"
+                                                    Margin="0,1,7,0"
+                                                    Background="{Binding StationCards[ST016].ConnectedBrush, FallbackValue=#94A3B8}"
+                                                    CornerRadius="6" />
+                                                <TextBlock Style="{StaticResource NodeTitleStyle}" Text="中转架 ST016/017/018" />
+                                            </DockPanel>
+                                            <TextBlock
+                                                Margin="0,8,0,2"
+                                                FontSize="14"
+                                                FontWeight="Bold"
+                                                Foreground="{Binding StationCards[ST016].Status1Brush, FallbackValue=#334155}"
+                                                Text="{Binding StationCards[ST016].Status1, StringFormat=架1 {0}, FallbackValue=架1 --}" />
+                                            <TextBlock Style="{StaticResource NodeSubStyle}" Text="{Binding StationCards[ST017].Status1, StringFormat=架2 {0}, FallbackValue=架2 --}" />
+                                            <TextBlock Style="{StaticResource NodeSubStyle}" Text="{Binding StationCards[ST018].Status1, StringFormat=架3 {0}, FallbackValue=架3 --}" />
+                                            <TextBlock
+                                                Margin="0,4,0,0"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="{Binding StationCards[ST016].Status2, FallbackValue=MC63}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <!--<ContentControl
+                                Content="{Binding StationCards[ST904]}"
+                                Style="{StaticResource NodeHostStyle}"
+                                Tag="后天车 ST904" />
+                            <TextBlock Style="{StaticResource ArrowStyle}" />-->
+                                    <Border
+                                        Width="500"
+                                        Height="178"
+                                        Margin="0,0,9,0"
+                                        Padding="10"
+                                        Background="{StaticResource CardBrush}"
+                                        BorderBrush="#C9D5E4"
+                                        BorderThickness="1"
+                                        CornerRadius="7">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
+                                            <DockPanel>
+                                                <Border
+                                                    Width="11"
+                                                    Height="11"
+                                                    Margin="0,1,7,0"
+                                                    Background="{Binding StationCards[ST606].ConnectedBrush, FallbackValue=#94A3B8}"
+                                                    CornerRadius="6" />
+                                                <TextBlock Style="{StaticResource NodeTitleStyle}" Text="斜床组 ST606~610" />
+                                            </DockPanel>
+                                            <Grid Grid.Row="1" Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="34" />
+                                                    <ColumnDefinition Width="74" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="20" />
+                                                    <RowDefinition Height="20" />
+                                                    <RowDefinition Height="20" />
+                                                    <RowDefinition Height="20" />
+                                                    <RowDefinition Height="20" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock
+                                                    Grid.Row="0"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="6号" />
+                                                <TextBlock
+                                                    Grid.Row="0"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST606].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST606].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="0"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST606].Status2, FallbackValue=--}" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="7号" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST607].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST607].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST607].Status2, FallbackValue=--}" />
+                                                <TextBlock
+                                                    Grid.Row="2"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="8号" />
+                                                <TextBlock
+                                                    Grid.Row="2"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST608].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST608].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="2"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST608].Status2, FallbackValue=--}" />
+                                                <TextBlock
+                                                    Grid.Row="3"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="9号" />
+                                                <TextBlock
+                                                    Grid.Row="3"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST609].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST609].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="3"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST609].Status2, FallbackValue=--}" />
+                                                <TextBlock
+                                                    Grid.Row="4"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="10号" />
+                                                <TextBlock
+                                                    Grid.Row="4"
+                                                    Grid.Column="1"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{Binding StationCards[ST610].Status1Brush, FallbackValue=#334155}"
+                                                    Text="{Binding StationCards[ST610].Status1, FallbackValue=--}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Grid.Row="4"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource NodeSubStyle}"
+                                                    Text="{Binding StationCards[ST610].Status2, FallbackValue=--}" />
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource ArrowStyle}" />
+                                    <ContentControl
+                                        Content="{Binding StationCards[ST020]}"
+                                        Style="{StaticResource DetailedNodeHostStyle}"
+                                        Tag="2号线动平衡下料架 ST020" />
+                                    <ContentControl
+                                        Content="{Binding StationCards[ST021]}"
+                                        Style="{StaticResource DetailedNodeHostStyle}"
+                                        Tag="2号线短板中转位 ST021" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Border Margin="0" Style="{StaticResource PanelStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,10">
+                            <TextBlock
+                                DockPanel.Dock="Left"
+                                Style="{StaticResource SectionTitleStyle}"
+                                Text="动平衡与研磨支线" />
+                            <TextBlock Style="{StaticResource SectionHintStyle}" Text="下料架 -&gt; 动平衡 -&gt; 研磨上料1号位 -&gt; 2号位测长 -&gt; 3号位取板 -&gt; 研磨机组 -&gt; 研磨下料" />
+                        </DockPanel>
+
+                        <ScrollViewer
+                            Grid.Row="1"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Disabled">
+                            <StackPanel Orientation="Horizontal">
+                                <ContentControl
+                                    Content="{Binding StationCards[ST008]}"
+                                    Style="{StaticResource CompactNodeHostStyle}"
+                                    Tag="平衡下料1 ST008" />
+                                <TextBlock Style="{StaticResource ArrowStyle}" />
+                                <ContentControl
+                                    Content="{Binding StationCards[ST009]}"
+                                    Style="{StaticResource CompactNodeHostStyle}"
+                                    Tag="平衡下料2 ST009" />
+                                <TextBlock Style="{StaticResource ArrowStyle}" />
+                                <ContentControl
+                                    Content="{Binding StationCards[ST010]}"
+                                    Style="{StaticResource CompactNodeHostStyle}"
+                                    Tag="研磨上料1号位 ST010" />
+                                <TextBlock Style="{StaticResource ArrowStyle}" />
+                                <ContentControl
+                                    Content="{Binding StationCards[ST709]}"
+                                    Style="{StaticResource CompactNodeHostStyle}"
+                                    Tag="研磨上料3号位 ST709" />
+                                <TextBlock Style="{StaticResource ArrowStyle}" />
+                                <Border
+                                    Width="550"
+                                    Height="150"
+                                    Margin="0,0,9,0"
+                                    Padding="10"
+                                    Background="{StaticResource CardBrush}"
+                                    BorderBrush="#C9D5E4"
+                                    BorderThickness="1"
+                                    CornerRadius="7">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <DockPanel>
+                                            <Border
+                                                Width="10"
+                                                Height="10"
+                                                Margin="0,1,7,0"
+                                                Background="{Binding StationCards[ST701].ConnectedBrush, FallbackValue=#94A3B8}"
+                                                CornerRadius="5" />
+                                            <TextBlock Style="{StaticResource NodeTitleStyle}" Text="研磨机组 ST701~704" />
+                                        </DockPanel>
+                                        <Grid Grid.Row="1" Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="34" />
+                                                <ColumnDefinition Width="74" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="22" />
+                                                <RowDefinition Height="22" />
+                                                <RowDefinition Height="22" />
+                                                <RowDefinition Height="22" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock
+                                                Grid.Row="0"
+                                                Grid.Column="0"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="1号" />
+                                            <TextBlock
+                                                Grid.Row="0"
+                                                Grid.Column="1"
+                                                FontWeight="SemiBold"
+                                                Foreground="{Binding StationCards[ST701].Status1Brush, FallbackValue=#334155}"
+                                                Text="{Binding StationCards[ST701].Status1, FallbackValue=--}"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <TextBlock
+                                                Grid.Row="0"
+                                                Grid.Column="2"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="{Binding StationCards[ST701].Status2, FallbackValue=--}" />
+                                            <TextBlock
+                                                Grid.Row="1"
+                                                Grid.Column="0"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="2号" />
+                                            <TextBlock
+                                                Grid.Row="1"
+                                                Grid.Column="1"
+                                                FontWeight="SemiBold"
+                                                Foreground="{Binding StationCards[ST702].Status1Brush, FallbackValue=#334155}"
+                                                Text="{Binding StationCards[ST702].Status1, FallbackValue=--}"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <TextBlock
+                                                Grid.Row="1"
+                                                Grid.Column="2"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="{Binding StationCards[ST702].Status2, FallbackValue=--}" />
+                                            <TextBlock
+                                                Grid.Row="2"
+                                                Grid.Column="0"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="3号" />
+                                            <TextBlock
+                                                Grid.Row="2"
+                                                Grid.Column="1"
+                                                FontWeight="SemiBold"
+                                                Foreground="{Binding StationCards[ST703].Status1Brush, FallbackValue=#334155}"
+                                                Text="{Binding StationCards[ST703].Status1, FallbackValue=--}"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <TextBlock
+                                                Grid.Row="2"
+                                                Grid.Column="2"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="{Binding StationCards[ST703].Status2, FallbackValue=--}" />
+                                            <TextBlock
+                                                Grid.Row="3"
+                                                Grid.Column="0"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="4号" />
+                                            <TextBlock
+                                                Grid.Row="3"
+                                                Grid.Column="1"
+                                                FontWeight="SemiBold"
+                                                Foreground="{Binding StationCards[ST704].Status1Brush, FallbackValue=#334155}"
+                                                Text="{Binding StationCards[ST704].Status1, FallbackValue=--}"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <TextBlock
+                                                Grid.Row="3"
+                                                Grid.Column="2"
+                                                Style="{StaticResource NodeSubStyle}"
+                                                Text="{Binding StationCards[ST704].Status2, FallbackValue=--}" />
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                                <TextBlock Style="{StaticResource ArrowStyle}" />
+                                <ContentControl
+                                    Content="{Binding StationCards[ST710]}"
+                                    Style="{StaticResource CompactNodeHostStyle}"
+                                    Tag="研磨下料 ST710" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>
