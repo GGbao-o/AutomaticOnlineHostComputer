@@ -18,7 +18,6 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
     }
 
     /// <summary>
-    /// <summary>
     /// 天车通信服务（汇川 PLC，Modbus TCP）。
     /// <para>
     /// 每台天车实例化一个 CraneService，传入对应 IP 地址。<br/>
@@ -39,7 +38,11 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         private readonly ModbusTcpClient _client;
         private readonly string _name; // 天车名称，调试输出用
         private readonly SemaphoreSlim _connectionLock = new(1, 1); // 连接/断开串行化，防止UI和引擎同时重连同一设备
+        private readonly object _statusLogLock = new(); // UI与流程会共享服务，保护状态日志节流字段
         private bool _manualModeSet;   // 是否已确认 PLC 处于手动模式，避免重复写 D4500
+        private string? _lastStatusLogKey;
+        private DateTime _lastStatusLogAtUtc;
+        private static readonly TimeSpan StatusLogHeartbeat = TimeSpan.FromSeconds(10);
 
         // ── 构造 ─────────────────────────────────────────────────────
         /// <param name="name">天车名称（如"1号线天车前"），仅用于日志输出</param>
@@ -143,11 +146,20 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     HasRoller        = (short)r[29],  // D5029
                 };
 
-                Console.WriteLine($"[CraneService] [{_name}] 状态读取成功 | " +
-                    $"Mode={status.Mode} Busy={status.Busy} Fault={status.Fault} " +
-                    $"ServoAlarm={status.ServoAlarm} PlcAlarm={status.PlcAlarm} " +
-                    $"XPos={status.XPos} YPos={status.YPos} ZPos={status.ZPos}");
+                // 到位轮询最快200ms一次。只在关键状态变化或心跳周期到达时打印，
+                // 避免正常运动期间大量同步刷盘；异常和动作日志仍始终保留。
+                if (ShouldLogStatus(status))
+                {
+                    Console.WriteLine($"[CraneService] [{_name}] 状态快照 | " +
+                        $"Mode={status.Mode} Busy={status.Busy} Fault={status.Fault} " +
+                        $"ServoAlarm={status.ServoAlarm} PlcAlarm={status.PlcAlarm} " +
+                        $"HasPlate={status.HasRoller} X={status.XPos} Y={status.YPos} Z={status.ZPos}");
+                }
                 return status;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -752,15 +764,17 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             if (hasZMove)
             {
                 var curStatus = await ReadStatusAsync(ct);
-                if (curStatus != null)
-                {
-                    int dz = zTarget - curStatus.ZPos;
-                    // Z轴方向：Z从0起始，变大=向下走 ↓，变小=向上走 ↑
-                    zGoingDown = dz > tolerance;   // 目标 > 当前（Z变大）→ ↓下降
-                    zGoingUp   = dz < -tolerance;  // 目标 < 当前（Z变小）→ ↑上升
-                    Console.WriteLine($"[CraneService] [{_name}] 当前Z={curStatus.ZPos} 目标Z={zTarget} ΔZ={dz} " +
-                        $"{(zGoingDown ? "↓下降" : zGoingUp ? "↑上升" : "→水平")}");
-                }
+                // 包含Z目标时必须知道当前Z才能决定“先XY还是先Z”。状态未知时继续触发
+                // 会落入三轴同时运动分支，破坏防碰撞顺序，因此这里保守拒绝本次动作。
+                if (curStatus == null)
+                    throw new InvalidOperationException($"[CraneService] [{_name}] 当前Z状态未知，禁止绝对移动");
+
+                int dz = zTarget - curStatus.ZPos;
+                // Z轴方向：Z从0起始，变大=向下走 ↓，变小=向上走 ↑
+                zGoingDown = dz > tolerance;   // 目标 > 当前（Z变大）→ ↓下降
+                zGoingUp   = dz < -tolerance;  // 目标 < 当前（Z变小）→ ↑上升
+                Console.WriteLine($"[CraneService] [{_name}] 当前Z={curStatus.ZPos} 目标Z={zTarget} ΔZ={dz} " +
+                    $"{(zGoingDown ? "↓下降" : zGoingUp ? "↑上升" : "→水平")}");
             }
 
             // ── 3. 接液盘互锁：Z 下降前必须打开，Z 上升后必须关闭 ──────────
@@ -855,6 +869,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <param name="stepDistance">每次下探步距 mm（默认5）</param>
         /// <param name="maxSteps">最大步数（默认10，即最多再降50mm）</param>
         /// <returns>true=检到版，false=步数用完仍未检到版</returns>
+        /// <remarks>当前生产流程未调用此方法；接入前必须现场确认Z坐标方向。</remarks>
         public async Task<bool> StepDownUntilPickupAsync(int stepDistance = 5, int maxSteps = 10, CancellationToken ct = default)
         {
             Console.WriteLine($"[CraneService] [{_name}] ▶ Z轴步进下探 step={stepDistance}mm maxSteps={maxSteps}");
@@ -864,15 +879,18 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 ct.ThrowIfCancellationRequested();
 
                 var status = await ReadStatusAsync(ct);
-                if (status != null && status.HasRoller == 1)
+                if (status == null)
+                    throw new InvalidOperationException($"[CraneService] [{_name}] Z步进前当前位置未知，禁止计算下一个目标");
+
+                if (status.HasRoller == 1)
                 {
                     Console.WriteLine($"[CraneService] [{_name}] ✔ Z步进下探：检到版 D5029=1（第{i}步） Z={status.ZPos}");
                     return true;
                 }
 
                 // 在当前 Z 基础上再降 stepDistance
-                int nextZ = (status?.ZPos ?? 0) - stepDistance;
-                Console.WriteLine($"[CraneService] [{_name}]   Z步进 {i}/{maxSteps}：当前Z={status?.ZPos} → 目标Z={nextZ}");
+                int nextZ = status.ZPos - stepDistance;
+                Console.WriteLine($"[CraneService] [{_name}]   Z步进 {i}/{maxSteps}：当前Z={status.ZPos} → 目标Z={nextZ}");
 
                 await WriteDintAsync(Addr.D_ZAbsTarget, nextZ, "Z步进目标 D3106~D3107", ct);
                 await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z步进触发 D4520", ct);
@@ -886,14 +904,11 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
         /// <summary>
         /// 轮询等待指定轴到位（-1 表示跳过该轴）。
-        /// 首次超时后自动补偿重试一次（偏差较大时微调再试），仍失败才抛异常。
+        /// 超时后抛异常，由上层按工件物理状态决定暂停或人工处理。
         /// </summary>
         private async Task PollAxesAsync(int xTarget, int yTarget, int zTarget,
             int tolerance, int timeoutMs, CancellationToken ct)
         {
-            bool retried = false;
-
-        retry:
             var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
             while (DateTime.UtcNow < deadline)
             {
@@ -949,33 +964,28 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
                 if (xOk && yOk && zOk)
                 {
-                    Console.WriteLine($"[CraneService] [{_name}] ✔ 到位 X={status.XPos} Y={status.YPos} Z={status.ZPos}" +
-                        (retried ? "（补偿后）" : ""));
+                    Console.WriteLine($"[CraneService] [{_name}] ✔ 到位 X={status.XPos} Y={status.YPos} Z={status.ZPos}");
                     return;
-                }
-
-                if (DateTime.UtcNow >= deadline && !retried)
-                {
-                    // 首次超时 → 补偿重试：以当前位置再触发一次微调
-                    Console.WriteLine($"[CraneService] [{_name}] ⚠ 首次未到位，触发补偿重试...");
-                    Console.WriteLine($"[CraneService] [{_name}]   偏差 ΔX={status.XPos - xTarget} ΔY={status.YPos - yTarget} ΔZ={status.ZPos - zTarget}");
-
-                    // 补偿重试：2→500ms→0 脉冲，使用 CancellationToken.None
-                    var retryCt = CancellationToken.None;
-                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X补偿重试触发 D4522", retryCt);
-                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y补偿重试触发 D4521", retryCt);
-                    if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z补偿重试触发 D4520", retryCt);
-                    await Task.Delay(500, retryCt);
-                    if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X补偿重试复位 D4522", retryCt);
-                    if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y补偿重试复位 D4521", retryCt);
-                    if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z补偿重试复位 D4520", retryCt);
-
-                    retried = true;
-                    goto retry;
                 }
             }
 
-            throw new TimeoutException($"[CraneService] [{_name}] 绝对移动超时（含补偿），当前 X={xTarget} Y={yTarget} Z={zTarget}");
+            throw new TimeoutException($"[CraneService] [{_name}] 绝对移动超时，目标 X={xTarget} Y={yTarget} Z={zTarget}");
+        }
+
+        private bool ShouldLogStatus(CraneStatus status)
+        {
+            string key = $"{status.Mode}|{status.Busy}|{status.Fault}|{status.ServoAlarm}|" +
+                         $"{status.PlcAlarm}|{status.HasRoller}|{status.CurrentTaskNo}|{status.StateMachineStep}";
+            var now = DateTime.UtcNow;
+            lock (_statusLogLock)
+            {
+                bool changed = !string.Equals(_lastStatusLogKey, key, StringComparison.Ordinal);
+                bool heartbeat = now - _lastStatusLogAtUtc >= StatusLogHeartbeat;
+                if (!changed && !heartbeat) return false;
+                _lastStatusLogKey = key;
+                _lastStatusLogAtUtc = now;
+                return true;
+            }
         }
 
         /// <summary>

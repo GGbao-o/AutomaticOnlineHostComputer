@@ -95,7 +95,7 @@ services.AddSingleton<HomeViewModel>();
         // ── 3. 注册导航服务（页面缓存）────────────────────────────────────
         services.AddSingleton<CachedNavigationService>();
 
-        // ── 4. 注册位置更新服务（异步写库，DB不可用时静默忽略）─────────
+        // ── 4. 注册工件跟踪/设备数据写库服务（天车实时坐标不再持久化）─────────
         services.AddSingleton<PositionUpdateService>(
             _ => new PositionUpdateService(connectionString));
 

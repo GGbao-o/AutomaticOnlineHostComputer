@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Media;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
-using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
@@ -26,10 +25,10 @@ namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
 {
     private readonly ManipulatorConnectionCache _cache;
-    private readonly PositionUpdateService? _posSvc;
     private readonly int _no;
     private CraneService? _service;
     private CancellationTokenSource? _pollCts;
+    private Task? _pollTask;
 
     // ── 重连退避 ──────────────────────────────────────────────────
     /// <summary>当前重连间隔（ms），成功后重置为 5000，失败后翻倍至上限 30000。</summary>
@@ -39,11 +38,10 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
 
     /// <param name="no">机械手编号 1~3</param>
     /// <param name="cache">已装载 IP 映射的机械手连接缓存</param>
-    public ManipulatorCardViewModel(int no, ManipulatorConnectionCache cache, PositionUpdateService? posSvc = null)
+    public ManipulatorCardViewModel(int no, ManipulatorConnectionCache cache)
     {
         _no = no;
         _cache = cache;
-        _posSvc = posSvc;
         Name = $"机械手{no}";
 
         EStopCommand = new AsyncRelayCommand(EStopAsync, nameof(EStopCommand));
@@ -109,6 +107,8 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
     /// <summary>启动机械手卡片：连接 → 首次读取 → 5 秒轮询。</summary>
     public async Task StartAsync()
     {
+        await StopPollingAsync();
+
         var info = _cache.GetManipulatorInfo(_no);
         Name = info.Name;
         OnPropertyChanged(nameof(Name));
@@ -134,8 +134,30 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
         }
 
         _pollCts = new CancellationTokenSource();
-        _ = PollLoopAsync(_pollCts.Token);
+        _pollTask = PollLoopAsync(_pollCts.Token);
         Console.WriteLine($"[ManipulatorVM] [{Name}] 轮询启动，间隔5s");
+    }
+
+    /// <summary>重载IP映射前等待旧轮询退出，避免重复读取同一机械手。</summary>
+    private async Task StopPollingAsync()
+    {
+        var cts = _pollCts;
+        var task = _pollTask;
+        if (cts == null) return;
+
+        cts.Cancel();
+        if (task != null)
+        {
+            try { await task.WaitAsync(TimeSpan.FromSeconds(10)); }
+            catch (OperationCanceledException) { }
+            catch (TimeoutException)
+            {
+                throw new TimeoutException($"[ManipulatorVM] [{Name}] 旧轮询10秒内未退出，禁止启动重复轮询");
+            }
+        }
+        _pollCts = null;
+        _pollTask = null;
+        cts.Dispose();
     }
 
     /// <summary>
@@ -210,9 +232,7 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
         Line4 = s.RunConditionMissing != 0 ? $"条件缺失 0x{s.RunConditionMissing:X4}" : "运行条件满足";
         Line5 = $"坐标 | Y={s.YPos}  Z={s.ZPos}";
 
-        // 异步更新当前位置到数据库（fire-and-forget，不阻塞轮询）
-        if (_posSvc != null)
-            _ = _posSvc.UpdateCranePositionAsync(Name, s.XPos, s.YPos, s.ZPos);
+        // 坐标只用于页面实时显示和流程安全判断，不再周期写入数据库。
     }
 
     /// <summary>连接断开时重置所有显示为"—"、灯变灰。</summary>
@@ -315,6 +335,7 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
     {
         _pollCts?.Cancel();
         _pollCts?.Dispose();
+        _pollTask = null;
         // 共享连接由 ManipulatorConnectionCache/流程生命周期管理；这里只停轮询, 不 Disconnect。
         Console.WriteLine($"[ManipulatorVM] [{Name}] 已释放资源");
     }

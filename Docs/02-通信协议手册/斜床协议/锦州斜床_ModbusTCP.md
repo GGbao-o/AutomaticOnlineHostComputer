@@ -1,7 +1,7 @@
 # 锦州斜床通信地址（迅捷 PLC，Modbus TCP）
 
 ## 概述
-- **设备数量**：4 台（ST601~ST604，1号线）
+- **设备数量**：4台（1号线 ST108、ST109、ST111、ST110）
 - **协议**：Modbus TCP，端口 502，单元 ID = 1
 - **地址段**：保持寄存器 10300~10374，FC03 读 / FC06 写
 - **代码**：`ModbusSkewBedService`（Communication/DeviceServices/）、`ModbusSkewBedAddress`（Communication/DeviceAddresses/）

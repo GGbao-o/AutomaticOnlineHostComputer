@@ -349,7 +349,8 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
                     var inst = GetInstance(ip);
                     var mi = _cncType!.GetMethod(methodName)
                               ?? throw new MissingMethodException(_cncType.Name, methodName);
-                    return mi.Invoke(inst, args);
+                    return mi.Invoke(inst, args)
+                           ?? throw new InvalidOperationException($"Syntec SDK {methodName} 返回 null");
                 }
                 catch (TargetInvocationException ex) { throw ex.InnerException ?? ex; }
             }

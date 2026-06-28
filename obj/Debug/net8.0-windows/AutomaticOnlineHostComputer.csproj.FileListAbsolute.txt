@@ -202,3 +202,5 @@ D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlin
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Automati.11868071.Up2Date
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlineHostComputer.genruntimeconfig.cache
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\ref\AutomaticOnlineHostComputer.dll
+D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Config\ConfigPageView.baml
+D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Config\ConfigPageView.g.cs

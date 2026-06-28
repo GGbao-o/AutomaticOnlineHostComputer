@@ -16,6 +16,7 @@ using AutomaticOnlineHostComputer.Communication.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service;
+using RackAddr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
@@ -37,6 +38,16 @@ public sealed class HomeViewModel : ObservableObject
     public IReadOnlyDictionary<string, MachineManagementRowVm> StationCoords => _stationDict;
     public CraneConnectionCache SharedCraneCache => _craneCache;
     public MotionConfig SharedMotionConfig => _cfg;
+
+    /// <summary>创建配置页面 ViewModel。提供天车连接供"读当前位置"功能使用。</summary>
+    public Config.ConfigPageViewModel CreateConfigPageViewModel()
+        => new(_cfg, craneNo =>
+        {
+            CraneService? service;
+            try { service = _craneCache.GetOrCreateService(craneNo); }
+            catch { service = null; }
+            return Task.FromResult(service);
+        });
 
     /// <summary>页面是否正在加载（绑定到启动动画）</summary>
     // ═══════════════════════════════════════════════════════════════
@@ -193,19 +204,19 @@ public sealed class HomeViewModel : ObservableObject
         _cfg = MotionConfig.Load();  // 提前加载，引擎创建和UI同步都要用
 
         // 引擎依赖天车/机械手缓存，由 HomeVM 创建并持有引用
-        _flowEngine = new ProductionFlowEngine(_craneCache, _manipulatorCache, _positionService);
+        _flowEngine = new ProductionFlowEngine(_craneCache, _manipulatorCache, _positionService, _cfg);
 
-        Crane1F = new CraneCardViewModel(1, _craneCache, _positionService);
-        Crane1R = new CraneCardViewModel(2, _craneCache, _positionService);
-        Crane2F = new CraneCardViewModel(3, _craneCache, _positionService);
-        Crane2R = new CraneCardViewModel(4, _craneCache, _positionService);
-        CraneGL = new CraneCardViewModel(5, _craneCache, _positionService);
+        Crane1F = new CraneCardViewModel(1, _craneCache);
+        Crane1R = new CraneCardViewModel(2, _craneCache);
+        Crane2F = new CraneCardViewModel(3, _craneCache);
+        Crane2R = new CraneCardViewModel(4, _craneCache);
+        CraneGL = new CraneCardViewModel(5, _craneCache);
 
-        ManualControl = new CraneManualControlViewModel(_craneCache, _manipulatorCache, _positionService);
+        ManualControl = new CraneManualControlViewModel(_craneCache, _manipulatorCache);
 
-        Manipulator1 = new ManipulatorCardViewModel(1, _manipulatorCache, _positionService);
-        Manipulator2 = new ManipulatorCardViewModel(2, _manipulatorCache, _positionService);
-        Manipulator3 = new ManipulatorCardViewModel(3, _manipulatorCache, _positionService);
+        Manipulator1 = new ManipulatorCardViewModel(1, _manipulatorCache);
+        Manipulator2 = new ManipulatorCardViewModel(2, _manipulatorCache);
+        Manipulator3 = new ManipulatorCardViewModel(3, _manipulatorCache);
 
         Grinder1 = new GrinderCardViewModel("研磨机1(新代)",   "", PlcGrinderService.GrinderType.TypeB);
         Grinder2 = new GrinderCardViewModel("研磨机2(新代)",   "", PlcGrinderService.GrinderType.TypeB);
@@ -351,6 +362,8 @@ public sealed class HomeViewModel : ObservableObject
     // ═══════════════════════════════════════════════════════════════
 
     private GrindingFlowEngine? _grindingEngine;
+    private CancellationTokenSource? _grinderPollCts;
+    private readonly List<Task> _grinderPollTasks = new();
 
     /// <summary>是否正在运行研磨自动流程</summary>
     private bool _isGrindingRunning;
@@ -1022,11 +1035,11 @@ public sealed class HomeViewModel : ObservableObject
     public ICommand GrindingToggleCommand { get; }
 
     /// <summary>启动/暂停1号线</summary>
-    private async Task Line1ToggleAsync()
+    private Task Line1ToggleAsync()
     {
         if (_line1Engine == null)
         {
-            Console.WriteLine("[HomeViewModel] ✘ 1号线引擎未初始化"); return;
+            Console.WriteLine("[HomeViewModel] ✘ 1号线引擎未初始化"); return Task.CompletedTask;
         }
 
         if (_isLine1Running)
@@ -1052,12 +1065,13 @@ public sealed class HomeViewModel : ObservableObject
             }
             IsLine1Running = true;
         }
+        return Task.CompletedTask;
     }
 
     /// <summary>启动/暂停2号线(平衡引擎共用1号线的, 不重复启停)</summary>
-    private async Task Line2ToggleAsync()
+    private Task Line2ToggleAsync()
     {
-        if (_line2Engine == null) { Console.WriteLine("[HomeViewModel] ✘ 2号线引擎未初始化"); return; }
+        if (_line2Engine == null) { Console.WriteLine("[HomeViewModel] ✘ 2号线引擎未初始化"); return Task.CompletedTask; }
 
         if (_isLine2Running)
         {
@@ -1082,6 +1096,7 @@ public sealed class HomeViewModel : ObservableObject
             }
             IsLine2Running = true;
         }
+        return Task.CompletedTask;
     }
 
     /// <summary>启动/暂停动平衡流转(两条线共用)</summary>
@@ -1236,6 +1251,35 @@ public sealed class HomeViewModel : ObservableObject
         _frontDispatchTask = null;
     }
 
+    /// <summary>
+    /// 停止四台研磨机的页面采集循环。只有旧循环全部退出后才允许重建生产上下文，
+    /// 防止旧循环继续重连并把服务注入已经失效的研磨引擎。
+    /// </summary>
+    private async Task StopGrinderPollLoopsAsync()
+    {
+        var cts = _grinderPollCts;
+        if (cts == null) return;
+
+        var tasks = _grinderPollTasks.ToArray();
+        cts.Cancel();
+        try
+        {
+            if (tasks.Length > 0)
+                await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (OperationCanceledException) { }
+        catch (TimeoutException)
+        {
+            Console.WriteLine("[GrinderPoll] 旧研磨轮询10秒内未退出，禁止重建生产上下文");
+            throw;
+        }
+
+        _grinderPollTasks.Clear();
+        _grinderPollCts = null;
+        cts.Dispose();
+        Console.WriteLine("[GrinderPoll] 四台研磨机旧轮询已全部退出");
+    }
+
     private async Task<bool> CanRebuildProductionContextAsync()
     {
         var reasons = new List<string>();
@@ -1263,9 +1307,9 @@ public sealed class HomeViewModel : ObservableObject
             var mc63 = await _mcCache.GetOrCreateAsync("192.168.2.63", 9000, cts.Token);
             var r63 = await mc63.ReadMAlignedWordAsync(800, 2, cts.Token);
             int m816Word = r63.IntValues.Length > 1 ? r63.IntValues[1] : 0;
-            bool m817 = (m816Word & (1 << 1)) != 0;
-            bool m823 = (m816Word & (1 << 7)) != 0;
-            bool m825 = (m816Word & (1 << 9)) != 0;
+            bool m817 = (m816Word & (1 << RackAddr.Bit_ST019_HasPlate)) != 0;
+            bool m823 = (m816Word & (1 << RackAddr.Bit_ST020_CanPick)) != 0;
+            bool m825 = (m816Word & (1 << RackAddr.Bit_ST021_CanPick)) != 0;
             if (m817) reasons.Add("PLC现场M817=1(1号线动平衡下料架有板)");
             if (m823 && _line1BalancingEngine?.M818CachePresent != true)
                 reasons.Add("PLC现场M823=1(ST020允许取料)但上位机M818缓存不存在");
@@ -1309,6 +1353,8 @@ public sealed class HomeViewModel : ObservableObject
                     return;
                 }
 
+                // 先确认持有研磨连接的旧循环退出，再创建新引擎和新连接。
+                await StopGrinderPollLoopsAsync();
                 StopStatusSyncLoops();
             }
 
@@ -1341,6 +1387,7 @@ public sealed class HomeViewModel : ObservableObject
 
         _craneCache.LoadFromMachineRows(machineRows);
         _manipulatorCache.LoadFromMachineRows(machineRows);
+        LogDuplicateMotionDeviceMappings(machineRows);
         ManualControl.NotifyMappingsUpdated();
 
         // ── 装载工位坐标到引擎 ──────────────────────────────────────
@@ -1588,11 +1635,8 @@ public sealed class HomeViewModel : ObservableObject
             if (tasks.Count > 0) await Task.WhenAll(tasks);
             Console.WriteLine($"[HomeViewModel] {tasks.Count} 个站卡后台连接完成（已跳过引擎托管设备）");
         });
-        _ = Task.Run(async () =>
-        {
-            await StartGrinderConnectionsAsync(newCards);
-            Console.WriteLine("[HomeViewModel] 研磨机GrinderPoll后台连接完成（已注入共享服务到卡片）");
-        });
+        StartGrinderConnections(newCards);
+        Console.WriteLine("[HomeViewModel] 研磨机GrinderPoll后台轮询已启动");
 
         _enginesInitialized = true;
         Console.WriteLine(forceReload
@@ -1651,8 +1695,13 @@ public sealed class HomeViewModel : ObservableObject
     /// 自动连接4台研磨机（ST701/ST702=新代TypeB, ST703/ST704=西门子TypeA）。
     /// 有IP则用PlcGrinderService连，按研磨配置周期读状态并更新对应站卡显示。
     /// </summary>
-    private async Task StartGrinderConnectionsAsync(Dictionary<string, StationCardViewModel> cards)
+    private void StartGrinderConnections(Dictionary<string, StationCardViewModel> cards)
     {
+        if (_grinderPollCts != null)
+            throw new InvalidOperationException("研磨机轮询已经启动，禁止重复创建");
+
+        _grinderPollCts = new CancellationTokenSource();
+        var pollToken = _grinderPollCts.Token;
         var grinderDefs = new (string code, string name, PlcGrinderService.GrinderType type, GrinderCardViewModel grinderCard)[]
         {
             ("ST701", "研磨机1(新代)",   PlcGrinderService.GrinderType.TypeB, Grinder1),
@@ -1680,14 +1729,43 @@ public sealed class HomeViewModel : ObservableObject
             card.IpText = $"{ip}:502";
             int pollMs = Math.Max(500, _cfg.Grinding.PollIntervalMs);
             Console.WriteLine($"[GrinderPoll] {name} ({code}) 启动轮询 Type={gtype} IP={ip} poll={pollMs}ms");
-            _ = GrinderPollLoopAsync(code, name, gtype, ip, card, grinderCard, _grindingEngine!, pollMs);
+            _grinderPollTasks.Add(
+                GrinderPollLoopAsync(code, name, gtype, ip, card, grinderCard, _grindingEngine!, pollMs, pollToken));
+        }
+    }
+
+    /// <summary>
+    /// 只做启动诊断，不改变数据库匹配结果。重复IP可能让两个设备编号创建到同一PLC的两条连接，
+    /// 因此在现场启动日志中明确列出，避免映射错误被误认为通信抖动。
+    /// </summary>
+    private static void LogDuplicateMotionDeviceMappings(IEnumerable<MachineManagementRowVm> machineRows)
+    {
+        var motionRows = machineRows
+            .Where(r => r.TypeName?.Trim() is "天车" or "机械手")
+            .Where(r => !string.IsNullOrWhiteSpace(r.Ip))
+            .ToList();
+
+        foreach (var group in motionRows.GroupBy(r => r.Ip.Trim(), StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+        {
+            string devices = string.Join(", ", group.Select(r => $"{r.StationCode}/{r.Name}/{r.TypeName}"));
+            Console.WriteLine($"[HomeViewModel] ⚠ 运动设备IP重复 IP={group.Key}: {devices}");
+        }
+
+        foreach (var group in motionRows
+                     .Where(r => !string.IsNullOrWhiteSpace(r.Name))
+                     .GroupBy(r => r.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+                     .Where(g => g.Count() > 1))
+        {
+            string records = string.Join(", ", group.Select(r => $"{r.StationCode}/{r.Ip}/{r.TypeName}"));
+            Console.WriteLine($"[HomeViewModel] ⚠ 运动设备名称重复 Name={group.Key}: {records}");
         }
     }
 
     /// <summary>研磨机轮询循环：连接 → 快速读状态 → 更新站卡 → 断开重连。日志按变化/周期节流。</summary>
     private static async Task GrinderPollLoopAsync(string code, string name,
         PlcGrinderService.GrinderType gtype, string ip, StationCardViewModel stationCard,
-        GrinderCardViewModel grinderCard, GrindingFlowEngine grindingEngine, int pollDelayMs)
+        GrinderCardViewModel grinderCard, GrindingFlowEngine grindingEngine, int pollDelayMs,
+        CancellationToken ct)
     {
         PlcGrinderService? svc = null;
         int retryDelay = 5000;
@@ -1697,11 +1775,13 @@ public sealed class HomeViewModel : ObservableObject
 
         Console.WriteLine($"[GrinderPoll] [{name}] ========== 轮询线程启动 IP={ip} ==========");
 
-        while (true)
+        try
         {
-            cycleCount++;
-            try
+            while (!ct.IsCancellationRequested)
             {
+                cycleCount++;
+                try
+                {
                 // 首次或断连 → 重建连接
                 if (svc == null || !svc.IsConnected)
                 {
@@ -1715,7 +1795,7 @@ public sealed class HomeViewModel : ObservableObject
                         stationCard.ConnectedBrush = System.Windows.Media.Brushes.Gray;
                         stationCard.Status1Brush = System.Windows.Media.Brushes.Gray;
                         grinderCard.SetDisconnected();
-                        await Task.Delay(retryDelay);
+                        await Task.Delay(retryDelay, ct);
                         retryDelay = Math.Min(retryDelay * 2, 30000);
                         continue;
                     }
@@ -1723,9 +1803,17 @@ public sealed class HomeViewModel : ObservableObject
                     Console.WriteLine($"[GrinderPoll] [{name}] {(svc == null ? "首次连接" : "重连")} IP={ip}...");
                     var oldSvc = svc;
                     var newSvc = new PlcGrinderService(name, ip, gtype);
-                    using (var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
+                    try
                     {
+                        using var connectTimeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct, connectTimeoutCts.Token);
                         await newSvc.ConnectAsync(connectCts.Token);
+                    }
+                    catch
+                    {
+                        // 连接尚未注入引擎，由本轮创建者负责释放。
+                        newSvc.Dispose();
+                        throw;
                     }
 
                     if (!grindingEngine.TrySetGrinderService(code, newSvc, out var rejectReason))
@@ -1740,7 +1828,7 @@ public sealed class HomeViewModel : ObservableObject
                         stationCard.ConnectedBrush = System.Windows.Media.Brushes.Gray;
                         stationCard.Status1Brush = System.Windows.Media.Brushes.Gray;
                         grinderCard.SetDisconnected();
-                        await Task.Delay(retryDelay);
+                        await Task.Delay(retryDelay, ct);
                         retryDelay = Math.Min(retryDelay * 2, 30000);
                         continue;
                     }
@@ -1755,7 +1843,8 @@ public sealed class HomeViewModel : ObservableObject
                 }
 
                 // 读全部状态
-                using var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                using var readTimeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct, readTimeoutCts.Token);
                 if (gtype == PlcGrinderService.GrinderType.TypeA)
                 {
                     var snapshot = await svc.ReadTypeAStatusSnapshotAsync(readCts.Token);
@@ -1815,24 +1904,42 @@ public sealed class HomeViewModel : ObservableObject
                     }
                 }
 
-                await Task.Delay(pollDelayMs);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} ✘ 异常：{ex.GetType().Name} — {ex.Message}");
-                if (svc != null && grindingEngine.CanReplaceGrinderService(code, out _))
-                {
-                    try { await svc.DisconnectAsync(); } catch { }
+                    await Task.Delay(pollDelayMs, ct);
                 }
-                stationCard.Status1 = "连接失败";
-                stationCard.Status2 = "等待重连...";
-                stationCard.ConnectedBrush = System.Windows.Media.Brushes.Gray;
-                stationCard.Status1Brush = System.Windows.Media.Brushes.Gray;
-                grinderCard.SetDisconnected();
-                Console.WriteLine($"[GrinderPoll] [{name}] 退避 {retryDelay / 1000}s 后重试...");
-                await Task.Delay(retryDelay);
-                retryDelay = Math.Min(retryDelay * 2, 30000);
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} ✘ 异常：{ex.GetType().Name} — {ex.Message}");
+                    if (svc != null && grindingEngine.CanReplaceGrinderService(code, out _))
+                    {
+                        try { await svc.DisconnectAsync(); } catch { }
+                    }
+                    stationCard.Status1 = "连接失败";
+                    stationCard.Status2 = "等待重连...";
+                    stationCard.ConnectedBrush = System.Windows.Media.Brushes.Gray;
+                    stationCard.Status1Brush = System.Windows.Media.Brushes.Gray;
+                    grinderCard.SetDisconnected();
+                    Console.WriteLine($"[GrinderPoll] [{name}] 退避 {retryDelay / 1000}s 后重试...");
+                    await Task.Delay(retryDelay, ct);
+                    retryDelay = Math.Min(retryDelay * 2, 30000);
+                }
             }
+        }
+        finally
+        {
+            if (svc != null)
+            {
+                if (!grindingEngine.CanReplaceGrinderService(code, out var holdReason))
+                    throw new InvalidOperationException($"[GrinderPoll] [{name}] 退出时服务仍被动作占用: {holdReason}");
+
+                try { await svc.DisconnectAsync(); } catch (Exception ex) { Console.WriteLine($"[GrinderPoll] [{name}] 退出断开异常: {ex.Message}"); }
+                svc.Dispose();
+            }
+            grinderCard.SetDisconnected();
+            Console.WriteLine($"[GrinderPoll] [{name}] 轮询已退出");
         }
     }
 

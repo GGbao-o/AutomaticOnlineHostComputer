@@ -2,6 +2,7 @@ using System.Linq;
 using System.Windows.Controls;
 using System.Windows;
 using AutomaticOnlineHostComputer.Views.Home.Dialogs;
+using AutomaticOnlineHostComputer.Views.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -75,6 +76,17 @@ public partial class HomeView : UserControl
     private void EmergencyCenter_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new EmergencyCenterDialog(_viewModel) { Owner = Window.GetWindow(this) };
+        dialog.ShowDialog();
+    }
+
+    /// <summary>
+    /// 运动参数配置 — 修改天车/机械手速度、斜床参数、机械手坐标、编码器标定等。
+    /// <para>修改即时生效（引擎共享同一配置实例），保存按钮持久化到 JSON 文件，无需重编译。</para>
+    /// </summary>
+    private void ConfigPage_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ConfigPageView(_viewModel.CreateConfigPageViewModel())
+            { Owner = Window.GetWindow(this) };
         dialog.ShowDialog();
     }
 

@@ -104,20 +104,41 @@ public sealed class CraneConnectionCache
     }
 
     /// <summary>
-    /// 按 Name 匹配 machine 表行取 IP。
-    /// 【注意】当前未按 type_name 过滤，若机械手与天车同名可能串数据。
-    /// 建议加上 <c>TypeName == "天车"</c> 过滤条件。
+    /// 优先按 TypeName="天车" + Name 匹配 machine 表行取 IP。
+    /// 旧数据库可能没有type_name；仅在完全不存在同名天车类型记录时，兼容退回Name-only匹配并告警。
     /// </summary>
     private static string FindIp(List<MachineManagementRowVm> machineRows, string name, string fallback)
     {
-        var row = machineRows.FirstOrDefault(x =>
+        var nameMatches = machineRows.Where(x =>
             !string.IsNullOrWhiteSpace(x.Name) &&
-            string.Equals(x.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
+            string.Equals(x.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)).ToList();
 
-        if (row != null && !string.IsNullOrWhiteSpace(row.Ip))
+        var typedMatches = nameMatches.Where(x =>
+            !string.IsNullOrWhiteSpace(x.TypeName) &&
+            string.Equals(x.TypeName.Trim(), "天车", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (typedMatches.Count > 1)
+            Console.WriteLine($"[CraneCache] ⚠ [{name}] 数据库存在{typedMatches.Count}条TypeName=天车的同名记录，使用第一条有效IP");
+
+        if (typedMatches.Count > 0)
         {
-            var ip = row.Ip.Trim();
-            Console.WriteLine($"[CraneCache] [{name}] 数据库查到IP: {ip}");
+            var typedRow = typedMatches.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Ip));
+            if (typedRow != null)
+            {
+                var typedIp = typedRow.Ip.Trim();
+                Console.WriteLine($"[CraneCache] [{name}] 按TypeName=天车精确匹配IP: {typedIp}");
+                return typedIp;
+            }
+
+            Console.WriteLine($"[CraneCache] ⚠ [{name}] 已找到天车类型记录但IP为空，使用默认值: {fallback}");
+            return fallback;
+        }
+
+        var legacyRow = nameMatches.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Ip));
+        if (legacyRow != null)
+        {
+            var ip = legacyRow.Ip.Trim();
+            Console.WriteLine($"[CraneCache] ⚠ [{name}] 未找到TypeName=天车记录，兼容按名称使用IP: {ip}；建议补全machine.type_name");
             return ip;
         }
 

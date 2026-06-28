@@ -143,7 +143,7 @@ Modbus 地址 = R 编号 × 2 + 1。例：R7301 → 14603。
 
 ```
 ① 扫描 4 台研磨机状态
-② 卡死检测（Loading/Unloading/WaitingForUnload 超时 → Idle）
+② 卡死检测（Loading/Unloading/WaitingForUnload 超过安全观察时间 → 暂停引擎，保留状态、Pending和缓存）
 ③ 加工监视（Machining + 请求下料=1 → WaitingForUnload）
 ④ 【优先】下料（WaitingForUnload + 天车空闲 → 取工件放 ST710）
 ⑤ 【次之】上料（Idle+请求数据=1 + 天车空闲 → ST709 取料送研磨机）
@@ -158,4 +158,4 @@ Modbus 地址 = R 编号 × 2 + 1。例：R7301 → 14603。
 - **门安全**：天车上下移动前必须确认 `门开=1`（TypeA: 40001-15 / TypeB: R7307）
 - **磨石报警**：仅 TypeA 有（40001-1/40001-2），请求数据阶段检查，任一报警则暂停流程并提示更换磨石
 - **心跳检测**：TypeA `IsHeartbeatOkAsync()` 连续两次（间隔 500ms）读 40001-8，值有变化=PLC 存活
-- **加工中**：仅用于上位机状态显示，不参与握手逻辑**
+- **加工中**：仅用于上位机状态显示，不参与握手逻辑

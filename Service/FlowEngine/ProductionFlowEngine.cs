@@ -174,12 +174,12 @@ public sealed class ProductionFlowEngine : IDisposable
     private readonly PositionUpdateService _posSvc;
 
     public ProductionFlowEngine(CraneConnectionCache craneCache, ManipulatorConnectionCache manipulatorCache,
-        PositionUpdateService positionService)
+        PositionUpdateService positionService, MotionConfig cfg)
     {
         _craneCache = craneCache;
         _manipulatorCache = manipulatorCache;
         _posSvc = positionService;
-        _cfg = MotionConfig.Load();
+        _cfg = cfg; // 使用共享配置实例, UI 修改后即时生效
 
         Console.WriteLine($"[FlowEngine] 引擎实例已创建（速度走GetCraneSpeed/GetManipulatorSpeed, 未配置设备用AbsMove默认值）");
     }
@@ -285,8 +285,7 @@ public sealed class ProductionFlowEngine : IDisposable
 
             Console.WriteLine($"[FlowEngine] [{craneName}] ✔ 自动调度完成，已到达 {station.Name}");
 
-            // 异步更新当前位置到数据库（fire-and-forget）
-            _ = _posSvc.UpdateCranePositionAsync(craneName, xTarget, yTarget, zTarget);
+            // 到位坐标以PLC实时值为准，不再持久化到crane表。
 
             return true;
         }

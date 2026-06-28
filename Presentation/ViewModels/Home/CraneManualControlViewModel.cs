@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
-using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
@@ -52,7 +51,6 @@ public sealed class CraneManualControlViewModel : ObservableObject
 {
     private readonly CraneConnectionCache _craneCache;
     private readonly ManipulatorConnectionCache _manipulatorCache;
-    private readonly PositionUpdateService? _posSvc;
 
     // ═══════════════════════════════════════════════════════════════
     //  下拉框数据
@@ -313,12 +311,10 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// 构造手动控制 VM。
     /// 参数缓存需先调用 <c>LoadFromMachineRows()</c> 装载 IP 映射。
     /// </summary>
-    public CraneManualControlViewModel(CraneConnectionCache craneCache, ManipulatorConnectionCache manipulatorCache,
-        PositionUpdateService? posSvc = null)
+    public CraneManualControlViewModel(CraneConnectionCache craneCache, ManipulatorConnectionCache manipulatorCache)
     {
         _craneCache = craneCache;
         _manipulatorCache = manipulatorCache;
-        _posSvc = posSvc;
 
         // ── 构建下拉框 8 项（名称占位，LoadAsync 后刷新） ──────────
         DeviceItems = new List<ManualDeviceItem>
@@ -761,7 +757,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
         Console.WriteLine($"[CraneManualVM] [{name}] ✔ 相对速度写入成功 D2504~D2524");
     }
 
-    /// <summary>延迟 300ms 后读取设备状态，输出日志 + 异步写库。</summary>
+    /// <summary>延迟 300ms 后读取设备状态并输出实时坐标日志，不写数据库。</summary>
     private async Task LogCurrentPositionAsync(CraneService service, string name, string action)
     {
         try
@@ -776,9 +772,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
             Console.WriteLine($"[CraneManualVM] [{name}] 动作={action} 完成，当前坐标 X={status.XPos}, Y={status.YPos}, Z={status.ZPos}");
 
-            // 异步更新当前位置到数据库
-            if (_posSvc != null)
-                _ = _posSvc.UpdateCranePositionAsync(name, status.XPos, status.YPos, status.ZPos);
+            // 当前位置只回显到手动控制日志，不再写入数据库。
         }
         catch (Exception ex)
         {

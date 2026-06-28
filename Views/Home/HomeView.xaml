@@ -219,6 +219,12 @@
                     HorizontalAlignment="Right"
                     Orientation="Horizontal">
                     <Button
+                        Width="60"
+                        Margin="0,0,8,0"
+                        Click="ConfigPage_Click"
+                        Content="配置"
+                        Style="{StaticResource BaseButtonStyle}" />
+                    <Button
                         Width="84"
                         Margin="0,0,8,0"
                         Click="EmergencyCenter_Click"

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 
 namespace AutomaticOnlineHostComputer.Infrastructure.Config;
@@ -192,7 +193,7 @@ public sealed class MotionConfig
         public int X11StableDelayMs { get; set; } = 3000;
         /// <summary>PLC/CNC信号等待轮询间隔(ms)，降低延迟更快发现信号变化</summary>
         public int SignalPollIntervalMs { get; set; } = 50;
-        /// <summary>研磨机状态卡死超时(ms)。Loading/Unloading/WaitingForUnload超过此值强制回Idle</summary>
+        /// <summary>研磨机状态卡死观察时间(ms)。超时后暂停引擎并保留状态/缓存，等待人工确认。</summary>
         public int GrindingStuckTimeoutMs { get; set; } = 60_000;
     }
 
@@ -388,12 +389,48 @@ public sealed class MotionConfig
         Directory.CreateDirectory(dir);
 
         var path = Path.Combine(dir, "motion_settings.json");
+        var tempPath = path + ".tmp";
+        var backupPath = path + ".bak";
         var json = JsonSerializer.Serialize(this, new JsonSerializerOptions
         {
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
-        File.WriteAllText(path, json);
-        Console.WriteLine($"[MotionConfig] 配置已保存：{path}");
+
+        try
+        {
+            // 临时文件与正式文件放在同一目录，后续替换不会跨磁盘。
+            using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+            {
+                writer.Write(json);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            // 替换前先验证临时文件可完整反序列化，避免把截断JSON变成正式配置。
+            var verifyJson = File.ReadAllText(tempPath);
+            _ = JsonSerializer.Deserialize<MotionConfig>(verifyJson, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            }) ?? throw new InvalidDataException("运动配置校验失败：反序列化结果为空");
+
+            if (File.Exists(path))
+                File.Replace(tempPath, path, backupPath, ignoreMetadataErrors: true);
+            else
+                File.Move(tempPath, path);
+
+            Console.WriteLine($"[MotionConfig] 配置已原子保存：{path}" +
+                              (File.Exists(backupPath) ? $"（备份：{backupPath}）" : string.Empty));
+        }
+        finally
+        {
+            // 保存失败时保留原正式文件，只清理未完成的临时文件。
+            if (File.Exists(tempPath))
+            {
+                try { File.Delete(tempPath); }
+                catch (Exception ex) { Console.WriteLine($"[MotionConfig] 临时文件清理失败：{ex.Message}"); }
+            }
+        }
     }
 }

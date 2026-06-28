@@ -6,7 +6,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using AutomaticOnlineHostComputer.Communication.DeviceAddresses;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
-using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
@@ -26,9 +25,9 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
 {
     private readonly CraneConnectionCache _cache;
     private readonly int _craneNo;
-    private readonly PositionUpdateService? _posSvc;
     private CraneService? _service;
     private CancellationTokenSource? _pollCts;
+    private Task? _pollTask;
 
     // ── 重连退避 ──────────────────────────────────────────────────
     /// <summary>当前重连间隔（ms），成功后重置为 5000，失败后翻倍至上限 30000。</summary>
@@ -38,11 +37,10 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
 
     /// <param name="craneNo">天车编号 1~5</param>
     /// <param name="cache">已装载 IP 映射的天车连接缓存</param>
-    public CraneCardViewModel(int craneNo, CraneConnectionCache cache, PositionUpdateService? posSvc = null)
+    public CraneCardViewModel(int craneNo, CraneConnectionCache cache)
     {
         _craneNo = craneNo;
         _cache = cache;
-        _posSvc = posSvc;
 
         CraneName = $"{craneNo}号天车";
 
@@ -113,6 +111,8 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task StartAsync()
     {
+        await StopPollingAsync();
+
         var info = _cache.GetCraneInfo(_craneNo);
         CraneName = info.Name;
         OnPropertyChanged(nameof(CraneName));
@@ -134,7 +134,7 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
                 try { x6Ok = await _service.ReadXBitAsync(CraneAddress.D_X6_MagnetizeOk); } catch { }
                 try { x7Ok = await _service.ReadXBitAsync(CraneAddress.D_X7_DemagnetizeOk); } catch { }
                 Console.WriteLine($"[CraneCardVM] [{CraneName}] 首次读取成功。");
-                await UpdateUiFromStatusAsync(first, x6Ok, x7Ok);
+                UpdateUiFromStatus(first, x6Ok, x7Ok);
             }
             else
             {
@@ -149,8 +149,30 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
         }
 
         _pollCts = new CancellationTokenSource();
-        _ = PollLoopAsync(_pollCts.Token);
+        _pollTask = PollLoopAsync(_pollCts.Token);
         Console.WriteLine($"[CraneCardVM] [{CraneName}] 轮询启动，间隔5s。");
+    }
+
+    /// <summary>重载IP映射前等待旧轮询退出，避免同一卡片留下两条共享连接读取链。</summary>
+    private async Task StopPollingAsync()
+    {
+        var cts = _pollCts;
+        var task = _pollTask;
+        if (cts == null) return;
+
+        cts.Cancel();
+        if (task != null)
+        {
+            try { await task.WaitAsync(TimeSpan.FromSeconds(10)); }
+            catch (OperationCanceledException) { }
+            catch (TimeoutException)
+            {
+                throw new TimeoutException($"[CraneCardVM] [{CraneName}] 旧轮询10秒内未退出，禁止启动重复轮询");
+            }
+        }
+        _pollCts = null;
+        _pollTask = null;
+        cts.Dispose();
     }
 
     /// <summary>
@@ -189,7 +211,7 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
                     {
                         Console.WriteLine($"[CraneCardVM] [{CraneName}] ⚠ 读取X6/X7线圈异常：{ex.Message}");
                     }
-                    await UpdateUiFromStatusAsync(status, x6MagnetOk, x7DemagnetOk);
+                    UpdateUiFromStatus(status, x6MagnetOk, x7DemagnetOk);
                 }
                 else
                 {
@@ -229,7 +251,7 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
     /// 将 <see cref="CraneStatus"/> 快照 + X6/X7 线圈状态映射到 UI 绑定属性（Line1~5 + 颜色）。
     /// <para>X6(63494)=充磁反馈，X7(63495)=退磁反馈，FC01 Read Coil 读取。</para>
     /// </summary>
-    private async Task UpdateUiFromStatusAsync(CraneStatus s, bool x6MagnetOk, bool x7DemagnetOk)
+    private void UpdateUiFromStatus(CraneStatus s, bool x6MagnetOk, bool x7DemagnetOk)
     {
         var hasFault = s.Fault != 0 || s.ServoAlarm != 0 || s.PlcAlarm != 0;
         Line1 = hasFault ? "已连接 | 故障" : "已连接，就绪";
@@ -254,9 +276,7 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
         // Line5：坐标 + 磁铁线圈原始值
         Line5 = $"X6={(x6MagnetOk?1:0)} X7={(x7DemagnetOk?1:0)} D5029={s.HasRoller} | X={s.XPos} Y={s.YPos} Z={s.ZPos}";
 
-        // 异步更新当前位置到数据库（fire-and-forget，不阻塞轮询）
-        if (_posSvc != null)
-            _ = _posSvc.UpdateCranePositionAsync(CraneName, s.XPos, s.YPos, s.ZPos);
+        // 坐标只用于页面实时显示和流程安全判断，不再周期写入数据库。
     }
 
     /// <summary>连接断开时重置所有显示为"—"、灯变灰。</summary>
@@ -300,6 +320,7 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
     {
         _pollCts?.Cancel();
         _pollCts?.Dispose();
+        _pollTask = null;
         // 共享连接由 CraneConnectionCache/流程生命周期管理；这里只停轮询, 不 Disconnect。
         Console.WriteLine($"[CraneCardVM] [{CraneName}] 已释放资源");
     }

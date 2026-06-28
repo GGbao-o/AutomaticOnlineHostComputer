@@ -245,19 +245,20 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
         private Task<bool> ReadMacroBoolAsync(int addr, CancellationToken ct = default)
         {
-            return SafeCallAsync(async () => {
+            return SafeCallAsync(() => {
                 double v = _sdk.GetMacro(addr);
                 bool r = Math.Abs(v) > 0.01;
                 Console.WriteLine($"[FANUC-SDK] 读宏变量 #{addr}={v:F1} → {r}");
-                return r;
+                return Task.FromResult(r);
             }, $"读 #{addr}", ct);
         }
 
         private Task WriteMacroBoolAsync(int addr, bool val, CancellationToken ct = default)
         {
-            return SafeCallAsync(async () => {
+            return SafeCallAsync(() => {
                 _sdk.SetMacro(addr, val ? 1.0 : 0.0);
                 Console.WriteLine($"[FANUC-SDK] 写宏变量 #{addr}={ (val ? 1 : 0) } OK");
+                return Task.CompletedTask;
             }, $"写 #{addr}", ct);
         }
 

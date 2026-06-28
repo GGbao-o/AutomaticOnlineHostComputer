@@ -17,7 +17,11 @@ public sealed class ForkService : IDisposable
 {
     private readonly MitsubishiMcClient _client;
     private readonly string _name;
+    private readonly object _statusLogLock = new();
     private bool _disposed;
+    private ushort? _lastLoggedRaw;
+    private DateTime _lastStatusLogAtUtc;
+    private static readonly TimeSpan StatusLogHeartbeat = TimeSpan.FromSeconds(10);
 
     /// <param name="name">调试名称</param>
     /// <param name="ip">三菱 PLC IP</param>
@@ -64,10 +68,29 @@ public sealed class ForkService : IDisposable
             RawValue      = raw,
         };
 
-        Console.WriteLine($"[ForkSvc] [{_name}] 状态 M900~M914=0x{raw:X4} " +
-            $"有版={status.HasPlate} 待机={status.AtStandbyPos} Pos3={status.AtPos3} " +
-            $"命令[M911={status.GoStandby},M912={status.FeedToBoring},M913={status.PickFromBoring},M914={status.StandbyToPos3}]");
+        // 前端主循环会在多个判断点读取同一货叉。仅在原始位变化或心跳周期到达时输出，
+        // 保留状态变化的诊断价值，同时避免每500ms重复刷相同日志。
+        if (ShouldLogStatus(raw))
+        {
+            Console.WriteLine($"[ForkSvc] [{_name}] 状态 M900~M914=0x{raw:X4} " +
+                $"有版={status.HasPlate} 待机={status.AtStandbyPos} Pos3={status.AtPos3} " +
+                $"命令[M911={status.GoStandby},M912={status.FeedToBoring},M913={status.PickFromBoring},M914={status.StandbyToPos3}]");
+        }
         return status;
+    }
+
+    private bool ShouldLogStatus(ushort raw)
+    {
+        var now = DateTime.UtcNow;
+        lock (_statusLogLock)
+        {
+            bool changed = _lastLoggedRaw != raw;
+            bool heartbeat = now - _lastStatusLogAtUtc >= StatusLogHeartbeat;
+            if (!changed && !heartbeat) return false;
+            _lastLoggedRaw = raw;
+            _lastStatusLogAtUtc = now;
+            return true;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════

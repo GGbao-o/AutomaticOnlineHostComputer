@@ -30,8 +30,6 @@
     <None Update="Config\motion_settings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="bin\Debug\net8.0-windows\Config\motion_settings.json" />
-    <None Include="bin\Debug\net8.0-windows\motion_settings.json" />
     <Content Include="Libs\**\*.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>%(Filename)%(Extension)</Link>

@@ -11,10 +11,8 @@ namespace AutomaticOnlineHostComputer.Views.Process.Dialogs;
 /// </summary>
 public partial class AddProcessDialog : Window
 {
-    private readonly ManagementQueryService _queryService;
     private readonly ManagementInsertService _insertService;
     private readonly ManagementUpdateService _updateService;
-    private readonly ManagementDeleteService _deleteService;
 
     private readonly int? _editId;
 

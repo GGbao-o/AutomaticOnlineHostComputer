@@ -5,8 +5,8 @@ using MySql.Data.MySqlClient;
 namespace AutomaticOnlineHostComputer.Service;
 
 /// <summary>
-/// 天车/机械手当前位置异步写库服务。
-/// 所有 DB 操作均为 fire-and-forget，失败不打紧（控制台日志 + 不影响主流程）。
+/// 工件跟踪及设备数据异步写库服务。
+/// 天车/机械手当前位置由PLC实时提供，不在此服务中持久化。
 /// </summary>
 public sealed class PositionUpdateService
 {
@@ -15,33 +15,6 @@ public sealed class PositionUpdateService
     public PositionUpdateService(string connectionString)
     {
         _connStr = connectionString;
-    }
-
-    /// <summary>
-    /// 更新 crane 表的 current_x/y/z（天车/机械手当前位置）。
-    /// 异步执行，DB 不可用时静默忽略。
-    /// </summary>
-    public async Task UpdateCranePositionAsync(string craneName, int x, int y, int z)
-    {
-        try
-        {
-            const string sql = "UPDATE crane SET current_x=@x, current_y=@y, current_z=@z WHERE name=@name LIMIT 1";
-            await using var conn = new MySqlConnection(_connStr);
-            await conn.OpenAsync();
-            await using var cmd = new MySqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@x", x);
-            cmd.Parameters.AddWithValue("@y", y);
-            cmd.Parameters.AddWithValue("@z", z);
-            cmd.Parameters.AddWithValue("@name", craneName);
-            int rows = await cmd.ExecuteNonQueryAsync();
-            Console.WriteLine(rows > 0
-                ? $"[PositionUpdate] ✔ crane.{craneName} 位置已更新: X={x} Y={y} Z={z}"
-                : $"[PositionUpdate] ⚠ crane.{craneName} 未匹配到记录（name字段不匹配？）");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[PositionUpdate] ✘ crane.{craneName} 写库失败: {ex.Message}");
-        }
     }
 
     /// <summary>
