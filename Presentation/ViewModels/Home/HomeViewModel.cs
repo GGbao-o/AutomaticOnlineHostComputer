@@ -2176,17 +2176,27 @@ public sealed class HomeViewModel : ObservableObject
             {
                 _frontDispatchLoopCycle++;
 
-                if (!TryPeekFrontDispatch(out var item) || item == null)
+                bool hasPendingItem = TryPeekFrontDispatch(out var item) && item != null;
+
+                // 派发上一块后必须亲眼看到M800从1复位为0，才能把下一次M800=1认作新物理板。
+                // 这个复位观察不能依赖全局FIFO非空：若上一块取走时FIFO刚好为空，跳过读取会漏掉
+                // M800=0，后续新板已经让M800重新变1时，调度器会永久误认为仍在等待上一块复位。
+                if (!hasPendingItem && !_frontDispatchWaitingM800Clear)
                 {
                     await Task.Delay(500, ct);
                     continue;
                 }
 
+                // 有待派发任务，或仍在等待上一块M800复位时，都必须读取现场快照。
+                // 空闲且复位门已解除时不读取，避免全局调度器无意义地持续占用MC63通信。
                 var status = await ReadFrontRackStatusForDispatchAsync(ct);
                 if (status == null)
                 {
                     if (_frontDispatchLoopCycle % 10 == 1)
-                        Console.WriteLine("[FrontDispatch] ⚠ 总上料架服务未初始化, 等待LoadAsync完成");
+                        Console.WriteLine(
+                            $"[FrontDispatch] ⚠ 总上料架服务未初始化, 等待LoadAsync完成; " +
+                            $"复位门={(_frontDispatchWaitingM800Clear ? "等待上一块M800=0" : "已就绪")} " +
+                            $"全局FIFO={FrontDispatchCachedCount}");
                     await Task.Delay(500, ct);
                     continue;
                 }
@@ -2196,10 +2206,30 @@ public sealed class HomeViewModel : ObservableObject
                     if (!status.RequestPickup)
                     {
                         _frontDispatchWaitingM800Clear = false;
-                        Console.WriteLine("[FrontDispatch] M800已复位, 允许派发下一块物理板");
+                        string nextTask = item?.Workpiece.IdentityText ?? "无(FIFO为空)";
+                        Console.WriteLine(
+                            $"[FrontDispatch] ✓ 已观察到上一块M800复位为0, 新物理板派发门已解除; " +
+                            $"全局FIFO={FrontDispatchCachedCount} 下一任务={nextTask} D100={status.PlateLength}mm");
+                        item?.Workpiece.ReportStage("上一块M800已复位，等待新板M800=1", "等待中");
+                    }
+                    else if (_frontDispatchLoopCycle % 10 == 1)
+                    {
+                        string nextTask = item?.Workpiece.IdentityText ?? "无(FIFO为空)";
+                        Console.WriteLine(
+                            $"[FrontDispatch] ⏳ 等待上一块M800复位: 当前M800=1 D100={status.PlateLength}mm " +
+                            $"全局FIFO={FrontDispatchCachedCount} 下一任务={nextTask}; " +
+                            "即使FIFO为空也会持续读取, 禁止把同一块物理板重复派发");
+                        item?.Workpiece.ReportStage("等待上一块M800复位", "等待中");
                     }
 
                     await Task.Delay(300, ct);
+                    continue;
+                }
+
+                // 正常情况下无任务已在方法开头返回；保留兜底，防止UI删除队列与本轮快照并发交错。
+                if (!hasPendingItem || item == null)
+                {
+                    await Task.Delay(500, ct);
                     continue;
                 }
 
@@ -2283,7 +2313,9 @@ public sealed class HomeViewModel : ObservableObject
                 dequeued.Workpiece.ReportStage($"已派发{line}号线前端缓存");
                 _frontDispatchWaitingM800Clear = true;
                 Console.WriteLine(
-                    $"[FrontDispatch] 🚀 M800=1 D100={status.PlateLength}mm 队头{dequeued.Workpiece.IdentityText} D={dequeued.Workpiece.Diameter} L={dequeued.Workpiece.Length} → {line}号线; {routeReason}; 剩余={FrontDispatchCachedCount}");
+                    $"[FrontDispatch] 🚀 M800=1 D100={status.PlateLength}mm 队头{dequeued.Workpiece.IdentityText} " +
+                    $"D={dequeued.Workpiece.Diameter} L={dequeued.Workpiece.Length} → {line}号线; {routeReason}; " +
+                    $"剩余={FrontDispatchCachedCount}; 已进入M800复位门, 必须观察到M800=0后才允许下一块派发");
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
