@@ -1005,7 +1005,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
                                         _boringUnloadDoneSent = true;
                                         _forkPhase = ForkBoringPhase.WaitingForkReturnFromBoring;
-                                        Console.WriteLine($"[Line2Front] [货叉] 下料完成已发送，R6102/R6104/R6108已清零 ✓ → 工件入天车队列 {_currentWp?.IdentityText}");
+                                        Console.WriteLine($"[Line2Front] [货叉] 下料完成已发送，R6108保持为1，R6102/R6104已清零 ✓ → 工件入天车队列 {_currentWp?.IdentityText}");
                                         _craneQueue.Enqueue(_currentWp!.Value);
                                         lock (_wpLock) { _currentWp = null; }
                                     }

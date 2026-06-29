@@ -74,7 +74,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
     /// <summary>天车任务队列 — 货叉Pos3到位后入队, 天车独立循环消费(可同时处理多个工件)</summary>
     private readonly ConcurrentQueue<WorkpieceCache> _craneQueue = new();
 
-    /// <summary>货叉-双头镗交互状态机；R6108置1后立即清R6102/R6104/R6108。</summary>
+    /// <summary>货叉-双头镗交互状态机；R6108置1并保持，随后立即清R6102/R6104。</summary>
     private enum ForkBoringPhase
     {
         Idle,
@@ -985,7 +985,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
 
                                         _boringUnloadDoneSent = true;
                                         _forkPhase = ForkBoringPhase.WaitingForkReturnFromBoring;
-                                        Console.WriteLine($"[Line1Front] [货叉] 下料完成已发送，R6102/R6104/R6108已清零 ✓ → 工件入天车队列 {_currentWp?.IdentityText}");
+                                        Console.WriteLine($"[Line1Front] [货叉] 下料完成已发送，R6108保持为1，R6102/R6104已清零 ✓ → 工件入天车队列 {_currentWp?.IdentityText}");
                                         _craneQueue.Enqueue(_currentWp!.Value);
                                         lock (_wpLock)
                                         {
