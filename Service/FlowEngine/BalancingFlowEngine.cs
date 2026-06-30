@@ -221,6 +221,8 @@ public sealed class BalancingFlowEngine : IDisposable
         Task? m3Completion = null;
         bool releasedM2 = false;
         bool releasedM3 = false;
+        string m2Source = string.Empty;
+        string m3Source = string.Empty;
 
         lock (_emergencyLock)
         {
@@ -233,18 +235,16 @@ public sealed class BalancingFlowEngine : IDisposable
 
             if (touchesM2)
             {
+                m2Source = _m2EmergencySource;
                 m2Completion = _m2ActionCompletion?.Task;
                 CancelM2ActionNoLock(logs);
-                if (_m2HoldsM818) { _lockM818?.Release(); _m2HoldsM818 = false; releasedM2 = true; logs.Add("释放M818锁(记录为M2当前动作持有)"); }
-                if (_m2HoldsM817) { _lockM817?.Release(); _m2HoldsM817 = false; releasedM2 = true; logs.Add("释放M817锁(记录为M2当前动作持有)"); }
             }
 
             if (touchesM3)
             {
+                m3Source = _m3EmergencySource;
                 m3Completion = _m3ActionCompletion?.Task;
                 CancelM3ActionNoLock(logs);
-                if (_m3HoldsM720) { _lockM720?.Release(); _m3HoldsM720 = false; releasedM3 = true; logs.Add("释放M720锁(记录为M3当前动作持有)"); }
-                if (_m3HoldsM821) { _lockM821?.Release(); _m3HoldsM821 = false; releasedM3 = true; logs.Add("释放M821锁(记录为M3当前动作持有)"); }
             }
         }
 
@@ -255,7 +255,7 @@ public sealed class BalancingFlowEngine : IDisposable
             var timeout = Task.Delay(TimeSpan.FromSeconds(6), ct);
             if (await Task.WhenAny(allExited, timeout) != allExited)
             {
-                logs.Add("旧动作6秒内未退出, 保持暂停且不清缓存/busy, 请确认设备通信后重试应急");
+                logs.Add("旧动作6秒内未退出, 保持暂停且不释放锁、不清缓存/busy, 请确认设备通信后重试应急");
                 string timeoutMessage = BuildBalancingEmergencyLog(position, logs);
                 Console.WriteLine(timeoutMessage);
                 return timeoutMessage;
@@ -264,8 +264,32 @@ public sealed class BalancingFlowEngine : IDisposable
             logs.Add("旧动作=已退出");
         }
 
+        // 旧动作finally已经退出后，才释放它仍记录持有的残留位置锁。
+        // 正常情况下finally会先释放并清标记；这里仅处理应急取消后残留的锁。
+        lock (_emergencyLock)
+        {
+            if (touchesM2)
+            {
+                if (_m2HoldsM818) { _lockM818?.Release(); _m2HoldsM818 = false; releasedM2 = true; logs.Add("旧动作退出后释放M818残留锁"); }
+                if (_m2HoldsM817) { _lockM817?.Release(); _m2HoldsM817 = false; releasedM2 = true; logs.Add("旧动作退出后释放M817残留锁"); }
+            }
+            if (touchesM3)
+            {
+                if (_m3HoldsM720) { _lockM720?.Release(); _m3HoldsM720 = false; releasedM3 = true; logs.Add("旧动作退出后释放M720残留锁"); }
+                if (_m3HoldsM821) { _lockM821?.Release(); _m3HoldsM821 = false; releasedM3 = true; logs.Add("旧动作退出后释放M821残留锁"); }
+            }
+        }
+
+        // 选择目的位M710/M720时，真实工件身份仍存放在动作来源M817/M818/M821。
+        // 应急只清选中位置和被取消动作的实际来源，不碰其它正常位置缓存或研磨FIFO。
+        var cacheKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { position };
+        if (touchesM2 && !string.IsNullOrWhiteSpace(m2Source)) cacheKeys.Add(m2Source);
+        if (touchesM3 && string.Equals(m3Source, "M821", StringComparison.OrdinalIgnoreCase)) cacheKeys.Add(m3Source);
         lock (_balWpsLock)
-            logs.Add(_balWps.Remove(position) ? $"缓存{position}=已删除" : $"缓存{position}=无");
+        {
+            foreach (var key in cacheKeys)
+                logs.Add(_balWps.Remove(key) ? $"缓存{key}=已删除" : $"缓存{key}=无");
+        }
 
         lock (_emergencyLock)
         {
@@ -274,7 +298,7 @@ public sealed class BalancingFlowEngine : IDisposable
         }
 
         if (!releasedM2 && !releasedM3)
-            logs.Add("锁=未释放(没有记录为当前动作持有)");
+            logs.Add("应急残留锁=无(已由旧动作finally释放或原本未持有)");
         if (position is "M700" or "M710")
             logs.Add($"{position}=PLC物理位, 本按钮不写PLC完成信号, 需人工确认设备侧状态");
         if (position == "M720")
@@ -418,22 +442,22 @@ public sealed class BalancingFlowEngine : IDisposable
 
     private void FinishM2Action(int version, TaskCompletionSource<bool> completion)
     {
-        completion.TrySetResult(true);
         lock (_emergencyLock)
         {
             if (ReferenceEquals(_m2ActionCompletion, completion)) _m2ActionCompletion = null;
             if (version == _m2ActionVersion) _m2ActionCts = null;
         }
+        completion.TrySetResult(true);
     }
 
     private void FinishM3Action(int version, TaskCompletionSource<bool> completion)
     {
-        completion.TrySetResult(true);
         lock (_emergencyLock)
         {
             if (ReferenceEquals(_m3ActionCompletion, completion)) _m3ActionCompletion = null;
             if (version == _m3ActionVersion) _m3ActionCts = null;
         }
+        completion.TrySetResult(true);
     }
 
     private void CancelM2ActionNoLock(List<string> logs)

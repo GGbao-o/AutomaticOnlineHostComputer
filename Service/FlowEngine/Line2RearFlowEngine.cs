@@ -822,6 +822,18 @@ public sealed class Line2RearFlowEngine : IDisposable
         {
             operation.CancelAndInvalidate();
             logs.Add($"当前动作={operation.Name} v{operation.Version} 已取消并失效");
+
+            if (!await WaitForOperationExitAsync(operation, ct))
+            {
+                string timeoutMessage = $"[Line2Rear] [斜床应急作废] {bed.Code} 旧动作6秒内未退出; " +
+                    $"{string.Join("; ", logs)}; 后端保持暂停, 未释放软件锁, 未清软件缓存/设备寄存器, 请稍后重试";
+                Console.WriteLine(timeoutMessage);
+                return timeoutMessage;
+            }
+            logs.Add("旧动作=已确认退出");
+
+            // 必须先确认旧动作退出，再释放finally仍未能释放的残留锁。
+            // 先释放会让其它引擎在旧SDK调用尚未返回时进入同一物理区域。
             logs.Add(ReleaseLeaseLock(operation, "RearCrane", _craneRearLock, "后天车锁"));
             logs.Add(ReleaseLeaseLock(operation, "TransferRack", _transferRackLock, "中转架锁"));
             logs.Add(bed.Code == "ST606"
@@ -829,15 +841,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 : "共享区锁=非共享区斜床, 未处理");
             logs.Add(ReleaseLeaseLock(operation, "M821", _lockM821, "M821分流锁"));
             logs.Add(ReleaseLeaseLock(operation, "M818", _lockM818, "M818分流锁"));
-
-            if (!await WaitForOperationExitAsync(operation, ct))
-            {
-                string timeoutMessage = $"[Line2Rear] [斜床应急作废] {bed.Code} 旧动作6秒内未退出; " +
-                    $"{string.Join("; ", logs)}; 后端保持暂停, 未清软件缓存/设备寄存器, 请稍后重试";
-                Console.WriteLine(timeoutMessage);
-                return timeoutMessage;
-            }
-            logs.Add("旧动作=已确认退出");
+            if (ReferenceEquals(bed.ActiveOperation, operation)) bed.ActiveOperation = null;
         }
         else
         {
@@ -857,8 +861,10 @@ public sealed class Line2RearFlowEngine : IDisposable
             }
             catch (Exception ex)
             {
-                return $"设备侧清零失败: {ex.Message}{Environment.NewLine}" +
-                       "旧动作已退出且软件锁已释放, 但未清上位机缓存。请确认是否仅清上位机软件状态。";
+                string failure = $"设备侧清零失败: {ex.Message}{Environment.NewLine}" +
+                                 "旧动作已退出且软件锁已释放, 但未清上位机缓存。请确认是否仅清上位机软件状态。";
+                Console.WriteLine($"[Line2Rear] [斜床应急作废] {bed.Code} {failure.Replace(Environment.NewLine, " ")}");
+                return failure;
             }
         }
 
@@ -890,7 +896,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             await bed.F.ClearEmergencyRegistersAsync(ct);
             return "设备寄存器=FANUC #800/#801/#802/#909/#1101~#1105 已清零";
         }
-        return "设备寄存器=未找到斜床通信服务, 未清零";
+        throw new InvalidOperationException($"{bed.Code}斜床通信服务未注入或未连接, 设备寄存器未清零");
     }
 
     private SkewCtx? FindBed(string bedCode)
@@ -929,8 +935,10 @@ public sealed class Line2RearFlowEngine : IDisposable
 
     private static void EndSkewOperation(SkewCtx bed, EmergencyActionLease operation)
     {
+        // 被应急作废的动作保留在ActiveOperation，直到应急流程确认退出并释放残留锁。
+        // 正常动作仍按原逻辑清空，不影响正常上/下料。
+        if (operation.IsValid && ReferenceEquals(bed.ActiveOperation, operation)) bed.ActiveOperation = null;
         operation.Complete();
-        if (ReferenceEquals(bed.ActiveOperation, operation)) bed.ActiveOperation = null;
     }
 
     private static async Task<bool> WaitForOperationExitAsync(EmergencyActionLease operation, CancellationToken ct)

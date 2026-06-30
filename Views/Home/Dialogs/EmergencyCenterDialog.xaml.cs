@@ -81,25 +81,42 @@ public partial class EmergencyCenterDialog : Window
     private async void ClearSkew_Click(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(this,
-                $"确认执行斜床应急？\n\n线体: {SelectedSkewLine}号线\n斜床: {SelectedSkewBed}\n\n请确认已人工处理磁铁、工件、天车安全位置。",
+                $"确认执行斜床应急？\n\n线体: {SelectedSkewLine}号线\n斜床: {SelectedSkewBed}\n\n请确认已人工处理磁铁、工件、天车安全位置。系统会先取消并等待旧动作退出，最多6秒；超时不会释放锁或清缓存。",
                 "确认斜床应急", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        var result = await _viewModel.EmergencyClearSkewBedAsync(SelectedSkewLine, SelectedSkewBed, skipDeviceClear: false);
-        if (await HandleDeviceClearFailureAsync(result, () => _viewModel.EmergencyClearSkewBedAsync(SelectedSkewLine, SelectedSkewBed, skipDeviceClear: true), text => SkewInfoBox.Text = text))
-            return;
+        try
+        {
+            var result = await _viewModel.EmergencyClearSkewBedAsync(SelectedSkewLine, SelectedSkewBed, skipDeviceClear: false);
+            if (await HandleDeviceClearFailureAsync(result, () => _viewModel.EmergencyClearSkewBedAsync(SelectedSkewLine, SelectedSkewBed, skipDeviceClear: true), text => SkewInfoBox.Text = text))
+                return;
 
-        SkewInfoBox.Text = result;
+            SkewInfoBox.Text = result;
+            ShowEmergencyFailureIfNeeded("斜床应急失败", result);
+        }
+        catch (Exception ex)
+        {
+            ShowEmergencyException("斜床应急异常", ex, text => SkewInfoBox.Text = text);
+        }
     }
 
     private async void ClearBalance_Click(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(this,
-                $"确认执行动平衡应急？\n\n位置: {SelectedBalancePosition}\n\n只会清对应缓存和本引擎明确持有的锁，不会写PLC信号，也不会控制机械手/磁铁。",
+                $"确认执行动平衡应急？\n\n位置: {SelectedBalancePosition}\n\n系统会先取消并等待旧动作退出，最多6秒；退出后才释放残留锁并清实际来源缓存。不会写PLC信号，也不会控制机械手/磁铁。",
                 "确认动平衡应急", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        BalanceInfoBox.Text = await _viewModel.EmergencyClearBalancingPositionAsync(SelectedBalancePosition);
+        try
+        {
+            var result = await _viewModel.EmergencyClearBalancingPositionAsync(SelectedBalancePosition);
+            BalanceInfoBox.Text = result;
+            ShowEmergencyFailureIfNeeded("动平衡应急失败", result);
+        }
+        catch (Exception ex)
+        {
+            ShowEmergencyException("动平衡应急异常", ex, text => BalanceInfoBox.Text = text);
+        }
     }
 
     private async void ClearGrinding_Click(object sender, RoutedEventArgs e)
@@ -112,15 +129,23 @@ public partial class EmergencyCenterDialog : Window
         // 保存点击应急前的运行状态。第一次设备清零失败后引擎会保持暂停，
         // 二次“仅清软件”仍使用这个原始状态，成功后才能按原状态恢复派发。
         bool resumeAfterClear = _viewModel.IsGrindingRunning;
-        var result = await _viewModel.EmergencyClearGrindingAsync(
-            SelectedGrindingTarget, skipDeviceClear: false, resumeAfterClear);
-        if (await HandleDeviceClearFailureAsync(result,
-                () => _viewModel.EmergencyClearGrindingAsync(
-                    SelectedGrindingTarget, skipDeviceClear: true, resumeAfterClear),
-                text => GrindingInfoBox.Text = text))
-            return;
+        try
+        {
+            var result = await _viewModel.EmergencyClearGrindingAsync(
+                SelectedGrindingTarget, skipDeviceClear: false, resumeAfterClear);
+            if (await HandleDeviceClearFailureAsync(result,
+                    () => _viewModel.EmergencyClearGrindingAsync(
+                        SelectedGrindingTarget, skipDeviceClear: true, resumeAfterClear),
+                    text => GrindingInfoBox.Text = text))
+                return;
 
-        GrindingInfoBox.Text = result;
+            GrindingInfoBox.Text = result;
+            ShowEmergencyFailureIfNeeded("研磨应急失败", result);
+        }
+        catch (Exception ex)
+        {
+            ShowEmergencyException("研磨应急异常", ex, text => GrindingInfoBox.Text = text);
+        }
     }
 
     private async Task<bool> HandleDeviceClearFailureAsync(string result, Func<Task<string>> softwareOnlyAction, Action<string> setText)
@@ -128,16 +153,45 @@ public partial class EmergencyCenterDialog : Window
         if (!result.StartsWith("设备侧清零失败:", StringComparison.Ordinal))
             return false;
 
+        Console.WriteLine($"[EmergencyCenter] 设备侧清零失败: {result.Replace(Environment.NewLine, " ")}");
         var ask = MessageBox.Show(this,
             result + "\n\n是否仅清上位机软件状态？\n继续后必须人工确认设备参数/握手信号已清除。",
             "设备侧清零失败", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (ask != MessageBoxResult.Yes)
         {
+            Console.WriteLine("[EmergencyCenter] 用户取消仅清软件，应急目标保持原软件状态/暂停状态");
             setText(result + "\n用户取消，仅保留原软件状态。");
             return true;
         }
 
-        setText(await softwareOnlyAction());
+        var softwareOnlyResult = await softwareOnlyAction();
+        Console.WriteLine($"[EmergencyCenter] 用户确认仅清软件: {softwareOnlyResult.Replace(Environment.NewLine, " ")}");
+        setText(softwareOnlyResult);
+        ShowEmergencyFailureIfNeeded("仅清软件应急失败", softwareOnlyResult);
         return true;
+    }
+
+    private void ShowEmergencyFailureIfNeeded(string title, string result)
+    {
+        // 应急接口目前返回可读文本而不是结构化结果；统一兜底常见失败关键词，
+        // 防止新增异常分支只显示在信息框、现场没有醒目的弹窗提示。
+        bool failed = result.Contains("失败", StringComparison.Ordinal)
+                      || result.Contains("未找到", StringComparison.Ordinal)
+                      || result.Contains("超时", StringComparison.Ordinal)
+                      || result.Contains("旧动作6秒内未退出", StringComparison.Ordinal)
+                      || result.StartsWith("未知", StringComparison.Ordinal)
+                      || result.StartsWith("无效", StringComparison.Ordinal);
+        if (!failed) return;
+
+        Console.WriteLine($"[EmergencyCenter] {title}: {result.Replace(Environment.NewLine, " ")}");
+        MessageBox.Show(this, result, title, MessageBoxButton.OK, MessageBoxImage.Error);
+    }
+
+    private void ShowEmergencyException(string title, Exception ex, Action<string> setText)
+    {
+        string message = $"{title}: {ex.GetType().Name} - {ex.Message}";
+        Console.WriteLine($"[EmergencyCenter] {message}");
+        setText(message);
+        MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }

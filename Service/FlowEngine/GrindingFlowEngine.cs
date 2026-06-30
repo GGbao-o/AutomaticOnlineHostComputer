@@ -413,18 +413,40 @@ public sealed class GrindingFlowEngine : IDisposable
         target = NormalizeGrindingTarget(target);
         if (target == "ST709")
         {
+            _paused = true; // 只做应急软暂停，不发送天车急停，不改变正常引擎条件。
             WorkpieceCache? removed = null;
-            lock (_cacheLock)
+            await _grindingDispatchGate.WaitAsync(ct);
+            try
             {
-                if (_cacheQueue.First != null)
+                // 如果已有研磨天车动作，队头可能已经被该动作取走；此时继续删除会误删下一块板。
+                lock (_emergencyLock)
                 {
-                    removed = _cacheQueue.First.Value;
-                    _cacheQueue.RemoveFirst();
-                    if (_cachedList.Count > 0) _cachedList.RemoveAt(0);
+                    if (_craneLockHeldByFlow)
+                    {
+                        string failure = $"研磨应急失败: ST709存在在途天车动作={_craneLockAction}, 目标研磨机={_craneLockStation}; 未清FIFO，研磨引擎保持暂停";
+                        Console.WriteLine($"[GrindingEngine] [研磨应急] {failure}");
+                        return failure;
+                    }
+                }
+
+                lock (_cacheLock)
+                {
+                    if (_cacheQueue.First != null)
+                    {
+                        removed = _cacheQueue.First.Value;
+                        _cacheQueue.RemoveFirst();
+                        if (_cachedList.Count > 0) _cachedList.RemoveAt(0);
+                    }
                 }
             }
+            finally
+            {
+                _grindingDispatchGate.Release();
+            }
 
-            string msg = $"[GrindingEngine] [研磨应急] {DateTime.Now:yyyy-MM-dd HH:mm:ss} ST709上料FIFO队头={(removed?.IdentityText ?? "无")} 已清; 队列长度={CachedCount}; 未写PLC信号";
+            if (resumeAfterClear && IsRunning) _paused = false;
+
+            string msg = $"[GrindingEngine] [研磨应急] {DateTime.Now:yyyy-MM-dd HH:mm:ss} ST709上料FIFO队头={(removed?.IdentityText ?? "无")} 已清; 队列长度={CachedCount}; 未写PLC信号; 研磨引擎={(_paused ? "保持暂停" : "已恢复派发")}";
             Console.WriteLine(msg);
             return msg;
         }
@@ -499,6 +521,8 @@ public sealed class GrindingFlowEngine : IDisposable
 
         var oldState = g.State;
         var oldWp = g.PendingWorkpiece;
+        // 作废应急开始前已经发出的扫描；否则旧扫描晚返回会把刚清掉的信号快照重新写回。
+        Interlocked.Increment(ref g.SignalScanVersion);
         g.State = GrinderState.Idle;
         g.PendingWorkpiece = null;
         g.WpRecoveryNeeded = false;
