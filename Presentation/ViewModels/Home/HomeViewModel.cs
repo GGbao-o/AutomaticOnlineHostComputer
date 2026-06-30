@@ -1243,8 +1243,18 @@ public sealed class HomeViewModel : ObservableObject
     public string GetGrindingEmergencyInfo(string target)
         => _grindingEngine?.GetGrindingEmergencyInfo(target) ?? "研磨引擎未初始化";
 
-    public Task<string> EmergencyClearGrindingAsync(string target, bool skipDeviceClear, CancellationToken ct = default)
-        => _grindingEngine?.EmergencyClearGrindingAsync(target, skipDeviceClear, ct) ?? Task.FromResult("研磨引擎未初始化");
+    public async Task<string> EmergencyClearGrindingAsync(string target, bool skipDeviceClear,
+        bool resumeAfterClear, CancellationToken ct = default)
+    {
+        if (_grindingEngine == null) return "研磨引擎未初始化";
+
+        var result = await _grindingEngine.EmergencyClearGrindingAsync(
+            target, skipDeviceClear, resumeAfterClear, ct);
+        // 超时或清零失败时引擎会保持暂停，主页面必须同步真实状态，不能仍显示“运行中”。
+        IsGrindingRunning = _grindingEngine.IsRunning && !_grindingEngine.IsPaused;
+        OnPropertyChanged(nameof(GrindingCachedCount));
+        return result;
+    }
 
     public ICommand Line1ToggleCommand { get; }
     /// <summary>2号线启动/暂停</summary>

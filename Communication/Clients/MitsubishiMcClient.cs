@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Sockets;
 using System.Text;
@@ -40,6 +41,11 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         private TcpClient?     _tcp;
         private NetworkStream? _stream;
         private readonly SemaphoreSlim _lock = new(1, 1);
+        // 同一PLC的同一个16位M字必须共用一把进程级锁。
+        // McConnectionCache通常会复用客户端，但页面诊断等路径仍可能创建独立客户端；
+        // 静态锁可以避免这些实例之间发生“读旧字→分别改位→后写覆盖先写”的丢位问题。
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MWordRmwLocks =
+            new(StringComparer.OrdinalIgnoreCase);
 
         public MitsubishiMcClient(string ip, int port = 3000, byte deviceType = DeviceD, int timeoutMs = 3000, McFrameType frameType = McFrameType.E3, bool enableConsoleLog = false)
         { _ip = ip; _port = port; _deviceType = deviceType; _timeoutMs = timeoutMs; _frameType = frameType; _enableConsoleLog = enableConsoleLog; }
@@ -140,18 +146,60 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
         public Task WriteAsync(byte deviceType, int address, int value, CancellationToken ct = default)
             => WriteWordsAsync(deviceType, (ushort)address, new[] { (ushort)value }, ct);
 
-        /// <summary>读改写M区一个bit。FX系列按字读写M设备时，内部自动换算到16点对齐字。</summary>
+        /// <summary>
+        /// 读改写M区一个bit。FX系列按字读写M设备时，内部自动换算到16点对齐字。
+        /// 同一PLC同一M字的读/改/写/回读校验由进程级锁串行化，校验不一致时最多重试3次。
+        /// </summary>
         public async Task WriteMBitInWordAsync(int wordStartAddr, int bitOffset, bool value, CancellationToken ct = default)
         {
             if ((uint)bitOffset > 15) throw new ArgumentOutOfRangeException(nameof(bitOffset));
             int targetAddr = wordStartAddr + bitOffset;
             int alignedAddr = targetAddr - (targetAddr % 16);
             int alignedBitOffset = targetAddr - alignedAddr;
+            int bitMask = 1 << alignedBitOffset;
+            string lockKey = $"{_ip}:{_port}:M{alignedAddr}";
+            var rmwLock = MWordRmwLocks.GetOrAdd(lockKey, static _ => new SemaphoreSlim(1, 1));
 
-            var words = await ReadWordsAsync(DeviceM, (ushort)alignedAddr, 1, ct, forceBitMode: false);
-            int current = words.Length > 0 ? words[0] : 0;
-            int next = value ? (current | (1 << alignedBitOffset)) : (current & ~(1 << alignedBitOffset));
-            await WriteWordsAsync(DeviceM, (ushort)alignedAddr, new[] { (ushort)next }, ct, forceBitMode: false);
+            await rmwLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                const int maxAttempts = 3;
+                const int retryDelayMs = 20;
+                bool lastActual = false;
+
+                for (int attempt = 1; attempt <= maxAttempts; attempt++)
+                {
+                    // 通信异常不在这里吞掉或盲目重连，继续交给现有引擎/连接缓存的失效重连流程。
+                    var words = await ReadWordsAsync(DeviceM, (ushort)alignedAddr, 1, ct, forceBitMode: false).ConfigureAwait(false);
+                    int current = words.Length > 0 ? words[0] : 0;
+                    int next = value ? (current | bitMask) : (current & ~bitMask);
+                    await WriteWordsAsync(DeviceM, (ushort)alignedAddr, new[] { (ushort)next }, ct, forceBitMode: false).ConfigureAwait(false);
+
+                    var verifyWords = await ReadWordsAsync(DeviceM, (ushort)alignedAddr, 1, ct, forceBitMode: false).ConfigureAwait(false);
+                    int verifyWord = verifyWords.Length > 0 ? verifyWords[0] : 0;
+                    lastActual = (verifyWord & bitMask) != 0;
+                    if (lastActual == value)
+                    {
+                        if (attempt > 1)
+                        {
+                            Console.WriteLine($"[MC-RMW] PLC={_ip}:{_port} M字=M{alignedAddr} 目标=M{targetAddr}(bit{alignedBitOffset}) 期望={(value ? 1 : 0)} 第{attempt}次校验成功");
+                        }
+                        return;
+                    }
+
+                    Console.WriteLine($"[MC-RMW] ⚠ PLC={_ip}:{_port} M字=M{alignedAddr} 目标=M{targetAddr}(bit{alignedBitOffset}) 期望={(value ? 1 : 0)} 实际={(lastActual ? 1 : 0)} 校验失败 {attempt}/{maxAttempts}");
+                    if (attempt < maxAttempts)
+                        await Task.Delay(retryDelayMs, ct).ConfigureAwait(false);
+                }
+
+                string message = $"MC位写回读校验失败: PLC={_ip}:{_port}, M字=M{alignedAddr}, 目标=M{targetAddr}(bit{alignedBitOffset}), 期望={(value ? 1 : 0)}, 实际={(lastActual ? 1 : 0)}, 已尝试3次";
+                Console.WriteLine($"[MC-RMW] ✘ {message}");
+                throw new IOException(message);
+            }
+            finally
+            {
+                rmwLock.Release();
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════

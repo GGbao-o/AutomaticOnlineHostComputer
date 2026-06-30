@@ -105,12 +105,19 @@ public partial class EmergencyCenterDialog : Window
     private async void ClearGrinding_Click(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(this,
-                $"确认执行研磨应急？\n\n目标: {SelectedGrindingTarget}\n\n研磨机会先尝试清PLC输出/参数，成功后再清上位机Pending/状态。ST709只清上位机FIFO队头。",
+                $"确认执行研磨应急？\n\n目标: {SelectedGrindingTarget}\n\nST701~ST704会先暂停新派发并取消目标旧动作，最多等待6秒确认退出；超时不会清状态或释放锁。随后尝试清PLC输出/参数，成功后再清Pending/状态。ST709只清上位机FIFO队头。",
                 "确认研磨应急", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        var result = await _viewModel.EmergencyClearGrindingAsync(SelectedGrindingTarget, skipDeviceClear: false);
-        if (await HandleDeviceClearFailureAsync(result, () => _viewModel.EmergencyClearGrindingAsync(SelectedGrindingTarget, skipDeviceClear: true), text => GrindingInfoBox.Text = text))
+        // 保存点击应急前的运行状态。第一次设备清零失败后引擎会保持暂停，
+        // 二次“仅清软件”仍使用这个原始状态，成功后才能按原状态恢复派发。
+        bool resumeAfterClear = _viewModel.IsGrindingRunning;
+        var result = await _viewModel.EmergencyClearGrindingAsync(
+            SelectedGrindingTarget, skipDeviceClear: false, resumeAfterClear);
+        if (await HandleDeviceClearFailureAsync(result,
+                () => _viewModel.EmergencyClearGrindingAsync(
+                    SelectedGrindingTarget, skipDeviceClear: true, resumeAfterClear),
+                text => GrindingInfoBox.Text = text))
             return;
 
         GrindingInfoBox.Text = result;

@@ -48,11 +48,15 @@ public sealed class GrindingFlowEngine : IDisposable
 
     /// <summary>天车信号量：保证一次只有一个研磨动作占用天车#5(充磁限制)。</summary>
     private readonly SemaphoreSlim _craneLock = new(1, 1);
+    // 应急清除和主循环派发共用此门闩：拿到天车锁后必须在门闩内再次检查暂停状态，
+    // 防止主循环已经越过轮询顶部的暂停判断时，又恰好启动一个新动作。
+    private readonly SemaphoreSlim _grindingDispatchGate = new(1, 1);
     private readonly object _emergencyLock = new();
     private bool _craneLockHeldByFlow;
     private string _craneLockAction = string.Empty;
     private string _craneLockStation = string.Empty;
     private CancellationTokenSource? _grindingActionCts;
+    private TaskCompletionSource<bool>? _grindingActionCompletion;
     private int _grindingActionVersion;
 
     // ═══════════════════════════════════════════════════════════════
@@ -128,7 +132,8 @@ public sealed class GrindingFlowEngine : IDisposable
     public bool IsRunning => _engineTask != null && !_engineTask.IsCompleted;
     public bool IsPaused => _paused;
 
-    private int BeginGrindingAction(CancellationTokenSource cts, string action, string stationCode)
+    private int BeginGrindingAction(CancellationTokenSource cts, TaskCompletionSource<bool> completion,
+        string action, string stationCode)
     {
         lock (_emergencyLock)
         {
@@ -136,6 +141,7 @@ public sealed class GrindingFlowEngine : IDisposable
             _craneLockAction = action;
             _craneLockStation = stationCode;
             _grindingActionCts = cts;
+            _grindingActionCompletion = completion;
             return ++_grindingActionVersion;
         }
     }
@@ -165,30 +171,41 @@ public sealed class GrindingFlowEngine : IDisposable
         lock (_emergencyLock) return actionVersion == _grindingActionVersion;
     }
 
-    private void FinishGrindingAction(int actionVersion)
+    private void FinishGrindingAction(int actionVersion, TaskCompletionSource<bool> completion)
     {
         lock (_emergencyLock)
         {
+            if (ReferenceEquals(_grindingActionCompletion, completion)) _grindingActionCompletion = null;
             if (actionVersion == _grindingActionVersion) _grindingActionCts = null;
         }
+        // 清完动作引用后再通知应急流程，确保它继续清状态时旧finally已经没有后续写入。
+        completion.TrySetResult(true);
     }
 
-    private bool CancelGrindingActionForEmergency(string stationCode, List<string> logs)
+    private Task? CancelGrindingActionForEmergency(string stationCode, List<string> logs)
     {
         lock (_emergencyLock)
         {
             if (!_craneLockHeldByFlow || !string.Equals(_craneLockStation, stationCode, StringComparison.OrdinalIgnoreCase))
-                return false;
+                return null;
 
+            var completion = _grindingActionCompletion?.Task;
             try
             {
-                _grindingActionCts?.Cancel();
-                logs.Add($"研磨天车当前动作={_craneLockAction} 已发送取消");
+                if (_grindingActionCts != null)
+                {
+                    _grindingActionCts.Cancel();
+                    logs.Add($"研磨天车当前动作={_craneLockAction} 已发送取消");
+                }
+                else
+                {
+                    logs.Add($"研磨天车当前动作={_craneLockAction} 取消令牌已结束, 等待应急释放记录锁");
+                }
             }
             catch (ObjectDisposedException) { }
             _grindingActionCts = null;
             _grindingActionVersion++;
-            return true;
+            return completion ?? Task.CompletedTask;
         }
     }
 
@@ -390,7 +407,8 @@ public sealed class GrindingFlowEngine : IDisposable
             "提示: 应急处理会先清研磨机PLC输出/参数, 成功后清Pending和状态; 失败时需要二次确认是否仅清软件。";
     }
 
-    public async Task<string> EmergencyClearGrindingAsync(string target, bool skipDeviceClear, CancellationToken ct = default)
+    public async Task<string> EmergencyClearGrindingAsync(string target, bool skipDeviceClear,
+        bool resumeAfterClear, CancellationToken ct = default)
     {
         target = NormalizeGrindingTarget(target);
         if (target == "ST709")
@@ -415,7 +433,41 @@ public sealed class GrindingFlowEngine : IDisposable
         if (g == null) return $"未知研磨应急目标: {target}";
 
         var emergencyLogs = new List<string>();
-        CancelGrindingActionForEmergency(g.StationCode, emergencyLogs);
+        _paused = true; // 应急期间先停新派发；这里只是软暂停，不发送天车急停指令。
+        Console.WriteLine($"[GrindingEngine] [研磨应急] 开始处理 {g.StationCode}/{g.Name}, 新派发已软暂停, resumeAfterClear={resumeAfterClear}");
+
+        Task? actionCompletion;
+        await _grindingDispatchGate.WaitAsync(ct);
+        try
+        {
+            // 与拿到天车锁后的二次检查串行，保证不会漏掉“刚要启动”的研磨动作。
+            _paused = true;
+            actionCompletion = CancelGrindingActionForEmergency(g.StationCode, emergencyLogs);
+        }
+        finally
+        {
+            _grindingDispatchGate.Release();
+        }
+
+        if (actionCompletion != null)
+        {
+            var timeout = Task.Delay(TimeSpan.FromSeconds(6), ct);
+            if (await Task.WhenAny(actionCompletion, timeout) != actionCompletion)
+            {
+                ct.ThrowIfCancellationRequested();
+                emergencyLogs.Add("旧动作6秒内未退出, 保持暂停且不清设备/软件状态、不释放天车锁");
+                string timeoutMessage = $"[GrindingEngine] [研磨应急] {DateTime.Now:yyyy-MM-dd HH:mm:ss} {g.StationCode}/{g.Name}; {string.Join("; ", emergencyLogs)}; 请确认设备通信后重试应急";
+                Console.WriteLine(timeoutMessage);
+                return timeoutMessage;
+            }
+
+            await actionCompletion;
+            emergencyLogs.Add("旧动作=已确认退出");
+        }
+        else
+        {
+            emergencyLogs.Add("当前动作=无匹配在途动作");
+        }
 
         string deviceLog;
         if (skipDeviceClear)
@@ -425,7 +477,11 @@ public sealed class GrindingFlowEngine : IDisposable
         else
         {
             if (g.Svc == null)
-                return $"设备侧清零失败: {g.Name} 通信服务未注入或未连接\n未清上位机软件状态。请确认是否仅清上位机软件状态。";
+            {
+                string failure = $"设备侧清零失败: {g.Name} 通信服务未注入或未连接\n{string.Join("; ", emergencyLogs)}；未清上位机软件状态、未释放记录锁，研磨引擎保持暂停。请确认是否仅清上位机软件状态。";
+                Console.WriteLine($"[GrindingEngine] [研磨应急] {g.StationCode}/{g.Name} {failure.Replace(Environment.NewLine, " ")}");
+                return failure;
+            }
             try
             {
                 await g.Svc.ClearEmergencyRegistersAsync(ct);
@@ -435,7 +491,9 @@ public sealed class GrindingFlowEngine : IDisposable
             }
             catch (Exception ex)
             {
-                return $"设备侧清零失败: {ex.Message}\n未清上位机软件状态。请确认是否仅清上位机软件状态。";
+                string failure = $"设备侧清零失败: {ex.Message}\n{string.Join("; ", emergencyLogs)}；未清上位机软件状态、未释放记录锁，研磨引擎保持暂停。请确认是否仅清上位机软件状态。";
+                Console.WriteLine($"[GrindingEngine] [研磨应急] {g.StationCode}/{g.Name} {failure.Replace(Environment.NewLine, " ")}");
+                return failure;
             }
         }
 
@@ -460,7 +518,17 @@ public sealed class GrindingFlowEngine : IDisposable
         if (releasedCrane)
             ReleaseRecordedCraneLock($"{g.Name}研磨应急");
 
-        string actionLog = emergencyLogs.Count == 0 ? "当前动作=无匹配在途动作" : string.Join("; ", emergencyLogs);
+        if (resumeAfterClear && IsRunning)
+        {
+            _paused = false;
+            emergencyLogs.Add("研磨引擎=已恢复派发");
+        }
+        else
+        {
+            emergencyLogs.Add("研磨引擎=保持人工暂停");
+        }
+
+        string actionLog = string.Join("; ", emergencyLogs);
         string message = $"[GrindingEngine] [研磨应急] {DateTime.Now:yyyy-MM-dd HH:mm:ss} {g.StationCode}/{g.Name} 原状态={oldState} 工件={oldWp?.IdentityText ?? "无"}; {actionLog}; {deviceLog}; 软件状态=Idle/Pending清空; 天车锁={(releasedCrane ? "已释放" : "未释放(非当前研磨动作持有)")}";
         Console.WriteLine(message);
         return message;
@@ -669,13 +737,34 @@ public sealed class GrindingFlowEngine : IDisposable
 
                         if (await _craneLock.WaitAsync(0, ct))
                         {
-                            var actionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                            int actionVersion = BeginGrindingAction(actionCts, "下料", g.StationCode);
-                            Console.WriteLine($"[GrindingEngine] [{g.Name}] 🚚 开始下料！天车锁已获取 {g.PendingWorkpiece?.IdentityText ?? "版号=未知"}");
-                            g.State = GrinderState.Unloading;
-                            g.StateChangedAt = DateTime.UtcNow;
-                            //下料操作
-                            _ = UnloadFromGrinderAsync(g, actionVersion, actionCts);
+                            bool dispatchGateHeld = false;
+                            try
+                            {
+                                await _grindingDispatchGate.WaitAsync(ct);
+                                dispatchGateHeld = true;
+                                // 应急可能在本轮顶部暂停检查之后发生，拿到天车锁后必须再次确认。
+                                if (_paused)
+                                {
+                                    _craneLock.Release();
+                                    Console.WriteLine($"[GrindingEngine] [{g.Name}] 应急/暂停已生效, 放弃本次下料派发并释放天车锁");
+                                }
+                                else
+                                {
+                                    var actionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                                    var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                                    int actionVersion = BeginGrindingAction(actionCts, completion, "下料", g.StationCode);
+                                    Console.WriteLine($"[GrindingEngine] [{g.Name}] 🚚 开始下料！天车锁已获取 {g.PendingWorkpiece?.IdentityText ?? "版号=未知"}");
+                                    g.State = GrinderState.Unloading;
+                                    g.StateChangedAt = DateTime.UtcNow;
+                                    // 下料动作和完成信号必须在派发门闩内一起登记，避免应急漏等旧动作。
+                                    _ = UnloadFromGrinderAsync(g, actionVersion, actionCts, completion);
+                                }
+                            }
+                            finally
+                            {
+                                if (dispatchGateHeld) _grindingDispatchGate.Release();
+                                else _craneLock.Release(); // 等待派发门闩时取消，不能遗留已取得的天车锁。
+                            }
                         }
                         else
                         {
@@ -721,24 +810,42 @@ public sealed class GrindingFlowEngine : IDisposable
                 // ── 条件全部满足, 抢天车锁 ──
                 if (await _craneLock.WaitAsync(0, ct))
                 {
-                    // ── 缓存有数据 → 出队上料 ──
-                    if (TryDequeueCache(out var wp))
+                    bool dispatchGateHeld = false;
+                    try
                     {
-                        var actionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                        int actionVersion = BeginGrindingAction(actionCts, "上料", ready.StationCode);
-                        Console.WriteLine($"[GrindingEngine] 🚀 分配 {wp.IdentityText} d={wp.Diameter} → {ready.Name}({ready.StationCode}) 请求数据=1 缓存剩余={CachedCount}");
-                        ready.State = GrinderState.Loading;
-                        ready.StateChangedAt = DateTime.UtcNow;
-                        ready.PendingWorkpiece = wp;
-                        //研磨引擎上料方法
-                        _ = ProcessWorkpieceAsync(ready, wp, actionVersion, actionCts);
+                        await _grindingDispatchGate.WaitAsync(ct);
+                        dispatchGateHeld = true;
+                        // 应急可能在本轮顶部暂停检查之后发生，拿到天车锁后必须再次确认。
+                        if (_paused)
+                        {
+                            _craneLock.Release();
+                            Console.WriteLine($"[GrindingEngine] [{ready.Name}] 应急/暂停已生效, 放弃本次上料派发并释放天车锁");
+                        }
+                        // ── 缓存有数据 → 出队上料 ──
+                        else if (TryDequeueCache(out var wp))
+                        {
+                            var actionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                            int actionVersion = BeginGrindingAction(actionCts, completion, "上料", ready.StationCode);
+                            Console.WriteLine($"[GrindingEngine] 🚀 分配 {wp.IdentityText} d={wp.Diameter} → {ready.Name}({ready.StationCode}) 请求数据=1 缓存剩余={CachedCount}");
+                            ready.State = GrinderState.Loading;
+                            ready.StateChangedAt = DateTime.UtcNow;
+                            ready.PendingWorkpiece = wp;
+                            // 上料动作和完成信号必须在派发门闩内一起登记，避免应急漏等旧动作。
+                            _ = ProcessWorkpieceAsync(ready, wp, actionVersion, actionCts, completion);
+                        }
+                        else
+                        {
+                            // 缓存空→释放天车锁
+                            _craneLock.Release();
+                            if (_cycleCount % 10 == 1)
+                                Console.WriteLine($"[GrindingEngine] ⏳ 有研磨机{ready.Name}就绪但缓存空, 等待工件入队...");
+                        }
                     }
-                    else
+                    finally
                     {
-                        // 缓存空→释放天车锁
-                        _craneLock.Release();
-                        if (_cycleCount % 10 == 1)
-                            Console.WriteLine($"[GrindingEngine] ⏳ 有研磨机{ready.Name}就绪但缓存空, 等待工件入队...");
+                        if (dispatchGateHeld) _grindingDispatchGate.Release();
+                        else _craneLock.Release(); // 等待派发门闩时取消，不能遗留已取得的天车锁。
                     }
                 }
 
@@ -1056,7 +1163,8 @@ public sealed class GrindingFlowEngine : IDisposable
     /// <para>⚠ magnetOn=true后(充磁后)工件在天车上, 异常无法自动恢复, 需人工处理。</para>
     /// <para>⚠ finally释放_craneLock, 保证天车锁不泄漏。</para>
     /// </summary>
-    private async Task ProcessWorkpieceAsync(GrinderContext grinder, WorkpieceCache wp, int actionVersion, CancellationTokenSource actionCts)
+    private async Task ProcessWorkpieceAsync(GrinderContext grinder, WorkpieceCache wp, int actionVersion,
+        CancellationTokenSource actionCts, TaskCompletionSource<bool> completion)
     {
         using var _ = actionCts;
         var ct = actionCts.Token;
@@ -1365,7 +1473,7 @@ public sealed class GrindingFlowEngine : IDisposable
         finally
         {
             ReleaseRecordedCraneLock($"{grinder.Name}上料finally", actionVersion); // ← 无论如何释放天车锁, 防止死锁
-            FinishGrindingAction(actionVersion);
+            FinishGrindingAction(actionVersion, completion);
         }
     }
 
@@ -1395,7 +1503,8 @@ public sealed class GrindingFlowEngine : IDisposable
     /// <para>⚠ finally释放_craneLock, 保证天车锁不泄漏。</para>
     /// <para>⚠ 取料失败时(magnetOn=true)无法自动回缓存, 需人工处理。</para>
     /// </summary>
-    private async Task UnloadFromGrinderAsync(GrinderContext grinder, int actionVersion, CancellationTokenSource actionCts)
+    private async Task UnloadFromGrinderAsync(GrinderContext grinder, int actionVersion,
+        CancellationTokenSource actionCts, TaskCompletionSource<bool> completion)
     {
         using var _ = actionCts;
         var ct = actionCts.Token;
@@ -1603,7 +1712,7 @@ public sealed class GrindingFlowEngine : IDisposable
             ReleaseRecordedCraneLock($"{grinder.Name}下料finally", actionVersion);
             if (IsGrindingActionCurrent(actionVersion))
                 _fastNextCycle = true; // 下料完成, 通知主循环快速检查上料任务
-            FinishGrindingAction(actionVersion);
+            FinishGrindingAction(actionVersion, completion);
         }
     }
 
@@ -1733,6 +1842,7 @@ public sealed class GrindingFlowEngine : IDisposable
         _engineCts.Cancel();
         _engineCts.Dispose();
         _craneLock.Dispose();
+        _grindingDispatchGate.Dispose();
         Console.WriteLine("[GrindingEngine] 引擎已释放");
     }
 }
