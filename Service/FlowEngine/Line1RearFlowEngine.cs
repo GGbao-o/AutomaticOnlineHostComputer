@@ -79,6 +79,8 @@ public sealed class Line1RearFlowEngine : IDisposable
     public Action<string, WorkpieceCache>? OnBalancingRackPlaced;
     /// <summary>下料放至研磨上料架ST010时回调, 通知研磨引擎入缓存(完整工件信息)</summary>
     public Action<WorkpieceCache>? OnGrindingRackPlaced;
+    /// <summary>后天车连续两次读到XYZ全零时通知主页面暂停整条1号线并弹窗。</summary>
+    public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
 
     /// <summary>单台斜床运行时上下文</summary>
     private sealed class SkewCtx
@@ -351,6 +353,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 // ═══════════════════════════════════════════════════════════
                 if (_cycleCount % 10 == 1) Console.WriteLine("│ [步骤4] 下料检查(优先级最高)...");
                 bool anyUnloading = false;
+                bool rearCraneZeroDetected = false;
                 foreach (var b in _beds)
                 {
                     if (b == null || !b.Ok) continue;
@@ -438,6 +441,13 @@ public sealed class Line1RearFlowEngine : IDisposable
                         Console.WriteLine($"│   {b.Code} 目的地空闲, 抢后天车锁(当前={_craneRearLock.CurrentCount})...");
                         if (await _craneRearLock.WaitAsync(0, ct))
                         {
+                            // 状态和工件身份尚未改变时检查坐标；全零则保留原任务等待人工处理。
+                            if (!await EnsureRearCranePositionReadyAsync("斜床下料任务派发前", ct))
+                            {
+                                _craneRearLock.Release();
+                                rearCraneZeroDetected = true;
+                                break;
+                            }
                             b.St = SkewState.Unloading; anyUnloading = true;
                             Console.WriteLine($"│   ▶ {b.Code} 开始下料! {wp.IdentityText} 工件={wp.Diameter}mm L={wp.Length}mm");
                             //1号线后天车进行下料   会释放共享区锁  
@@ -452,6 +462,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                         if (_cycleCount % 10 == 1) Console.WriteLine($"│   {b.Code} 正在下料中..."); anyUnloading = true;
                     }
                 }
+                if (rearCraneZeroDetected) continue;
                 if (!anyUnloading && _cycleCount % 10 == 1) Console.WriteLine("│   (无下料任务)");
 
                 // ═══════════════════════════════════════════════════════════
@@ -475,6 +486,12 @@ public sealed class Line1RearFlowEngine : IDisposable
                     Console.WriteLine($"│   ✓ 预选 源={previewPair.RackCode} L={previewPair.Wp.Length} → 目标={previewPair.Bed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(previewPair.Bed.Code)}), 抢后天车锁(当前={_craneRearLock.CurrentCount})...");
                     if (await _craneRearLock.WaitAsync(0, ct))
                     {
+                        // 在取得后天车锁后、取得中转架锁及改变斜床状态前检查，避免遗留任何锁或任务变更。
+                        if (!await EnsureRearCranePositionReadyAsync("斜床上料任务派发前", ct))
+                        {
+                            _craneRearLock.Release();
+                            continue;
+                        }
                         // ⑤c. 抢中转架锁 (非阻塞, 与前端互斥)
                         Console.WriteLine("│   ✓ 后天车锁获取, 抢中转架锁...");
                         bool triggered = false;
@@ -540,6 +557,17 @@ public sealed class Line1RearFlowEngine : IDisposable
             catch (Exception ex) { Console.WriteLine($"[后引擎] 主循环异常: {ex.Message}\n{ex.StackTrace}"); await Task.Delay(2000, ct); }
         }
         Console.WriteLine("[后引擎] 主循环退出");
+    }
+
+    private async Task<bool> EnsureRearCranePositionReadyAsync(string context, CancellationToken ct)
+    {
+        var crane = _craneCache.GetOrCreateService(CraneRearNo);
+        var alarm = await CraneZeroPositionGuard.CheckAsync(crane, CraneRearNo, "1号线后天车", context, ct);
+        if (alarm == null) return true;
+
+        _paused = true;
+        OnCraneZeroPositionDetected?.Invoke(alarm);
+        return false;
     }
 
     private string StCn(int i) { var b = _beds[i]; return b == null ? "?" : $"{b.St}({(b.Ok ? "连" : "断")})"; }

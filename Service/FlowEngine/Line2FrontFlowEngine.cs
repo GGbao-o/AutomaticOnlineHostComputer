@@ -131,6 +131,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
     /// <summary>前端放料到中转架时回调, 通知后端引擎工件数据。参数: (站号, 工件数据)</summary>
     public Action<string, WorkpieceCache>? OnRackPlaced;
+    /// <summary>天车任务出队前连续两次读到XYZ全零时通知主页面暂停整条2号线并弹窗。</summary>
+    public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
 
     /// <summary>物理工件已放到中转架, 但后端缓存回调未确认。用于外层catch区分“已在中转架”和“仍在天车上”。</summary>
     private sealed class TransferRackCacheException : Exception
@@ -1064,8 +1066,22 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     {
                         try
                         {
-                            while (!ct.IsCancellationRequested && _craneQueue.TryDequeue(out var craneWp))
+                            while (!ct.IsCancellationRequested && _craneQueue.TryPeek(out _))
                             {
+                                // 必须在出队前检查。若疑似断电，保留队头工件，避免暂停后丢失任务身份。
+                                var crane = _craneCache.GetOrCreateService(CraneFront2No);
+                                var zeroAlarm = await CraneZeroPositionGuard.CheckAsync(
+                                    crane, CraneFront2No, "2号线前天车", "前天车任务出队前", ct);
+                                if (zeroAlarm != null)
+                                {
+                                    _paused = true;
+                                    OnCraneZeroPositionDetected?.Invoke(zeroAlarm);
+                                    break;
+                                }
+
+                                if (!_craneQueue.TryDequeue(out var craneWp))
+                                    break;
+
                                 Console.WriteLine($"[Line2Front] [天车调度] ▶ 出队 {craneWp.IdentityText} d={craneWp.Diameter} L={craneWp.Length} 队列剩余={_craneQueue.Count}");
                                 await ProcessCraneFrontAsync(craneWp, ct);
                                 if (_paused) break; // 当前任务已进入人工确认状态，禁止继续消费后续天车任务。

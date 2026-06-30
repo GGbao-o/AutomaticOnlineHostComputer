@@ -68,6 +68,10 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
+            if (!await EnsureCranePositionsReadyForStartAsync(
+                    new[] { (_cfg.Grinding.CraneNo, "研磨天车") }, "研磨引擎启动/恢复前"))
+                return;
+
             if (_grindingEngine.IsRunning && _grindingEngine.IsPaused)
             {
                 Console.WriteLine("[HomeViewModel] ▶ 【恢复研磨】");
@@ -1109,11 +1113,11 @@ public sealed class HomeViewModel : ObservableObject
     public ICommand GrindingToggleCommand { get; }
 
     /// <summary>启动/暂停1号线</summary>
-    private Task Line1ToggleAsync()
+    private async Task Line1ToggleAsync()
     {
         if (_line1Engine == null)
         {
-            Console.WriteLine("[HomeViewModel] ✘ 1号线引擎未初始化"); return Task.CompletedTask;
+            Console.WriteLine("[HomeViewModel] ✘ 1号线引擎未初始化"); return;
         }
 
         if (_isLine1Running)
@@ -1125,6 +1129,10 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
+            if (!await EnsureCranePositionsReadyForStartAsync(
+                    new[] { (1, "1号线前天车"), (2, "1号线后天车") }, "1号线引擎启动/恢复前"))
+                return;
+
             if (_line1Engine.IsRunning || _line1RearEngine?.IsRunning == true)
             {
                 Console.WriteLine("[HomeViewModel] ▶ 【恢复1号线】→ 前端+后端(动平衡单独恢复)");
@@ -1139,13 +1147,12 @@ public sealed class HomeViewModel : ObservableObject
             }
             IsLine1Running = true;
         }
-        return Task.CompletedTask;
     }
 
     /// <summary>启动/暂停2号线(平衡引擎共用1号线的, 不重复启停)</summary>
-    private Task Line2ToggleAsync()
+    private async Task Line2ToggleAsync()
     {
-        if (_line2Engine == null) { Console.WriteLine("[HomeViewModel] ✘ 2号线引擎未初始化"); return Task.CompletedTask; }
+        if (_line2Engine == null) { Console.WriteLine("[HomeViewModel] ✘ 2号线引擎未初始化"); return; }
 
         if (_isLine2Running)
         {
@@ -1156,6 +1163,10 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
+            if (!await EnsureCranePositionsReadyForStartAsync(
+                    new[] { (3, "2号线前天车"), (4, "2号线后天车") }, "2号线引擎启动/恢复前"))
+                return;
+
             if (_line2Engine.IsRunning || _line2RearEngine?.IsRunning == true)
             {
                 Console.WriteLine("[HomeViewModel] ▶ 【恢复2号线】→ 前端+后端");
@@ -1170,7 +1181,74 @@ public sealed class HomeViewModel : ObservableObject
             }
             IsLine2Running = true;
         }
-        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 引擎启动/恢复前读取天车实时显示坐标。第一次全零后延时500ms复核，
+    /// 只有连续两次全零才阻止启动；读取失败仍交由原通信异常流程处理。
+    /// </summary>
+    private async Task<bool> EnsureCranePositionsReadyForStartAsync(
+        IEnumerable<(int CraneNo, string CraneName)> cranes, string context)
+    {
+        foreach (var (craneNo, craneName) in cranes)
+        {
+            try
+            {
+                var crane = _craneCache.GetOrCreateService(craneNo);
+                var alarm = await CraneZeroPositionGuard.CheckAsync(
+                    crane, craneNo, craneName, context, CancellationToken.None);
+                if (alarm == null) continue;
+
+                HandleCraneZeroPositionAlarm(alarm);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                // 本保护只识别“成功读取且连续两次全零”；通信失败不能伪装成坐标丢失。
+                Console.WriteLine($"[天车坐标保护] [{craneName}] {context} 读取异常，交由现有通信异常流程处理: {ex.Message}");
+            }
+        }
+        return true;
+    }
+
+    /// <summary>按天车归属暂停对应引擎，并在主页面线程显示明确告警。</summary>
+    private void HandleCraneZeroPositionAlarm(CraneZeroPositionAlarm alarm)
+    {
+        // 先在当前线程立即关掉派发门，UI调度延迟不能留下继续派发的窗口。
+        if (alarm.CraneNo is 1 or 2)
+        {
+            _line1Engine?.Pause();
+            _line1RearEngine?.Pause();
+        }
+        else if (alarm.CraneNo is 3 or 4)
+        {
+            _line2Engine?.Pause();
+            _line2RearEngine?.Pause();
+        }
+        else if (alarm.CraneNo == _cfg.Grinding.CraneNo)
+        {
+            _grindingEngine?.PauseForCraneZeroPosition();
+        }
+
+        void UpdateUiAndShowAlarm()
+        {
+            if (alarm.CraneNo is 1 or 2) IsLine1Running = false;
+            else if (alarm.CraneNo is 3 or 4) IsLine2Running = false;
+            else if (alarm.CraneNo == _cfg.Grinding.CraneNo) IsGrindingRunning = false;
+
+            string message =
+                $"{alarm.CraneName}连续两次读取到XYZ全为0，疑似天车断电后坐标丢失。\n\n" +
+                $"检查位置：{alarm.Context}\n" +
+                $"第一次：{alarm.First}\n第二次：{alarm.Second}\n\n" +
+                "对应引擎已暂停，当前任务和缓存未清除。请确认天车坐标恢复正常后，再点击启动继续。";
+            Console.WriteLine($"[HomeViewModel] ⚠ {message.Replace(Environment.NewLine, " | ")}");
+            MessageBox.Show(message, "天车坐标异常 - 引擎已暂停",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess()) UpdateUiAndShowAlarm();
+        else dispatcher.BeginInvoke((Action)UpdateUiAndShowAlarm);
     }
 
     /// <summary>启动/暂停动平衡流转(两条线共用)</summary>
@@ -1549,6 +1627,13 @@ public sealed class HomeViewModel : ObservableObject
             _sharedTransferRackLock2, sharedSafety2, _line2Engine.DeviceStatus,
             lockM818: lockM818, lockM821: lockM821);
         Console.WriteLine("[HomeViewModel] 2号线后端流程引擎已创建");
+
+        // 天车坐标保护统一回到主页面：后台派发确认全零后，暂停对应整线并弹窗。
+        _line1Engine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
+        _line1RearEngine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
+        _line2Engine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
+        _line2RearEngine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
+        _grindingEngine!.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
 
         // ── 前后端联动: 前端放中转架→通知后端工件数据 ──
         _line1Engine.OnRackPlaced = (code, wp) =>

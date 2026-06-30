@@ -131,6 +131,8 @@ public sealed class GrindingFlowEngine : IDisposable
     /// <summary>引擎是否正在运行</summary>
     public bool IsRunning => _engineTask != null && !_engineTask.IsCompleted;
     public bool IsPaused => _paused;
+    /// <summary>研磨天车连续两次读到XYZ全零时通知主页面更新状态并弹窗。</summary>
+    public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
 
     private int BeginGrindingAction(CancellationTokenSource cts, TaskCompletionSource<bool> completion,
         string action, string stationCode)
@@ -322,6 +324,16 @@ public sealed class GrindingFlowEngine : IDisposable
         {
             Console.WriteLine($"[GrindingEngine] ⚠ 急停发送异常：{ex.Message}（引擎已标记暂停）");
         }
+    }
+
+    /// <summary>
+    /// 坐标全零保护使用软暂停：只阻止新任务派发，不发送D4518急停，
+    /// 因为校验发生在天车新动作开始之前，不应额外改变现场设备状态。
+    /// </summary>
+    public void PauseForCraneZeroPosition()
+    {
+        _paused = true;
+        Console.WriteLine("[GrindingEngine] ⏸ 研磨天车XYZ连续全零，已软暂停新任务派发");
     }
 
     /// <summary>恢复运行</summary>
@@ -772,6 +784,11 @@ public sealed class GrindingFlowEngine : IDisposable
                                     _craneLock.Release();
                                     Console.WriteLine($"[GrindingEngine] [{g.Name}] 应急/暂停已生效, 放弃本次下料派发并释放天车锁");
                                 }
+                                else if (!await EnsureGrindingCranePositionReadyAsync("研磨下料任务派发前", ct))
+                                {
+                                    // 尚未改变研磨机状态或登记动作；保留原工件身份等待人工处理。
+                                    _craneLock.Release();
+                                }
                                 else
                                 {
                                     var actionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -844,6 +861,11 @@ public sealed class GrindingFlowEngine : IDisposable
                         {
                             _craneLock.Release();
                             Console.WriteLine($"[GrindingEngine] [{ready.Name}] 应急/暂停已生效, 放弃本次上料派发并释放天车锁");
+                        }
+                        else if (!await EnsureGrindingCranePositionReadyAsync("研磨上料任务出队前", ct))
+                        {
+                            // 必须在FIFO出队和研磨机状态变化前校验，报警时任务仍留在原缓存。
+                            _craneLock.Release();
                         }
                         // ── 缓存有数据 → 出队上料 ──
                         else if (TryDequeueCache(out var wp))
@@ -1857,6 +1879,18 @@ public sealed class GrindingFlowEngine : IDisposable
             await action(ct);
             Console.WriteLine($"[GrindingEngine] 天车重连后「{desc}」成功 ✓");
         }
+    }
+
+    private async Task<bool> EnsureGrindingCranePositionReadyAsync(string context, CancellationToken ct)
+    {
+        int craneNo = _cfg.Grinding.CraneNo;
+        var crane = _craneCache.GetOrCreateService(craneNo);
+        var alarm = await CraneZeroPositionGuard.CheckAsync(crane, craneNo, "研磨天车", context, ct);
+        if (alarm == null) return true;
+
+        PauseForCraneZeroPosition();
+        OnCraneZeroPositionDetected?.Invoke(alarm);
+        return false;
     }
 
     public void Dispose()
