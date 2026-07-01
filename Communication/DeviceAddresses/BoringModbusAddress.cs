@@ -19,13 +19,13 @@ public static class BoringModbusAddress
     /// <summary>R2045 右堵厚，整数，ERP 值 * 100。</summary>
     public const int R_RightPlugThickness = 2045;
 
-    /// <summary>R2046 内孔锥度，固定10并按*100写入1000。</summary>
+    /// <summary>R2046 内孔锥度，任务值 * 100。</summary>
     public const int R_InnerTaper = 2046;
 
     /// <summary>R2047 内孔成活/版孔，整数，ERP 值 * 100。</summary>
     public const int R_BoreType = 2047;
 
-    /// <summary>R2048 圆角大小，固定8并按*100写入800。</summary>
+    /// <summary>R2048 圆角大小，任务值 * 100。</summary>
     public const int R_CornerSize = 2048;
 
     // ── 握手信号 ─────────────────────────────────────────────────

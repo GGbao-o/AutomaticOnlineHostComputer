@@ -5,7 +5,7 @@ namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
 /// <summary>
 /// ERP任务文件解析器。
-/// 文件每行固定为11列: 打印内容,版号,序号,长度,直径,堵孔,斜床工艺,左堵厚,右堵厚,是否做动平衡,是否跳过双头镗。
+/// 文件每行固定为13列: 打印内容,版号,序号,长度,直径,堵孔,斜床工艺,左堵厚,右堵厚,是否做动平衡,是否跳过双头镗,内孔锥度,圆角大小。
 /// 这里只创建主页面任务行, 不启动任务、不写产线缓存。
 /// </summary>
 internal static class ErpTaskImportParser
@@ -22,9 +22,9 @@ internal static class ErpTaskImportParser
         }
 
         string[] parts = line.Trim().Split(',');
-        if (parts.Length != 11)
+        if (parts.Length != 13)
         {
-            error = $"ERP任务字段数量错误: 当前{parts.Length}个, 必须11个";
+            error = $"ERP任务字段数量错误: 当前{parts.Length}个, 必须13个";
             return false;
         }
 
@@ -90,6 +90,16 @@ internal static class ErpTaskImportParser
             error = $"是否跳过双头镗[{parts[10]}]无效, 只能是1或0";
             return false;
         }
+        if (!TryParseBoringRegisterValue(parts[11], out double innerTaper))
+        {
+            error = $"内孔锥度[{parts[11]}]无效, 必须>0且<=655.35";
+            return false;
+        }
+        if (!TryParseBoringRegisterValue(parts[12], out double cornerSize))
+        {
+            error = $"圆角大小[{parts[12]}]无效, 必须>0且<=655.35";
+            return false;
+        }
 
         row = new TaskRowViewModel
         {
@@ -100,6 +110,8 @@ internal static class ErpTaskImportParser
             PlugHole = plugHole,
             LeftPlugThickness = leftPlugThickness,
             RightPlugThickness = rightPlugThickness,
+            InnerTaper = innerTaper,
+            CornerSize = cornerSize,
             MarkingContent = markingContent,
             ProcessType = skipBoring ? "省去双头镗工艺" : "总工艺",
             BoringProcess = string.Empty,
@@ -120,6 +132,9 @@ internal static class ErpTaskImportParser
 
     private static bool TryParseInt(string text, out int value) =>
         int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+
+    private static bool TryParseBoringRegisterValue(string text, out double value) =>
+        TryParseDouble(text, out value) && double.IsFinite(value) && value > 0 && value <= 655.35;
 
     private static bool TryParseSwitch(string text, out bool value)
     {

@@ -1290,6 +1290,8 @@ public sealed class GrindingFlowEngine : IDisposable
                     MarkingContent = wp.MarkingContent,
                     LeftPlugThickness = wp.LeftPlugThickness,
                     RightPlugThickness = wp.RightPlugThickness,
+                    InnerTaper = wp.InnerTaper,
+                    CornerSize = wp.CornerSize,
                     BoringProcess = wp.BoringProcess,
                     SkewBedProcess = wp.SkewBedProcess,
                     SkipBoring = wp.SkipBoring,
@@ -1970,6 +1972,8 @@ public struct WorkpieceCache
     public string MarkingContent;// 刻印内容
     public double LeftPlugThickness;   //左堵厚 mm
     public double RightPlugThickness;  //右堵厚 mm
+    public double InnerTaper;          //内孔锥度, 正常双头镗任务按*100写R2046
+    public double CornerSize;          //圆角大小, 正常双头镗任务按*100写R2048
     public string BoringProcess; // 镗孔工艺
     public string SkewBedProcess; // 斜床工艺
     public bool SkipBoring;      // 跳过双头镗: 叉→Pos2→天车取→打号→中转架

@@ -12,9 +12,6 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
 /// </summary>
 public sealed class BoringModbusService : IDisposable
 {
-    private const double DefaultInnerTaper = 10;
-    private const double DefaultCornerSize = 8;
-
     private readonly string _name;
     private readonly ModbusTcpClient _client;
     private bool _disposed;
@@ -68,29 +65,33 @@ public sealed class BoringModbusService : IDisposable
 
     /// <summary>
     /// 下发双头镗加工参数。
-    /// 长度按16位无符号整数写ERP原值；直径/堵厚/版孔按协议乘100写整数。
-    /// 内孔锥度固定10并写1000，圆角固定8并写800。
+    /// 长度按16位无符号整数写ERP原值；直径/堵厚/内孔锥度/版孔/圆角按协议乘100写整数。
     /// </summary>
     public async Task SendMachiningParamsAsync(
         double rollerLength,
         double outerDiameter,
         double leftPlugThickness,
         double rightPlugThickness,
+        double innerTaper,
         double boreType,
+        double cornerSize,
         CancellationToken ct = default)
     {
         ushort rollerLengthUInt16 = ToUInt16(rollerLength, nameof(rollerLength));
+        ushort innerTaperUInt16 = Scale100ToUInt16(innerTaper, nameof(innerTaper));
+        ushort cornerSizeUInt16 = Scale100ToUInt16(cornerSize, nameof(cornerSize));
         await _client.WriteAsync(Addr.RToModbus(Addr.R_RollerLength), rollerLengthUInt16, ct);
         await _client.WriteAsync(Addr.RToModbus(Addr.R_OuterDiameter), Scale100(outerDiameter), ct);
         await _client.WriteAsync(Addr.RToModbus(Addr.R_LeftPlugThickness), Scale100(leftPlugThickness), ct);
         await _client.WriteAsync(Addr.RToModbus(Addr.R_RightPlugThickness), Scale100(rightPlugThickness), ct);
-        await _client.WriteAsync(Addr.RToModbus(Addr.R_InnerTaper), Scale100(DefaultInnerTaper), ct);
+        await _client.WriteAsync(Addr.RToModbus(Addr.R_InnerTaper), innerTaperUInt16, ct);
         await _client.WriteAsync(Addr.RToModbus(Addr.R_BoreType), Scale100(boreType), ct);
-        await _client.WriteAsync(Addr.RToModbus(Addr.R_CornerSize), Scale100(DefaultCornerSize), ct);
+        await _client.WriteAsync(Addr.RToModbus(Addr.R_CornerSize), cornerSizeUInt16, ct);
         Console.WriteLine(
             $"[BoringModbusSvc] [{_name}] 参数已写 R2041={rollerLengthUInt16}(uint16,ERP={rollerLength}) " +
             $"R2043={Scale100(outerDiameter)} R2044={Scale100(leftPlugThickness)} R2045={Scale100(rightPlugThickness)} " +
-            $"R2046={Scale100(DefaultInnerTaper)} R2047={Scale100(boreType)} R2048={Scale100(DefaultCornerSize)}");
+            $"R2046={innerTaperUInt16}(内孔锥度={innerTaper}) R2047={Scale100(boreType)} " +
+            $"R2048={cornerSizeUInt16}(圆角大小={cornerSize})");
     }
 
     public Task SetDataSentDoneAsync(CancellationToken ct = default)
@@ -126,6 +127,13 @@ public sealed class BoringModbusService : IDisposable
 
     private static int Scale100(double value)
         => (int)Math.Round(value * 100, MidpointRounding.AwayFromZero);
+
+    private static ushort Scale100ToUInt16(double value, string paramName)
+    {
+        if (!double.IsFinite(value) || value <= 0 || value > 655.35)
+            throw new ArgumentOutOfRangeException(paramName, value, "双头镗参数必须>0且<=655.35。");
+        return checked((ushort)Math.Round(value * 100, MidpointRounding.AwayFromZero));
+    }
 
     private static ushort ToUInt16(double value, string paramName)
     {

@@ -34,6 +34,12 @@ public sealed class WorkpieceContext
     /// <summary>右侧堵头厚度（mm）</summary>
     public double RightPlugThickness { get; init; }
 
+    /// <summary>内孔锥度，按×100写入双头镗R2046</summary>
+    public double InnerTaper { get; init; }
+
+    /// <summary>圆角大小，按×100写入双头镗R2048</summary>
+    public double CornerSize { get; init; }
+
     /// <summary>打标/刻印内容</summary>
     public string MarkingContent { get; init; } = string.Empty;
 

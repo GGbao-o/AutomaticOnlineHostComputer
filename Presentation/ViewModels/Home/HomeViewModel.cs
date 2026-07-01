@@ -120,6 +120,7 @@ public sealed class HomeViewModel : ObservableObject
         {
             Diameter = 147, Length = 700, BoreType = 100,
             MarkingContent = "TEST", LeftPlugThickness = 14, RightPlugThickness = 14,
+            InnerTaper = 10, CornerSize = 8,
             SkipBoring = false, BoringProcess = "粗镗"
         };
         _line1RearEngine.EnqueueWorkpiece("ST105", wp);
@@ -136,6 +137,7 @@ public sealed class HomeViewModel : ObservableObject
         {
             Diameter = 150, Length = 795, BoreType = 100,
             MarkingContent = "TEST2", LeftPlugThickness = 14, RightPlugThickness = 14,
+            InnerTaper = 10, CornerSize = 8,
             SkipBoring = false, BoringProcess = "粗镗"
         };
         _line2RearEngine.EnqueueWorkpiece("ST016", wp);
@@ -2544,6 +2546,8 @@ public sealed class HomeViewModel : ObservableObject
             MarkingContent = taskRow.MarkingContent,
             LeftPlugThickness = taskRow.LeftPlugThickness,
             RightPlugThickness = taskRow.RightPlugThickness,
+            InnerTaper = taskRow.InnerTaper,
+            CornerSize = taskRow.CornerSize,
             BoringProcess = taskRow.BoringProcess,
             SkewBedProcess = taskRow.SkewBedProcess,
             SkipBoring = skipBoring,

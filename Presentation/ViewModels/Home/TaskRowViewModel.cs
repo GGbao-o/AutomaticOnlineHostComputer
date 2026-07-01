@@ -23,6 +23,8 @@ public sealed class TaskRowViewModel : ObservableObject
     public double PlugHole { get; set; }       // 70=小孔, 100=大孔
     public double LeftPlugThickness { get; set; }
     public double RightPlugThickness { get; set; }
+    public double InnerTaper { get; set; }
+    public double CornerSize { get; set; }
     public string MarkingContent { get; set; } = string.Empty;
     public string ProcessType
     {

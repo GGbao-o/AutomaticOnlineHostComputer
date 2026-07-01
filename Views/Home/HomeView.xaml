@@ -364,6 +364,14 @@
                                 Binding="{Binding RightPlugThickness}"
                                 Header="右堵厚" />
                             <DataGridTextColumn
+                                Width="80"
+                                Binding="{Binding InnerTaper}"
+                                Header="内孔锥度" />
+                            <DataGridTextColumn
+                                Width="80"
+                                Binding="{Binding CornerSize}"
+                                Header="圆角大小" />
+                            <DataGridTextColumn
                                 Width="140"
                                 Binding="{Binding StartSourceText}"
                                 Header="任务起点" />

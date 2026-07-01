@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
@@ -15,6 +16,10 @@ public sealed class AddTaskDialogViewModel : ObservableObject
     private double _plugHole = 70;
     private double _leftPlugThickness;
     private double _rightPlugThickness;
+    private string _innerTaperText = "10";
+    private string _cornerSizeText = "8";
+    private double _validatedInnerTaper = 10;
+    private double _validatedCornerSize = 8;
     private string _markingContent = string.Empty;
     private string _processType = "总工艺";
     private string _boringProcess = string.Empty;
@@ -30,6 +35,8 @@ public sealed class AddTaskDialogViewModel : ObservableObject
     public double PlugHole { get => _plugHole; set => SetField(ref _plugHole, value); }
     public double LeftPlugThickness { get => _leftPlugThickness; set => SetField(ref _leftPlugThickness, value); }
     public double RightPlugThickness { get => _rightPlugThickness; set => SetField(ref _rightPlugThickness, value); }
+    public string InnerTaperText { get => _innerTaperText; set => SetField(ref _innerTaperText, value); }
+    public string CornerSizeText { get => _cornerSizeText; set => SetField(ref _cornerSizeText, value); }
     public string MarkingContent { get => _markingContent; set => SetField(ref _markingContent, value); }
 
     public string ProcessType { get => _processType; set => SetField(ref _processType, value); }
@@ -93,6 +100,18 @@ public sealed class AddTaskDialogViewModel : ObservableObject
             return false;
         }
 
+        if (!TryParseBoringRegisterValue(InnerTaperText, out _validatedInnerTaper))
+        {
+            message = "内孔锥度必须>0且<=655.35";
+            return false;
+        }
+
+        if (!TryParseBoringRegisterValue(CornerSizeText, out _validatedCornerSize))
+        {
+            message = "圆角大小必须>0且<=655.35";
+            return false;
+        }
+
         if (IsStartFromTransferRack && SelectedTransferRack == null)
         {
             message = "请选择要写入缓存的中转架";
@@ -114,6 +133,8 @@ public sealed class AddTaskDialogViewModel : ObservableObject
             PlugHole = PlugHole,
             LeftPlugThickness = LeftPlugThickness,
             RightPlugThickness = RightPlugThickness,
+            InnerTaper = _validatedInnerTaper,
+            CornerSize = _validatedCornerSize,
             MarkingContent = MarkingContent.Trim(),
             ProcessType = ProcessType,
             BoringProcess = BoringProcess.Trim(),
@@ -127,6 +148,10 @@ public sealed class AddTaskDialogViewModel : ObservableObject
             State = "待执行"
         };
     }
+
+    private static bool TryParseBoringRegisterValue(string text, out double value) =>
+        double.TryParse(text?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+        && double.IsFinite(value) && value > 0 && value <= 655.35;
 }
 
 public sealed class TransferRackStartOption

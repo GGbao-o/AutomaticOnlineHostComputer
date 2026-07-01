@@ -850,9 +850,10 @@ public sealed class Line1FrontFlowEngine : IDisposable
                                             var wp = _currentWp!.Value;
                                             double boringD = wp.Diameter + _cfg.GetDiameterOffset("boring1");
                                             Console.WriteLine(
-                                                $"[Line1Front] [货叉] ② R6101=1，写Modbus参数 R2041={wp.Length} R2043={boringD}*100 R2044={wp.LeftPlugThickness}*100 R2045={wp.RightPlugThickness}*100 R2046=1000 R2047={wp.BoreType}*100 R2048=800");
+                                                $"[Line1Front] [货叉] ② R6101=1，写Modbus参数 R2041={wp.Length} R2043={boringD}*100 R2044={wp.LeftPlugThickness}*100 R2045={wp.RightPlugThickness}*100 R2046={wp.InnerTaper}*100 R2047={wp.BoreType}*100 R2048={wp.CornerSize}*100");
                                             await _boringSvc.SendMachiningParamsAsync(wp.Length, boringD,
-                                                wp.LeftPlugThickness, wp.RightPlugThickness, wp.BoreType, ct);
+                                                wp.LeftPlugThickness, wp.RightPlugThickness, wp.InnerTaper,
+                                                wp.BoreType, wp.CornerSize, ct);
                                             await _boringSvc.SetDataSentDoneAsync(ct);
                                             Console.WriteLine("[Line1Front] [货叉] ③ R6102=1 数据下发完成 ✓ → 持续等R6103=1（无业务超时）");
                                             _forkPhase = ForkBoringPhase.WaitingRequestLoad;
