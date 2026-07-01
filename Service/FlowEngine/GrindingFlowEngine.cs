@@ -133,6 +133,8 @@ public sealed class GrindingFlowEngine : IDisposable
     public bool IsPaused => _paused;
     /// <summary>研磨天车连续两次读到XYZ全零时通知主页面更新状态并弹窗。</summary>
     public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
+    /// <summary>研磨流程进入人工确认暂停时通知主页面。</summary>
+    public Action<string>? OnSafetyAlarm;
 
     private int BeginGrindingAction(CancellationTokenSource cts, TaskCompletionSource<bool> completion,
         string action, string stationCode)
@@ -692,6 +694,7 @@ public sealed class GrindingFlowEngine : IDisposable
                         Console.WriteLine($"[GrindingEngine] ⚠ [{g.Name}] 保留 PendingWorkpiece={g.PendingWorkpiece?.IdentityText ?? "null"}，不回Idle、不清缓存，避免慢动作时数据/现场断开");
                         g.StateChangedAt = DateTime.UtcNow;
                         _paused = true;
+                        OnSafetyAlarm?.Invoke($"{g.Name}状态={g.State}超过安全观察时间{stuckTimeout.TotalSeconds:F0}秒。研磨引擎已暂停，PendingWorkpiece={g.PendingWorkpiece?.IdentityText ?? "null"}，请人工确认现场。");
                         pausedByTimeout = true;
                     }
                 }
@@ -1253,6 +1256,7 @@ public sealed class GrindingFlowEngine : IDisposable
                     Console.WriteLine($"══════════════════════════════════════════════");
                     Console.WriteLine($"[GrindingEngine] ⚠ 磨石报警！暂停引擎");
                     _paused = true;
+                    OnSafetyAlarm?.Invoke($"{grinder.Name}磨石厚度报警。研磨引擎已暂停，工件{wp.IdentityText}已放回缓存，请更换磨石后恢复。");
                     grinder.State = GrinderState.Idle;
                     grinder.StateChangedAt = DateTime.UtcNow;
                     grinder.PendingWorkpiece = null; // 清PendingWorkpiece, 否则FindReadyGrinder永久排除此研磨机
@@ -1479,6 +1483,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 : (holdingWorkpiece || magnetOn ? GrinderState.Loading : GrinderState.Idle);
             grinder.StateChangedAt = DateTime.UtcNow;
             grinder.PendingWorkpiece = (placedInGrinder || holdingWorkpiece || magnetOn) ? wp : null;
+            OnSafetyAlarm?.Invoke($"{grinder.Name}上料时触发下压急停。研磨引擎已暂停，工件={grinder.PendingWorkpiece?.IdentityText ?? wp.IdentityText}，请人工处理并复位设备。异常：{pEx.Message}");
         }
         catch (Exception ex)
         {
@@ -1497,6 +1502,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 grinder.State = loadDoneNotified ? GrinderState.Machining : GrinderState.Loading;
                 grinder.PendingWorkpiece = wp;
                 Console.WriteLine($"[GrindingEngine] ⚠⚠⚠ 工件 {wp.IdentityText} 已放入研磨机但握手未完全闭环, 暂停等待人工确认");
+                OnSafetyAlarm?.Invoke($"{grinder.Name}上料异常：工件{wp.IdentityText}已放入研磨机，但握手未完全闭环。研磨引擎已暂停，请人工确认。异常：{ex.Message}");
             }
             else if (holdingWorkpiece || magnetOn)
             {
@@ -1505,6 +1511,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 grinder.State = GrinderState.Loading;
                 grinder.PendingWorkpiece = wp;
                 Console.WriteLine($"[GrindingEngine] ⚠⚠⚠ 工件 d={wp.Diameter} 已吸在天车上,引擎暂停,需人工处理！");
+                OnSafetyAlarm?.Invoke($"{grinder.Name}上料异常：工件{wp.IdentityText}已在研磨天车上。研磨引擎已暂停，请人工确认天车和工件位置。异常：{ex.Message}");
             }
             else
             {
@@ -1572,6 +1579,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 grinder.StateChangedAt = DateTime.UtcNow;
                 grinder.WpRecoveryNeeded = true;
                 Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠ PendingWorkpiece=null，无法知道成品直径，暂停等待人工确认后再下料");
+                OnSafetyAlarm?.Invoke($"{grinder.Name}请求下料，但PendingWorkpiece为空，无法确认成品身份和直径。研磨引擎已暂停，请人工补录工件信息。");
                 return;
             }
             var workpiece = wp.Value;
@@ -1734,6 +1742,7 @@ public sealed class GrindingFlowEngine : IDisposable
             grinder.StateChangedAt = DateTime.UtcNow;
             grinder.PendingWorkpiece = placedOnUnloadRack && unloadRackNotified && unloadDoneNotified ? null : wp;
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠ 下料急停后保留状态={grinder.State}, PendingWorkpiece={grinder.PendingWorkpiece?.IdentityText ?? "null"}");
+            OnSafetyAlarm?.Invoke($"{grinder.Name}下料时触发下压急停。研磨引擎已暂停，状态={grinder.State}，工件={grinder.PendingWorkpiece?.IdentityText ?? "未知"}，请人工处理并复位设备。");
         }
         catch (Exception ex)
         {
@@ -1752,6 +1761,7 @@ public sealed class GrindingFlowEngine : IDisposable
             grinder.StateChangedAt = DateTime.UtcNow;
             grinder.PendingWorkpiece = placedOnUnloadRack && unloadRackNotified && unloadDoneNotified ? null : wp;
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠ 下料异常后已暂停, 状态={grinder.State}, placedOnUnloadRack={placedOnUnloadRack}, unloadRackNotified={unloadRackNotified}, unloadDoneNotified={unloadDoneNotified}");
+            OnSafetyAlarm?.Invoke($"{grinder.Name}下料流程异常。研磨引擎已暂停，状态={grinder.State}，工件={grinder.PendingWorkpiece?.IdentityText ?? "未知"}。异常：{ex.Message}");
         }
         finally
         {

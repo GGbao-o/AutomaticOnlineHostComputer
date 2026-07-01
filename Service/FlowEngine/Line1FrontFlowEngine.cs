@@ -133,6 +133,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
     public Action<string, WorkpieceCache>? OnRackPlaced;
     /// <summary>天车任务出队前连续两次读到XYZ全零时通知主页面暂停整条1号线并弹窗。</summary>
     public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
+    /// <summary>前端进入人工确认暂停时通知主页面弹窗。</summary>
+    public Action<string>? OnSafetyAlarm;
 
     /// <summary>物理工件已放到中转架, 但后端缓存回调未确认。用于外层catch区分“已在中转架”和“仍在天车上”。</summary>
     private sealed class TransferRackCacheException : Exception
@@ -428,7 +430,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
         // 双头镗握手异常不能回Idle: CNC/货叉/工件可能已经处于中间状态。
         // 保持当前_forkPhase并暂停, 让人工按现场确认后再恢复, 避免下一块板进入同一区域。
         _paused = true;
-        Console.WriteLine($"[Line1Front] [货叉] {reason}: {ex.Message} → 保持阶段={_forkPhase}, 引擎已暂停, 请人工确认货叉/双头镗/工件位置");
+        string message = $"1号线货叉/双头镗握手异常：{reason}：{ex.Message}。保持阶段={_forkPhase}，引擎已暂停，请人工确认货叉、双头镗和工件位置。";
+        Console.WriteLine($"[Line1Front] [货叉] {message}");
+        OnSafetyAlarm?.Invoke(message);
     }
 
     /// <summary>
@@ -1351,6 +1355,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 lock (_wpLock) { _currentWp = null; }
                 _paused = true;
                 Console.WriteLine("[Line1Front] ⚠ 机械手1已吸住工件但未放到货叉！引擎已暂停, 需人工确认机械手/工件位置！");
+                OnSafetyAlarm?.Invoke($"1号线机械手1处理{wp.IdentityText}时发生异常：已吸住工件但未放到货叉。引擎已暂停，请人工确认机械手和工件位置。异常：{ex.Message}");
             }
             else if (placedOnFork)
             {
@@ -1368,6 +1373,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 RequeueFrontCache(wp);
                 _paused = true;
                 Console.WriteLine("[Line1Front] ⚠ 机械手1未确认吸住工件, 已退回工件缓存并暂停, 请人工确认总上料架/机械手状态");
+                OnSafetyAlarm?.Invoke($"1号线机械手1处理{wp.IdentityText}时发生异常：未确认吸住工件，任务已退回缓存。引擎已暂停，请确认总上料架和机械手状态。异常：{ex.Message}");
             }
         }
         finally
@@ -1581,6 +1587,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 _skipBoringTriggered = false;
                 _paused = true;
                 Console.WriteLine($"[Line1Front] ⚠⚠⚠ 工件已在{rackEx.RackStation}, 但后端缓存未确认；不回队列，等待人工补缓存/确认现场");
+                OnSafetyAlarm?.Invoke($"1号线前天车处理{wp.IdentityText}时，工件已放到{rackEx.RackStation}，但后端缓存未确认。引擎已暂停，请人工补缓存并确认现场。");
             }
             else if (magnetOn)
             {
@@ -1591,6 +1598,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 _skipBoringTriggered = false;
                 _paused = true;
                 Console.WriteLine("[Line1Front] ⚠⚠⚠ 天车已充磁但流程中断！工件在天车上！引擎已暂停,需人工处理！");
+                OnSafetyAlarm?.Invoke($"1号线前天车处理{wp.IdentityText}时流程中断，天车磁铁已启动，工件位置不确定。引擎已暂停，请人工确认天车和工件位置。异常：{ex.Message}");
             }
             else
             {

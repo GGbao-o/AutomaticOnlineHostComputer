@@ -72,6 +72,7 @@ public sealed class HomeViewModel : ObservableObject
                     new[] { (_cfg.Grinding.CraneNo, "研磨天车") }, "研磨引擎启动/恢复前"))
                 return;
 
+            lock (_lineSafetyPopupLock) _grindingSafetyPopupShown = false;
             if (_grindingEngine.IsRunning && _grindingEngine.IsPaused)
             {
                 Console.WriteLine("[HomeViewModel] ▶ 【恢复研磨】");
@@ -371,6 +372,7 @@ public sealed class HomeViewModel : ObservableObject
 
     /// <summary>是否正在运行研磨自动流程</summary>
     private bool _isGrindingRunning;
+    private bool _grindingSafetyPopupShown;
     public bool IsGrindingRunning { get => _isGrindingRunning; set { if (SetField(ref _isGrindingRunning, value)) OnPropertyChanged(nameof(GrindingToggleText)); } }
 
     /// <summary>启动/暂停按钮文本</summary>
@@ -1054,6 +1056,9 @@ public sealed class HomeViewModel : ObservableObject
     }
 
     private bool _isLine1Running;
+    private readonly object _lineSafetyPopupLock = new();
+    private bool _line1SafetyPopupShown;
+    private bool _line2SafetyPopupShown;
     /// <summary>1号线是否在运行</summary>
     public bool IsLine1Running { get => _isLine1Running; set { if (SetField(ref _isLine1Running, value)) OnPropertyChanged(nameof(Line1ToggleText)); } }
 
@@ -1074,6 +1079,7 @@ public sealed class HomeViewModel : ObservableObject
 
     // ── 动平衡引擎 ────────────────────────────────────────────────
     private bool _isBalancingRunning;
+    private bool _balancingSafetyPopupShown;
     public bool IsBalancingRunning { get => _isBalancingRunning; set { if (SetField(ref _isBalancingRunning, value)) OnPropertyChanged(nameof(BalancingToggleText)); } }
     public string BalancingToggleText => _isBalancingRunning ? "暂停动平衡" : "启动动平衡";
 
@@ -1133,6 +1139,8 @@ public sealed class HomeViewModel : ObservableObject
                     new[] { (1, "1号线前天车"), (2, "1号线后天车") }, "1号线引擎启动/恢复前"))
                 return;
 
+            lock (_lineSafetyPopupLock) _line1SafetyPopupShown = false;
+
             if (_line1Engine.IsRunning || _line1RearEngine?.IsRunning == true)
             {
                 Console.WriteLine("[HomeViewModel] ▶ 【恢复1号线】→ 前端+后端(动平衡单独恢复)");
@@ -1166,6 +1174,8 @@ public sealed class HomeViewModel : ObservableObject
             if (!await EnsureCranePositionsReadyForStartAsync(
                     new[] { (3, "2号线前天车"), (4, "2号线后天车") }, "2号线引擎启动/恢复前"))
                 return;
+
+            lock (_lineSafetyPopupLock) _line2SafetyPopupShown = false;
 
             if (_line2Engine.IsRunning || _line2RearEngine?.IsRunning == true)
             {
@@ -1251,6 +1261,100 @@ public sealed class HomeViewModel : ObservableObject
         else dispatcher.BeginInvoke((Action)UpdateUiAndShowAlarm);
     }
 
+    /// <summary>后天车无法完成退磁/回升时，立即暂停对应整线并在主页面显示安全告警。</summary>
+    private void HandleLineSafetyAlarm(int line, string source, string message)
+    {
+        // 先同步关闭前后端派发门；不能等待UI线程调度后再暂停。
+        if (line == 1)
+        {
+            _line1Engine?.Pause();
+            _line1RearEngine?.Pause();
+        }
+        else if (line == 2)
+        {
+            _line2Engine?.Pause();
+            _line2RearEngine?.Pause();
+        }
+
+        // 同一次停机可能由内层catch、外层catch和finally分别报告；整线恢复前只显示第一条。
+        lock (_lineSafetyPopupLock)
+        {
+            if (line == 1)
+            {
+                if (_line1SafetyPopupShown) return;
+                _line1SafetyPopupShown = true;
+            }
+            else if (line == 2)
+            {
+                if (_line2SafetyPopupShown) return;
+                _line2SafetyPopupShown = true;
+            }
+        }
+
+        void UpdateUiAndShowAlarm()
+        {
+            if (line == 1) IsLine1Running = false;
+            else if (line == 2) IsLine2Running = false;
+
+            Console.WriteLine($"[HomeViewModel] ⚠ {source}: {message}");
+            MessageBox.Show(message, $"{line}号线{source} - 引擎已暂停",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess()) UpdateUiAndShowAlarm();
+        else dispatcher.BeginInvoke((Action)UpdateUiAndShowAlarm);
+    }
+
+    /// <summary>X11连续无板但已安全退磁回升：只提示一次，不改变引擎运行状态。</summary>
+    private static void HandleRearCraneWarning(int line, string message)
+    {
+        void ShowWarning()
+        {
+            Console.WriteLine($"[HomeViewModel] ⚠ {line}号线后天车取料警告: {message}");
+            MessageBox.Show(message, $"{line}号线后天车取料警告 - 引擎继续运行",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess()) ShowWarning();
+        else dispatcher.BeginInvoke((Action)ShowWarning);
+    }
+
+    /// <summary>动平衡/研磨最终安全异常：每次恢复运行前只显示第一条。</summary>
+    private void HandleStandaloneSafetyAlarm(string engine, string message)
+    {
+        if (engine == "动平衡") _line1BalancingEngine?.Pause();
+        else if (engine == "研磨") _grindingEngine?.PauseForCraneZeroPosition();
+
+        lock (_lineSafetyPopupLock)
+        {
+            if (engine == "动平衡")
+            {
+                if (_balancingSafetyPopupShown) return;
+                _balancingSafetyPopupShown = true;
+            }
+            else if (engine == "研磨")
+            {
+                if (_grindingSafetyPopupShown) return;
+                _grindingSafetyPopupShown = true;
+            }
+        }
+
+        void ShowAlarm()
+        {
+            if (engine == "动平衡") IsBalancingRunning = false;
+            else if (engine == "研磨") IsGrindingRunning = false;
+            Console.WriteLine($"[HomeViewModel] ⚠ {engine}流程安全异常: {message}");
+            MessageBox.Show(message, $"{engine}流程异常 - 引擎已暂停",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess()) ShowAlarm();
+        else dispatcher.BeginInvoke((Action)ShowAlarm);
+    }
+
     /// <summary>启动/暂停动平衡流转(两条线共用)</summary>
     private async Task BalancingToggleAsync()
     {
@@ -1264,6 +1368,7 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
+            lock (_lineSafetyPopupLock) _balancingSafetyPopupShown = false;
             if (_line1BalancingEngine.IsRunning && _line1BalancingEngine.IsPaused)
             {
                 Console.WriteLine("[HomeViewModel] ▶ 【恢复动平衡】");
@@ -1634,6 +1739,14 @@ public sealed class HomeViewModel : ObservableObject
         _line2Engine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
         _line2RearEngine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
         _grindingEngine!.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
+        _line1RearEngine.OnRearCraneSafetyAlarm = message => HandleLineSafetyAlarm(1, "后天车安全异常", message);
+        _line2RearEngine.OnRearCraneSafetyAlarm = message => HandleLineSafetyAlarm(2, "后天车安全异常", message);
+        _line1RearEngine.OnRearCraneWarning = message => HandleRearCraneWarning(1, message);
+        _line2RearEngine.OnRearCraneWarning = message => HandleRearCraneWarning(2, message);
+        _line1Engine.OnSafetyAlarm = message => HandleLineSafetyAlarm(1, "前端流程异常", message);
+        _line2Engine.OnSafetyAlarm = message => HandleLineSafetyAlarm(2, "前端流程异常", message);
+        _line1BalancingEngine.OnSafetyAlarm = message => HandleStandaloneSafetyAlarm("动平衡", message);
+        _grindingEngine.OnSafetyAlarm = message => HandleStandaloneSafetyAlarm("研磨", message);
 
         // ── 前后端联动: 前端放中转架→通知后端工件数据 ──
         _line1Engine.OnRackPlaced = (code, wp) =>

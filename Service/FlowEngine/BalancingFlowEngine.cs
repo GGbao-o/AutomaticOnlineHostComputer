@@ -158,6 +158,8 @@ public sealed class BalancingFlowEngine : IDisposable
 
     public bool IsRunning => _engineTask != null && !_engineTask.IsCompleted;
     public bool IsPaused => _paused;
+    /// <summary>动平衡流程进入人工确认暂停时通知主页面。</summary>
+    public Action<string>? OnSafetyAlarm;
     public bool M2Busy => System.Threading.Volatile.Read(ref _m2BusyFlag) == 1;
     public bool M3Busy => System.Threading.Volatile.Read(ref _m3BusyFlag) == 1;
     public bool Mc63Connected => _mc63?.IsConnected == true;
@@ -917,6 +919,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 // M817/M818都是后天车放料后回调写入缓存; PLC允许取料到了但缓存没到, 说明数据链断了。
                 // 直径会影响机械手Z下降深度, 不能再用默认160mm盲取。
                 _paused = true;
+                OnSafetyAlarm?.Invoke($"动平衡机械手2检测到{pickReg}允许取料，但工件缓存缺失。引擎已暂停，禁止使用默认直径；当前缓存Keys=[{CacheKeysText}]。");
                 throw new InvalidOperationException($"M2检测到{pickReg}=有板但工件缓存缺失, 当前Keys=[{CacheKeysText}], 已暂停, 禁止默认160mm取料");
             }
             var trackedWorkpiece = trackedWp.Value;
@@ -1075,16 +1078,19 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M2已吸住工件但未放到ST008/M710, 引擎已暂停, 请人工确认机械手2/工件位置");
+                OnSafetyAlarm?.Invoke($"动平衡机械手2已吸住工件但未放到ST008/M710。引擎已暂停，请人工确认机械手和工件位置。异常：{ex.Message}");
             }
             else if (mag && !placedOnM710)
             {
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M2磁铁处于打开/异常状态且未完成放料, 引擎已暂停, 请人工确认");
+                OnSafetyAlarm?.Invoke($"动平衡机械手2磁铁处于打开或异常状态，且未完成放料。引擎已暂停，请人工确认。异常：{ex.Message}");
             }
             if (placedOnM710 && !m711Notified)
             {
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M2已把工件放到ST008/M710但M711未确认, 引擎已暂停, 请人工确认PLC信号");
+                OnSafetyAlarm?.Invoke($"动平衡机械手2已把工件放到ST008/M710，但M711未确认。引擎已暂停，请人工确认PLC信号。异常：{ex.Message}");
             }
         }
         finally
@@ -1179,12 +1185,14 @@ public sealed class BalancingFlowEngine : IDisposable
                     {
                         // M700是人工动平衡后的乱序工件, 只能相信D100; 读不到直径时不能默认160mm盲取。
                         _paused = true;
+                        OnSafetyAlarm?.Invoke($"动平衡机械手3检测到M700有板，但D100直径读取失败。引擎已暂停。异常：{ex.Message}");
                         throw new InvalidOperationException($"M3检测到M700=有板但D100直径读取失败, 已暂停: {ex.Message}", ex);
                     }
                 }
                 else
                 {
                     _paused = true;
+                    OnSafetyAlarm?.Invoke("动平衡机械手3检测到M700有板，但MC65未连接，无法读取D100直径。引擎已暂停。");
                     throw new InvalidOperationException("M3检测到M700=有板但MC65未连接, D100不可读, 已暂停");
                 }
             }
@@ -1208,6 +1216,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 {
                     // M821由2号线后天车放料回调写缓存; 缓存缺失时身份和直径都不可靠, 不能默认160mm。
                     _paused = true;
+                    OnSafetyAlarm?.Invoke("动平衡机械手3检测到M825允许取料，但M821工件缓存缺失。引擎已暂停，禁止使用默认直径。");
                     throw new InvalidOperationException("M3检测到M825允许取料但M821工件缓存缺失, 已暂停, 禁止默认160mm取料");
                 }
                 Console.WriteLine($"[平衡引擎] [M3] M821来源 {m821TrackedWp?.IdentityText ?? "版号=未知"} → 缓存读取 工件直径={d}mm");
@@ -1412,21 +1421,25 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M3已吸住工件但未放到M720/ST010, 引擎已暂停, 请人工确认机械手3/工件位置");
+                OnSafetyAlarm?.Invoke($"动平衡机械手3已吸住工件但未放到M720/ST010。引擎已暂停，请人工确认机械手和工件位置。异常：{ex.Message}");
             }
             else if (mag && !placedOnM720)
             {
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M3磁铁处于打开/异常状态且未完成放料, 引擎已暂停, 请人工确认");
+                OnSafetyAlarm?.Invoke($"动平衡机械手3磁铁处于打开或异常状态，且未完成放料。引擎已暂停，请人工确认。异常：{ex.Message}");
             }
             if (placedOnM720 && !m721Notified)
             {
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M3已把工件放到M720/ST010但M721未确认, 引擎已暂停, 请人工确认PLC信号/研磨缓存");
+                OnSafetyAlarm?.Invoke($"动平衡机械手3已把工件放到M720/ST010，但M721未确认。引擎已暂停，请确认PLC信号和研磨缓存。异常：{ex.Message}");
             }
             if (placedOnM720 && m721Notified && !grindingCacheNotified)
             {
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M3已把工件放到M720/ST010且M721已通知, 但研磨缓存未写入, 引擎已暂停, 请人工确认/补录缓存");
+                OnSafetyAlarm?.Invoke($"动平衡机械手3已把工件放到M720/ST010且M721已通知，但研磨缓存未写入。引擎已暂停，请人工补录缓存。异常：{ex.Message}");
             }
         }
         finally

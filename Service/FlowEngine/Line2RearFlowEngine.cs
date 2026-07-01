@@ -77,6 +77,10 @@ public sealed class Line2RearFlowEngine : IDisposable
     public Action<string, WorkpieceCache>? OnBalancingRackPlaced;
     /// <summary>后天车连续两次读到XYZ全零时通知主页面暂停整条2号线并弹窗。</summary>
     public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
+    /// <summary>后天车异常恢复失败、现场位置不再可确认时通知主页面暂停整条2号线并弹窗。</summary>
+    public Action<string>? OnRearCraneSafetyAlarm;
+    /// <summary>X11连续无板但已安全退磁回升时通知主页面一次，不暂停引擎。</summary>
+    public Action<string>? OnRearCraneWarning;
 
     /// <summary>单台斜床运行时上下文</summary>
     private sealed class SkewCtx
@@ -102,6 +106,8 @@ public sealed class Line2RearFlowEngine : IDisposable
         public int ConsecutiveReconnectFails;
         /// <summary>引擎重启后检测到斜床上有工件但Wp=null → 需人工确认</summary>
         public bool WpRecoveryNeeded;
+        /// <summary>同一故障周期只弹一次X11连续无板警告，X11成功或应急清除后复位。</summary>
+        public bool X11UnloadMissWarningShown;
         /// <summary>当前上/下料动作令牌。人工应急作废时取消, 防止旧动作继续写状态。</summary>
         public EmergencyActionLease? ActiveOperation;
         public long NextOperationVersion;
@@ -904,6 +910,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             bed.SignalFresh = false;
             bed.CompletionExported = false;
             bed.WpRecoveryNeeded = false;
+            bed.X11UnloadMissWarningShown = false;
             Interlocked.Increment(ref bed.PollVersion);
         }
 
@@ -1242,12 +1249,16 @@ public sealed class Line2RearFlowEngine : IDisposable
                 Console.WriteLine(loadState.LoadDoneNotified
                     ? "│ [上料] ⚠ 工件已放入斜床且CNC已收到上料完成, 但后续动作异常; 引擎已暂停, 请确认后天车安全位置"
                     : "│ [上料] ⚠ 工件已物理放到斜床但CNC上料完成未确认; 引擎已暂停, 禁止把斜床改Idle");
+                OnRearCraneSafetyAlarm?.Invoke($"2号线后天车给{bed.Code}上料时发生异常。工件{wp.IdentityText}已放入斜床，" +
+                    (loadState.LoadDoneNotified ? "CNC已收到上料完成" : "CNC上料完成尚未确认") +
+                    $"。引擎已暂停，请确认后天车、斜床和工件状态。异常：{ex.Message}");
             }
             else if (holdingWorkpiece)
             {
                 _paused = true;
                 bed.St = SkewState.Loading;
                 Console.WriteLine("│ [上料] ⚠ X11已确认工件在后天车上但未放到斜床; 引擎已暂停, 需人工确认后天车和工件位置");
+                OnRearCraneSafetyAlarm?.Invoke($"2号线后天车给{bed.Code}上料时发生异常，X11已确认工件{wp.IdentityText}在天车上但尚未放入斜床。引擎已暂停，请人工确认位置。异常：{ex.Message}");
             }
             else
             {
@@ -1293,6 +1304,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 {
                     _paused = true;
                     Console.WriteLine("│ [上料] ⚠ 共享区退避失败, 未释放共享区锁; 引擎已暂停, 请人工确认后天车位置");
+                    OnRearCraneSafetyAlarm?.Invoke($"2号线后天车在{bed.Code}上料异常收尾时无法退出共享区，共享区锁未释放。引擎已暂停，请人工确认天车位置。");
                 }
                 }
             }
@@ -1457,7 +1469,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 await cr.RecoverFromPressureStopAsync(ct);
             }
 
-            // Z↓到位→充磁→等3s→查X11(63497)→有版就保持Z, 没版就退磁→Z↓5mm→充磁→等3s→再查, 最多2次
+            // Z↓到位后最多读取3次X11；后两次各下探5mm重试。
             Console.WriteLine("│ [下料] 充磁→等3s→X11检测");
             int unlz = zDown;
             for (int retry = 0; retry <= 2; retry++)
@@ -1493,12 +1505,73 @@ public sealed class Line2RearFlowEngine : IDisposable
                 Console.WriteLine($"│ [下料] X11={(x11 ? "1(有版)" : "0(无版)")} (第{retry + 1}次)");
                 if (x11)
                 {
+                    bed.X11UnloadMissWarningShown = false;
                     holdingWorkpiece = true; // X11=1才确认工件已由后天车持有, 异常时必须暂停人工处理
                     Console.WriteLine($"│ [下料] ✓ X11=1 已吸到(保持在取料位Z={unlz})");
                     break;
                 }
 
-                if (retry > 1) throw new Exception($"下料取料失败: 2次充磁后X11仍=0");
+                if (retry > 1)
+                {
+                    // X11连续三次均未确认有板：工件按“仍在斜床”处理。
+                    // 必须在仍持有后天车锁时先退磁、再把Z升到安全高度，成功后才允许释放锁并自动重试。
+                    var recoveryErrors = new List<string>();
+                    try
+                    {
+                        await cr.MagnetOffAsync(ct);
+                        magnetOn = false;
+                        Console.WriteLine("│ [下料恢复] X11三次均为0，退磁成功");
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception offEx)
+                    {
+                        recoveryErrors.Add($"退磁失败: {offEx.Message}");
+                        Console.WriteLine($"│ [下料恢复] ❌ 退磁失败: {offEx.Message}");
+                    }
+
+                    try
+                    {
+                        await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+                        Console.WriteLine($"│ [下料恢复] Z已回安全高度 {sz}");
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception zEx)
+                    {
+                        recoveryErrors.Add($"Z回安全高度{sz}失败: {zEx.Message}");
+                        Console.WriteLine($"│ [下料恢复] ❌ Z回安全高度{sz}失败: {zEx.Message}");
+                    }
+
+                    if (recoveryErrors.Count > 0)
+                    {
+                        // 使任务牌失效并保留到应急流程：共享区斜床不得在Z/磁铁状态不确定时执行X退避，
+                        // EndSkewOperation也不能丢掉仍可能持有SharedArea的任务牌。
+                        operation.CancelAndInvalidate();
+                        _paused = true;
+                        string alarm = $"2号线后天车从{bed.Code}下料取料时，X11连续三次为0，且安全恢复失败：" +
+                                       string.Join("；", recoveryErrors) +
+                                       $"。工件{wp.IdentityText}仍保留在斜床等待下料，后端已暂停。请人工确认磁铁和Z轴位置。";
+                        Console.WriteLine($"│ [下料恢复] ⚠ {alarm}");
+                        OnRearCraneSafetyAlarm?.Invoke(alarm);
+                        throw new InvalidOperationException(alarm);
+                    }
+
+                    if (!bed.X11UnloadMissWarningShown)
+                    {
+                        bed.X11UnloadMissWarningShown = true;
+                        string warning = $"2号线后天车在{bed.Code}下料取料时，X11连续三次为0。" +
+                                         $"工件{wp.IdentityText}仍按留在斜床处理；后天车已退磁并将Z升到安全高度{sz}，引擎未暂停，将继续自动重试。";
+                        Console.WriteLine($"│ [下料恢复] ⚠ {warning}");
+                        OnRearCraneWarning?.Invoke(warning);
+                    }
+
+                    throw new InvalidOperationException("下料取料失败: 3次充磁后X11仍=0；已退磁并将Z升到安全高度，保留工件等待下轮重试");
+                }
                 unlz += 5;
                 Console.WriteLine($"│ [下料] ⚠ X11=0 未吸到, 准备下探5mm重试");
             }
@@ -1685,6 +1758,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 _paused = true;
                 bed.St = SkewState.Unloading;
                 Console.WriteLine("│ ⚠ X11已确认工件离开斜床但未完成目标位放料/通知, 引擎已暂停, 请人工确认后天车和工件位置");
+                OnRearCraneSafetyAlarm?.Invoke($"2号线后天车从{bed.Code}下料时发生异常，X11已确认工件在天车上，但目标位放料或通知尚未完成。引擎已暂停，请人工确认天车和工件位置。异常：{ex.Message}");
             }
             else if (magnetOn)
             {
@@ -1728,6 +1802,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 {
                     _paused = true;
                     Console.WriteLine("│ [下料] ⚠ 共享区兜底退避失败, 未释放共享区锁; 引擎已暂停, 请人工确认后天车位置");
+                    OnRearCraneSafetyAlarm?.Invoke($"2号线后天车在{bed.Code}下料异常收尾时无法退出共享区，共享区锁未释放。引擎已暂停，请人工确认天车位置。");
                 }
                 }
             }
