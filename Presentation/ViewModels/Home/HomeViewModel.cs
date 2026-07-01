@@ -1016,23 +1016,14 @@ public sealed class HomeViewModel : ObservableObject
             var result = await client.ReadMAlignedWordAsync(720, 1, linked.Token);
             ushort raw = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
             bool m720CanPlace = (raw & 1) != 0;
-            bool m730Safe = (raw & (1 << 10)) != 0;
-            bool unloadReady = m720CanPlace && m730Safe;
-
-            int unloadDiameter = 0;
-            try
-            {
-                var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, linked.Token);
-                unloadDiameter = d.IntValues.Length > 0 ? d.IntValues[0] : 0;
-            }
-            catch { }
+            bool m721PlaceDone = (raw & (1 << 1)) != 0;
 
             if (cards.TryGetValue("ST710", out var c710))
             {
                 c710.ConnectedBrush = Brushes.LimeGreen;
-                c710.Status1 = unloadReady ? "可放料" : (!m720CanPlace ? "不可放料" : "未到安全位");
-                c710.Status1Brush = unloadReady ? Brushes.Green : Brushes.Orange;
-                c710.Status2 = $"M720={(m720CanPlace ? 1 : 0)} M730={(m730Safe ? 1 : 0)} D200={unloadDiameter}";
+                c710.Status1 = m720CanPlace ? "无板/允许放料" : "不可放料";
+                c710.Status1Brush = m720CanPlace ? Brushes.Green : Brushes.Orange;
+                c710.Status2 = $"M720={(m720CanPlace ? 1 : 0)} M721={(m721PlaceDone ? 1 : 0)}";
                 c710.IpText = "192.168.2.64:9000";
             }
         }
@@ -1852,7 +1843,7 @@ public sealed class HomeViewModel : ObservableObject
         EnsureNewCard("ST009", "动平衡下料架2");    // M700 192.168.2.65
         EnsureNewCard("ST010", "研磨上料1号位");    // M720 192.168.2.65
         EnsureNewCard("ST709", "研磨机上料架");     // → ST709 MC65: M730末位有板/D200测长
-        EnsureNewCard("ST710", "研磨机下料架");     // → ST710 MC64: M720/M730
+        EnsureNewCard("ST710", "研磨机下料架");     // → ST710 MC64: M720允许放料/M721放料完成
         // 机械手2/3 (Modbus, 引擎托管)
         EnsureNewCard("ST005", "机械手2");          // → ST005 Modbus:192.168.2.86
         EnsureNewCard("ST006", "机械手3");          // → ST006 Modbus:192.168.2.87
@@ -3208,23 +3199,18 @@ public sealed class HomeViewModel : ObservableObject
                 var client = await _mcCache.GetOrCreateAsync("192.168.2.64", 9000, cts.Token);
                 Console.WriteLine("[ProbeMC] [2.64下料架] 共享MC连接可用 ✓");
 
-                // 与GrindingFlowEngine保持一致: MC64下料架按对齐字读 M720起1字, M720=1允许放版, M730=1安全位置。
+                // 与GrindingFlowEngine保持一致: MC64下料架按对齐字读M720起1字；M720=1表示无板且允许放版。
                 var result = await client.ReadMAlignedWordAsync(720, 1, cts.Token);
                 ushort raw = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
                 Console.WriteLine($"[ProbeMC] [2.64下料架] ✔ 读成功 M720~M735=0x{raw:X4}");
 
-                bool m720CanPlace = (raw & 1) != 0;        // M720=1: 下料架允许放版
-                bool m730Safe = (raw & (1 << 10)) != 0;   // M730=1: 下料架在安全位置
-                bool unloadReady = m720CanPlace && m730Safe;
-                // 读 D200: 研磨下料架最近写入/显示的工件直径。
-                int unloadDiameter = 0;
-                try { var d = await client.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, cts.Token); unloadDiameter = d.IntValues.Length > 0 ? d.IntValues[0] : 0; }
-                catch { }
+                bool m720CanPlace = (raw & 1) != 0;              // M720=1: 下料架无板且允许放版
+                bool m721PlaceDone = (raw & (1 << 1)) != 0;     // M721=1: 天车放版完成
 
-                string unloadState = unloadReady ? "可放料" : (!m720CanPlace ? "不可放料" : "未到安全位");
-                var unloadBrush = unloadReady ? Brushes.Green : Brushes.Orange;
-                if (cards.TryGetValue("ST013", out var c13)) { c13.ConnectedBrush = Brushes.LimeGreen; c13.Status1 = unloadState; c13.Status1Brush = unloadBrush; c13.Status2 = $"D200直径={unloadDiameter}"; c13.IpText = "192.168.2.64:9000"; }
-                if (cards.TryGetValue("ST710", out var c710)) { c710.ConnectedBrush = Brushes.LimeGreen; c710.Status1 = unloadState; c710.Status1Brush = unloadBrush; c710.Status2 = $"M720={(m720CanPlace ? 1 : 0)} M730={(m730Safe ? 1 : 0)}"; c710.IpText = "192.168.2.64:9000"; }
+                string unloadState = m720CanPlace ? "无板/允许放料" : "不可放料";
+                var unloadBrush = m720CanPlace ? Brushes.Green : Brushes.Orange;
+                if (cards.TryGetValue("ST013", out var c13)) { c13.ConnectedBrush = Brushes.LimeGreen; c13.Status1 = unloadState; c13.Status1Brush = unloadBrush; c13.Status2 = $"M720={(m720CanPlace ? 1 : 0)} M721={(m721PlaceDone ? 1 : 0)}"; c13.IpText = "192.168.2.64:9000"; }
+                if (cards.TryGetValue("ST710", out var c710)) { c710.ConnectedBrush = Brushes.LimeGreen; c710.Status1 = unloadState; c710.Status1Brush = unloadBrush; c710.Status2 = $"M720={(m720CanPlace ? 1 : 0)} M721={(m721PlaceDone ? 1 : 0)}"; c710.IpText = "192.168.2.64:9000"; }
                 Console.WriteLine("[ProbeMC] [2.64下料架] 卡片已更新: ST013✓ ST710✓");
             }
             catch (Exception ex)

@@ -33,7 +33,7 @@ public sealed class GrindingFlowEngine : IDisposable
     private readonly Dictionary<string, MachineManagementRowVm> _stationCoords; // 工位坐标(数据库machine表, 含XYZ+偏移量)
     // ── MC连接(共享McConnectionCache, 与平衡/后端引擎共用, 防重复TCP) ──
     //   MC65=192.168.2.65: 上料架(研磨上料架) M730(末位有板/允许取板) M731(取板完成) D200(2号位测长,读)
-    //   MC64=192.168.2.64: 下料架(研磨下料架) M720(允许放版) M721(放版完成,写) M730(安全位置) D200(直径,写)
+    //   MC64=192.168.2.64: 下料架(研磨下料架) M720(无板且允许放版) M721(放版完成,写)
     private readonly McConnectionCache _mcCache;
     private MitsubishiMcClient? _mc65;   // 上料架PLC
     private MitsubishiMcClient? _mc64;   // 下料架PLC
@@ -643,7 +643,7 @@ public sealed class GrindingFlowEngine : IDisposable
                         }
                         catch (Exception ex) { Console.WriteLine($"[GrindingEngine] MC65连接失败: {ex.Message}, 下轮重试"); }
                     }
-                    // MC64 下料架 (192.168.2.64:9000): 读M720+M730+写M721/D200
+                    // MC64 下料架 (192.168.2.64:9000): 读M720允许放版 + 写M721放版完成
                     if (_mc64 == null || !_mc64.IsConnected)
                     {
                         try
@@ -651,7 +651,7 @@ public sealed class GrindingFlowEngine : IDisposable
                             using var cts = new CancellationTokenSource(5000);
                             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cts.Token);
                             _mc64 = await _mcCache.GetOrCreateAsync("192.168.2.64", 9000, linked.Token);
-                            Console.WriteLine("[GrindingEngine] MC64 ✓ (192.168.2.64:9000, 下料架:读M720+M730 + 写M721/D200)");
+                            Console.WriteLine("[GrindingEngine] MC64 ✓ (192.168.2.64:9000, 下料架:读M720 + 写M721)");
                         }
                         catch (Exception ex) { Console.WriteLine($"[GrindingEngine] MC64连接失败: {ex.Message}, 下轮重试"); }
                     }
@@ -725,7 +725,7 @@ public sealed class GrindingFlowEngine : IDisposable
 
                 // ═══════════════════════════════════════════════════════════
                 //  ④ 优先：下料（WaitingForUnload + 天车空闲 → 取料放ST710研磨机下料架
-                //  下料架MC64: M720=1允许放版 + M730=1安全位置
+                //  下料架MC64: M720=1同时表示无板且允许天车放版
                 //  成品工件占着研磨机，必须优先卸出才能接下一单
                 // ═══════════════════════════════════════════════════════════
                 foreach (var g in _grinders)
@@ -748,22 +748,21 @@ public sealed class GrindingFlowEngine : IDisposable
                             g.WpRecoveryNeeded = false;
                             Console.WriteLine($"[GrindingEngine] [{g.Name}] PendingWorkpiece已恢复, WpRecoveryNeeded清除");
                         }
-                        // ── 检查下料架MC64: M720=1允许放版 + M730=1安全位置(不满足则等下轮, 不破坏研磨机状态) ──
+                        // ── 检查下料架MC64: M720=1表示无板且允许放版(不满足则等下轮, 不破坏研磨机状态) ──
                         bool unloadRackOk = false; // MC64未连接/读失败时保守等待, 不允许盲放到ST710。
                         if (_mc64?.IsConnected == true)
                         {
                             try
                             {
                                 var r = await _mc64.ReadMAlignedWordAsync(720, 1, ct);
-                                unloadRackOk = (r.IntValues[0] & 1) != 0           // M720=1: 下料架允许放版
-                                           && (r.IntValues[0] & (1 << 10)) != 0;  // M730=1: 安全位置 (bit10)
+                                unloadRackOk = r.IntValues.Length > 0 && (r.IntValues[0] & 1) != 0;
                                 if (!unloadRackOk && _cycleCount % 10 == 1)
-                                    Console.WriteLine($"[GrindingEngine] [{g.Name}] ⏳ 下料架不可用(MC64 M720/M730), 等待...");
+                                    Console.WriteLine($"[GrindingEngine] [{g.Name}] ⏳ 下料架不可用(MC64 M720=0), 等待...");
                             }
                             catch (Exception ex)
                             {
                                 unloadRackOk = false;
-                                Console.WriteLine($"[GrindingEngine] [{g.Name}] 读取下料架MC64 M720/M730失败, 已失效连接等待重连: {ex.Message}");
+                                Console.WriteLine($"[GrindingEngine] [{g.Name}] 读取下料架MC64 M720失败, 已失效连接等待重连: {ex.Message}");
                                 await _mcCache.InvalidateAsync("192.168.2.64", 9000);
                                 _mc64 = null;
                             }
@@ -966,14 +965,14 @@ public sealed class GrindingFlowEngine : IDisposable
 
     /// <summary>
     /// 确认研磨机下料架(ST710)当前可放料。
-    /// M720=1表示下料架允许放版; M730=1表示下料架处于可放料/安全位。
+    /// M720=1同时表示下料架无板且允许天车放版。
     /// 下料从研磨机取起后再确认一次, 宁可暂停人工确认, 不能盲目去占用下料架。
     /// </summary>
     private async Task<bool> ConfirmGrindingUnloadRackReadyAsync(string context, CancellationToken ct)
     {
         if (_mc64?.IsConnected != true)
         {
-            Console.WriteLine($"[GrindingEngine] {context}: MC64未连接, ST710/M720/M730状态未知");
+            Console.WriteLine($"[GrindingEngine] {context}: MC64未连接, ST710/M720状态未知");
             return false;
         }
 
@@ -982,15 +981,13 @@ public sealed class GrindingFlowEngine : IDisposable
             var r = await _mc64.ReadMAlignedWordAsync(720, 1, ct);
             int raw = r.IntValues.Length > 0 ? r.IntValues[0] : 0;
             bool m720CanPlace = (raw & 1) != 0;
-            bool m730Safe = (raw & (1 << 10)) != 0;
-            bool ok = m720CanPlace && m730Safe;
-            if (!ok || _cycleCount % 10 == 1)
-                Console.WriteLine($"[GrindingEngine] {context}: ST710/M720={(m720CanPlace ? "可放料" : "不可放料")} M730={(m730Safe ? "安全" : "未到安全位")} raw=0x{raw:X4}");
-            return ok;
+            if (!m720CanPlace || _cycleCount % 10 == 1)
+                Console.WriteLine($"[GrindingEngine] {context}: ST710/M720={(m720CanPlace ? "无板且允许放料" : "不可放料")} raw=0x{raw:X4}");
+            return m720CanPlace;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[GrindingEngine] {context}: 读取ST710/M720/M730失败, 保守等待/暂停: {ex.Message}");
+            Console.WriteLine($"[GrindingEngine] {context}: 读取ST710/M720失败, 保守等待/暂停: {ex.Message}");
             await _mcCache.InvalidateAsync("192.168.2.64", 9000);
             _mc64 = null;
             return false;
@@ -1566,7 +1563,7 @@ public sealed class GrindingFlowEngine : IDisposable
         bool magnetOn = false;  // 充磁标志: true=成品已吸在天车上, 异常时无法恢复
         bool holdingWorkpiece = false;     // X11确认吸住后, 成品才算真实在天车上
         bool placedOnUnloadRack = false;   // ST710退磁成功后, 成品已在下料架, 不能再当作仍在研磨机
-        bool unloadRackNotified = false;   // M721+D200都写入成功后, 下料架PLC才算知道这块板
+        bool unloadRackNotified = false;   // M721写入成功后, 下料架PLC才算收到放版完成通知
         bool unloadDoneNotified = false;   // SetUnloadDone成功后, 研磨机PLC才算完成闭环
 
         try
@@ -1676,7 +1673,7 @@ public sealed class GrindingFlowEngine : IDisposable
             // 主循环预检到实际放料之间要等待门开、松尾座、Z升安全。
             // ST710可能在这段时间被人工/设备改变状态, 因此动作前必须重新确认。
             if (!await ConfirmGrindingUnloadRackReadyAsync("下料动作前", ct))
-                throw new InvalidOperationException("ST710/M720/M730动作前确认失败, 成品仍由天车保持, 暂停等待人工确认");
+                throw new InvalidOperationException("ST710/M720动作前确认失败, 成品仍由天车保持, 暂停等待人工确认");
 
             if (!TryGetStationCoords("ST710", out int unloadX, out int unloadY, out int unloadRackZ))
                 throw new InvalidOperationException("数据库未找到 ST710 下料架坐标");
@@ -1699,16 +1696,13 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine($"[GrindingEngine] [{craneName}] ⑩ Z升到安全高度 {_cfg.Grinding.SafeZHeight}（绝对坐标，不加偏移）");
             await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(-1, -1, _cfg.Grinding.SafeZHeight, ct: c), "Z升安全高度", ct);
 
-            // ── ⑩.5 通知下料架PLC(MC64): M721=1放版完成 + D200写入工件直径 ──
+            // ── ⑩.5 通知下料架PLC(MC64): Z升安全后写M721=1放版完成 ──
             if (_mc64?.IsConnected != true)
-                throw new InvalidOperationException("MC64未连接, 成品已放到ST710但无法写M721/D200");
+                throw new InvalidOperationException("MC64未连接, 成品已放到ST710但无法写M721");
 
-            // 成品已经物理放到下料架, M721/D200任一失败都不能继续释放研磨机。
+            // 成品已经物理放到下料架；M721失败时不能继续释放研磨机，避免PLC不知道已有板。
             await _mc64.WriteMBitInWordAsync(720, 1, true, ct);
             Console.WriteLine($"[GrindingEngine] [{craneName}]   MC64 M721=1 通知放版完成 ✓ {workpiece.IdentityText}");
-            int unloadDiameter = (int)Math.Round(workpiece.Diameter);
-            await _mc64.WriteAsync(MitsubishiMcClient.DeviceD, 200, unloadDiameter, ct);
-            Console.WriteLine($"[GrindingEngine] [{craneName}]   MC64 D200={unloadDiameter}mm(原{workpiece.Diameter}) 工件直径已写入 ✓ {workpiece.IdentityText}");
             unloadRackNotified = true;
 
             // ── ⑪ 下料完成（通知研磨机 PLC：工件已放下，可开始下一循环）──
@@ -1755,7 +1749,7 @@ public sealed class GrindingFlowEngine : IDisposable
             _paused = true;
             // 未吸住: 成品大概率还在研磨机内, 保持WaitingForUnload。
             // 已吸住未放: 成品在天车上, 保持Unloading并暂停。
-            // 已放ST710但未闭环: 成品在下料架, 保持Unloading并要求人工补写/确认M721、D200或SetUnloadDone。
+            // 已放ST710但未闭环: 成品在下料架, 保持Unloading并要求人工补写/确认M721或SetUnloadDone。
             grinder.State = placedOnUnloadRack && unloadDoneNotified ? GrinderState.Idle
                 : (holdingWorkpiece || magnetOn || placedOnUnloadRack ? GrinderState.Unloading : GrinderState.WaitingForUnload);
             grinder.StateChangedAt = DateTime.UtcNow;
