@@ -1815,6 +1815,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 }
             }
 
+            
             Console.WriteLine("│ [下料] ⑤ 后天车回自定义位置 X→home Z回原点 并发执行");
             int homeX = _cfg.GetCraneHomeX(CraneRearNo); // 后天车归位X(配置文件, 默认-4000)
             var xTask = cr.MoveAbsoluteAsync(homeX, -1, -1, ct: ct);

@@ -148,7 +148,8 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
 
         /// <summary>
         /// 读改写M区一个bit。FX系列按字读写M设备时，内部自动换算到16点对齐字。
-        /// 同一PLC同一M字的读/改/写/回读校验由进程级锁串行化，校验不一致时最多重试3次。
+        /// 同一PLC同一M字的读/改/写由进程级锁串行化；真实通信失败时重连并最多完整尝试3次。
+        /// 完成通知位可能被PLC快速消费并清零，因此写入取得正常协议应答后不再回读目标bit。
         /// </summary>
         public async Task WriteMBitInWordAsync(int wordStartAddr, int bitOffset, bool value, CancellationToken ct = default)
         {
@@ -164,37 +165,61 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             try
             {
                 const int maxAttempts = 3;
-                const int retryDelayMs = 20;
-                bool lastActual = false;
+                const int retryDelayMs = 500;
+                Exception? lastException = null;
+                string lastStage = "尚未开始";
 
                 for (int attempt = 1; attempt <= maxAttempts; attempt++)
                 {
-                    // 通信异常不在这里吞掉或盲目重连，继续交给现有引擎/连接缓存的失效重连流程。
-                    var words = await ReadWordsAsync(DeviceM, (ushort)alignedAddr, 1, ct, forceBitMode: false).ConfigureAwait(false);
-                    int current = words.Length > 0 ? words[0] : 0;
-                    int next = value ? (current | bitMask) : (current & ~bitMask);
-                    await WriteWordsAsync(DeviceM, (ushort)alignedAddr, new[] { (ushort)next }, ct, forceBitMode: false).ConfigureAwait(false);
-
-                    var verifyWords = await ReadWordsAsync(DeviceM, (ushort)alignedAddr, 1, ct, forceBitMode: false).ConfigureAwait(false);
-                    int verifyWord = verifyWords.Length > 0 ? verifyWords[0] : 0;
-                    lastActual = (verifyWord & bitMask) != 0;
-                    if (lastActual == value)
+                    try
                     {
+                        // 每次尝试都从连接确认和最新整字读取开始。上一次失败后绝不能复用旧字，
+                        // 否则重连期间PLC或同字其他信号的变化可能被旧快照覆盖。
+                        lastStage = "连接/重连";
+                        if (!IsConnected)
+                        {
+                            await ConnectAsync(ct).ConfigureAwait(false);
+                            Console.WriteLine($"[MC-RMW] PLC={_ip}:{_port} M字=M{alignedAddr} 目标=M{targetAddr}(bit{alignedBitOffset}) 第{attempt}次连接成功");
+                        }
+
+                        lastStage = "读取最新整字";
+                        var words = await ReadWordsAsync(DeviceM, (ushort)alignedAddr, 1, ct, forceBitMode: false).ConfigureAwait(false);
+                        int current = words.Length > 0 ? words[0] : 0;
+                        int next = value ? (current | bitMask) : (current & ~bitMask);
+
+                        lastStage = "写入并等待PLC协议应答";
+                        await WriteWordsAsync(DeviceM, (ushort)alignedAddr, new[] { (ushort)next }, ct, forceBitMode: false).ConfigureAwait(false);
+
+                        // M701/M711/M721/M731/M801/M819/M821/M824/M826均为完成通知位，
+                        // PLC可能在下一扫描周期立即消费并清零。收到正常写应答即视为本次写入成功，
+                        // 禁止回读为0后重复发送同一个完成通知。
                         if (attempt > 1)
                         {
-                            Console.WriteLine($"[MC-RMW] PLC={_ip}:{_port} M字=M{alignedAddr} 目标=M{targetAddr}(bit{alignedBitOffset}) 期望={(value ? 1 : 0)} 第{attempt}次校验成功");
+                            Console.WriteLine($"[MC-RMW] PLC={_ip}:{_port} M字=M{alignedAddr} 目标=M{targetAddr}(bit{alignedBitOffset}) 期望={(value ? 1 : 0)} 第{attempt}次写入恢复成功");
                         }
                         return;
                     }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        // 调用方取消代表动作/引擎正在退出，不能继续重连或重复写完成通知。
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastException = ex;
+                        Console.WriteLine($"[MC-RMW] ⚠ PLC={_ip}:{_port} M字=M{alignedAddr} 目标=M{targetAddr}(bit{alignedBitOffset}) 期望={(value ? 1 : 0)} 阶段={lastStage} 第{attempt}/{maxAttempts}次失败: {ex.GetType().Name} - {ex.Message}");
+                    }
 
-                    Console.WriteLine($"[MC-RMW] ⚠ PLC={_ip}:{_port} M字=M{alignedAddr} 目标=M{targetAddr}(bit{alignedBitOffset}) 期望={(value ? 1 : 0)} 实际={(lastActual ? 1 : 0)} 校验失败 {attempt}/{maxAttempts}");
                     if (attempt < maxAttempts)
+                    {
+                        // 底层读写异常会关闭失效Socket；等待后由下一次完整尝试重新连接、重新读字、再写入。
                         await Task.Delay(retryDelayMs, ct).ConfigureAwait(false);
+                    }
                 }
 
-                string message = $"MC位写回读校验失败: PLC={_ip}:{_port}, M字=M{alignedAddr}, 目标=M{targetAddr}(bit{alignedBitOffset}), 期望={(value ? 1 : 0)}, 实际={(lastActual ? 1 : 0)}, 已尝试3次";
+                string message = $"MC位写入失败: PLC={_ip}:{_port}, M字=M{alignedAddr}, 目标=M{targetAddr}(bit{alignedBitOffset}), 期望={(value ? 1 : 0)}, 最后阶段={lastStage}, 已尝试{maxAttempts}次, 最后异常={lastException?.GetType().Name}: {lastException?.Message}";
                 Console.WriteLine($"[MC-RMW] ✘ {message}");
-                throw new IOException(message);
+                throw new IOException(message, lastException);
             }
             finally
             {
