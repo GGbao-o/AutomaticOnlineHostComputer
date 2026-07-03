@@ -3,8 +3,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="清空机器状态"
-    Width="520"
-    Height="700"
+    Width="690"
+    Height="720"
     Background="{StaticResource AppBackgroundBrush}"
     ResizeMode="CanResize"
     WindowStartupLocation="CenterOwner">
@@ -32,7 +32,7 @@
                     Margin="0,6,0,0"
                     FontSize="12"
                     Foreground="#FFFBBF24"
-                    Text="将上位机写入寄存器的信号全部清零。请确认所有设备已停止运行。"
+                    Text="每次只清所选设备中由上位机写入的数据。请先停止或暂停对应引擎，并确认设备没有正在执行的动作。"
                     TextWrapping="Wrap" />
             </StackPanel>
         </Border>
@@ -77,30 +77,24 @@
                 Padding="8"
                 Header="斜床 (锦州 Modbus / FANUC FOCAS)">
                 <StackPanel>
-                    <StackPanel Margin="0,0,0,6" Orientation="Horizontal">
-                        <Button
-                            x:Name="BtnSkewModbus"
-                            Width="150"
-                            Height="28"
-                            Margin="0,0,8,0"
-                            Click="BtnSkewModbus_Click"
-                            Content="清空 ST108~111 (锦州)" />
-                        <Button
-                            x:Name="BtnSkewST112"
-                            Width="150"
-                            Height="28"
-                            Click="BtnSkewST112_Click"
-                            Content="清空 ST112 (FANUC)" />
-                    </StackPanel>
-                    <StackPanel Margin="0,0,0,6" Orientation="Horizontal">
-                        <Button
-                            x:Name="BtnSkewLine2"
-                            Width="150"
-                            Height="28"
-                            Click="BtnSkewLine2_Click"
-                            Content="清空 ST606~610 (2号线 FANUC)" />
-                    </StackPanel>
+                    <TextBlock Margin="0,0,0,4" FontWeight="SemiBold" Text="1号线斜床（点哪个只清哪个）" />
+                    <UniformGrid Margin="0,0,0,8" Columns="5">
+                        <!--  1号线物理顺序不是站号数字顺序：ST111是3号斜床，ST110是4号斜床。  -->
+                        <Button Margin="2" Height="30" Tag="ST108" Click="SkewButton_Click" Content="1号斜床 ST108" />
+                        <Button Margin="2" Height="30" Tag="ST109" Click="SkewButton_Click" Content="2号斜床 ST109" />
+                        <Button Margin="2" Height="30" Tag="ST111" Click="SkewButton_Click" Content="3号斜床 ST111" />
+                        <Button Margin="2" Height="30" Tag="ST110" Click="SkewButton_Click" Content="4号斜床 ST110" />
+                        <Button Margin="2" Height="30" Tag="ST112" Click="SkewButton_Click" Content="5号斜床 ST112" />
+                    </UniformGrid>
 
+                    <TextBlock Margin="0,0,0,4" FontWeight="SemiBold" Text="2号线斜床（点哪个只清哪个）" />
+                    <UniformGrid Columns="5">
+                        <Button Margin="2" Height="30" Tag="ST606" Click="SkewButton_Click" Content="清 ST606" />
+                        <Button Margin="2" Height="30" Tag="ST607" Click="SkewButton_Click" Content="清 ST607" />
+                        <Button Margin="2" Height="30" Tag="ST608" Click="SkewButton_Click" Content="清 ST608" />
+                        <Button Margin="2" Height="30" Tag="ST609" Click="SkewButton_Click" Content="清 ST609" />
+                        <Button Margin="2" Height="30" Tag="ST610" Click="SkewButton_Click" Content="清 ST610" />
+                    </UniformGrid>
                 </StackPanel>
             </GroupBox>
 
@@ -110,21 +104,12 @@
                 Margin="0,0,0,6"
                 Padding="8"
                 Header="研磨机 (Modbus TCP)">
-                <StackPanel Orientation="Horizontal">
-                    <Button
-                        x:Name="BtnGrinderB"
-                        Width="150"
-                        Height="28"
-                        Margin="0,0,8,0"
-                        Click="BtnGrinderB_Click"
-                        Content="清空 ST701~702 (新代)" />
-                    <Button
-                        x:Name="BtnGrinderA"
-                        Width="150"
-                        Height="28"
-                        Click="BtnGrinderA_Click"
-                        Content="清空 ST703~704 (西门子)" />
-                </StackPanel>
+                <UniformGrid Columns="4">
+                    <Button Margin="2" Height="30" Tag="ST701" Click="GrinderButton_Click" Content="清 ST701（新代）" />
+                    <Button Margin="2" Height="30" Tag="ST702" Click="GrinderButton_Click" Content="清 ST702（新代）" />
+                    <Button Margin="2" Height="30" Tag="ST703" Click="GrinderButton_Click" Content="清 ST703（西门子）" />
+                    <Button Margin="2" Height="30" Tag="ST704" Click="GrinderButton_Click" Content="清 ST704（西门子）" />
+                </UniformGrid>
             </GroupBox>
 
             <!--  日志  -->
@@ -150,16 +135,6 @@
             Margin="0,12,0,0"
             HorizontalAlignment="Right"
             Orientation="Horizontal">
-            <Button
-                x:Name="BtnClearAll"
-                Width="120"
-                Height="32"
-                Margin="0,0,12,0"
-                Background="#FF4444"
-                Click="BtnClearAll_Click"
-                Content="⚠ 一键清空全部"
-                FontWeight="Bold"
-                Foreground="White" />
             <Button
                 Width="80"
                 Height="28"

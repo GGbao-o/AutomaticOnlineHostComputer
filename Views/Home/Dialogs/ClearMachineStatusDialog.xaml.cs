@@ -3,15 +3,25 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 
 namespace AutomaticOnlineHostComputer.Views.Home.Dialogs;
 
+/// <summary>
+/// 主页面“清空状态”窗口。
+/// 此窗口只清目标设备中由上位机写入的寄存器，不清任务、缓存、锁或引擎状态。
+/// 需要处理软件在途状态或释放锁时，应使用主页面“应急处理”窗口。
+/// </summary>
 public partial class ClearMachineStatusDialog : Window
 {
     private readonly Dictionary<string, string> _stationIps;
+
+    // 即使操作员快速点击不同按钮，也只允许一个设备清理在途。
+    // 设备清理会建立连接并连续写多个寄存器，并行执行不仅难以判断日志，也可能与共享通信资源竞争。
+    private int _clearInProgress;
 
     /// <param name="stationIps">站号→IP映射, 从HomeViewModel传入</param>
     public ClearMachineStatusDialog(Dictionary<string, string> stationIps)
@@ -22,220 +32,169 @@ public partial class ClearMachineStatusDialog : Window
 
     private void Log(string msg, bool isError = false)
     {
-        var time = DateTime.Now.ToString("HH:mm:ss");
-        var line = $"[{time}] {msg}";
-        var para = new Paragraph(new Run(line));
+        string time = DateTime.Now.ToString("HH:mm:ss");
+        var para = new Paragraph(new Run($"[{time}] {msg}"));
         if (isError) para.Foreground = Brushes.Red;
         TxtLog.Document.Blocks.Add(para);
         TxtLog.ScrollToEnd();
     }
 
-    private string? Ip(string code) => _stationIps.TryGetValue(code, out var ip) ? ip : null;
+    private string? Ip(string code) => _stationIps.TryGetValue(code, out string? ip) ? ip : null;
+
+    /// <summary>
+    /// 单设备清理统一入口：确认目标、阻止并行点击、禁用当前按钮、记录完整结果。
+    /// 操作失败不会自动改为“仅清软件”，因为本窗口本来就不管理软件状态。
+    /// </summary>
+    private async Task RunSingleDeviceClearAsync(
+        Button button,
+        string code,
+        string deviceName,
+        string registerText,
+        Func<string, Task> clearAction)
+    {
+        string? ip = Ip(code);
+        if (string.IsNullOrWhiteSpace(ip))
+        {
+            Log($"✘ {deviceName} ({code}): 未配置IP", true);
+            return;
+        }
+
+        string prompt =
+            $"确认只清空这一台设备？\n\n" +
+            $"设备：{deviceName}\n" +
+            $"站号：{code}\n" +
+            $"IP：{ip}\n" +
+            $"清理：{registerText}\n\n" +
+            "只清上位机写入的设备数据，不清任务、缓存、锁或引擎状态。\n" +
+            "请确认对应引擎已经停止或暂停，且设备没有正在执行的动作。";
+
+        if (MessageBox.Show(this, prompt, $"确认清空 {code}",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        if (Interlocked.CompareExchange(ref _clearInProgress, 1, 0) != 0)
+        {
+            Log($"⚠ 已有设备正在清空，本次 {code} 操作未执行", true);
+            return;
+        }
+
+        button.IsEnabled = false;
+        try
+        {
+            Log($"▶ {deviceName} ({code}) {ip} 开始清空：{registerText}");
+            await clearAction(ip);
+            Log($"✔ {deviceName} ({code}) 清空完成：{registerText}");
+        }
+        catch (Exception ex)
+        {
+            Log($"✘ {deviceName} ({code}) 清空失败：{ex.Message}", true);
+            MessageBox.Show(this,
+                $"{deviceName}（{code}）清空失败。\n\n{ex.Message}\n\n设备数据可能只完成了部分清零，请检查日志和现场状态后再决定是否重试。",
+                $"清空 {code} 失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            button.IsEnabled = true;
+            Interlocked.Exchange(ref _clearInProgress, 0);
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════
-    //  双头镗 清空 R6102/R6104/R6108（上位机写入的握手寄存器）
-    //
-    //  ⚠ 注意事项:
-    //    1. 不清 R6101 — R6101 是 CNC→上位机 的只读请求信号, 上位机不应改写
-    //    2. 不清 R2041/R2043/R2044/R2045/R2047 — 加工参数, 下次加工前会被覆盖
-    //    3. 必须在引擎停止(暂停)状态下使用 — 引擎正在握手中会信号冲突, 导致状态机异常
-    //    4. 清空后双头镗侧握手信号归零, 下个工件从 ① 等 R6101=1 重新开始
-    //    5. 正常流程只写1不清零；这里写0仅用于人工异常清理
+    // 双头镗：保留原有两个独立按钮和原有清理范围。
+    // 不清R6101/R6103/R6107等CNC→上位机输入，也不改变双头镗状态机。
     // ═══════════════════════════════════════════════════════════════
 
     private async void BtnBoring1_Click(object sender, RoutedEventArgs e)
-        => await ClearBoringAsync("ST103", "1号线双头镗");
+        => await RunSingleDeviceClearAsync(BtnBoring1, "ST103", "1号线双头镗",
+            "R6102/R6104/R6108→0", ip => ClearBoringDeviceAsync("1号线双头镗", ip));
 
     private async void BtnBoring2_Click(object sender, RoutedEventArgs e)
-        => await ClearBoringAsync("ST402", "2号线双头镗");
+        => await RunSingleDeviceClearAsync(BtnBoring2, "ST402", "2号线双头镗",
+            "R6102/R6104/R6108→0", ip => ClearBoringDeviceAsync("2号线双头镗", ip));
 
-    private async Task ClearBoringAsync(string code, string name)
+    private static async Task ClearBoringDeviceAsync(string name, string ip)
     {
-        try
-        {
-            var ip = Ip(code);
-            if (string.IsNullOrWhiteSpace(ip)) { Log($"✘ {name} ({code}): 未配置IP", true); return; }
+        using var svc = new BoringModbusService(name, ip);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await svc.ConnectAsync(cts.Token);
 
-            Log($"▶ {name} ({code}) {ip} 开始清空 R6102/R6104/R6108 ...");
-            using var svc = new BoringModbusService(name, ip);
-            using var cts = new CancellationTokenSource(5000);
-            await svc.ConnectAsync(cts.Token);
-
-            // 人工清理: 只清上位机写入的三个完成位。
-            await svc.WriteRAsync(6108, 0, cts.Token);
-            await svc.WriteRAsync(6104, 0, cts.Token);
-            await svc.WriteRAsync(6102, 0, cts.Token);
-
-            Log($"✔ {name} ({code}) R6102/R6104/R6108 → 0");
-        }
-        catch (Exception ex) { Log($"✘ {name} ({code}): {ex.Message}", true); }
+        // 保持现场既定清理顺序：下料完成→上料完成→数据完成。
+        await svc.WriteRAsync(6108, 0, cts.Token);
+        await svc.WriteRAsync(6104, 0, cts.Token);
+        await svc.WriteRAsync(6102, 0, cts.Token);
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  锦州斜床 ST108~ST111 清空 10370~10374（上位机写入的全部寄存器）
-    //
-    //  ⚠ 注意事项:
-    //    1. 10370(加工方式) → 0
-    //    2. 10371(尾座夹紧) → 0,  10372(远程启动) → 0
-    //    3. 10373(尾座张开) → 0,  10374(停止尾座) → 1(脉冲, PLC自动复位)
-    //    4. 清空后斜床回到初始状态, 引擎会检测 Idle 并在下轮重新触发上料
-    //    5. 必须在引擎停止时使用
+    // 斜床：按钮Tag就是唯一目标站号。ST108~111为锦州Modbus，其余为FANUC。
+    // 每次只创建目标设备服务，并调用服务层统一维护的应急寄存器清零。
     // ═══════════════════════════════════════════════════════════════
 
-    private async void BtnSkewModbus_Click(object sender, RoutedEventArgs e)
-        => await ClearModbusSkewAsync();
-
-    private async Task ClearModbusSkewAsync()
+    private async void SkewButton_Click(object sender, RoutedEventArgs e)
     {
-        var codes = new[] { "ST108", "ST109", "ST111", "ST110" };
-        foreach (var code in codes)
-        {
-            var ip = Ip(code);
-            if (string.IsNullOrWhiteSpace(ip)) { Log($"  {code}: 无IP,跳过"); continue; }
+        if (sender is not Button button || button.Tag is not string code) return;
 
-            try
-            {
-                Log($"▶ {code} {ip} ...");
-                using var svc = new ModbusSkewBedService(ip);
-                using var cts = new CancellationTokenSource(5000);
-                await svc.ConnectAsync(cts.Token);
+        bool isModbus = code is "ST108" or "ST109" or "ST110" or "ST111";
+        string deviceName = isModbus ? "锦州斜床" : "FANUC斜床";
+        string registers = isModbus
+            ? "10300~10305参数、10370~10374命令→0"
+            : "#800/#801/#802/#909/#1101~#1105→0";
 
-                await svc.ClearMachiningModeAsync(cts.Token);      // 10370=0
-                await svc.ClearTailstockClampAsync(cts.Token);     // 10371=0
-                await svc.ClearRemoteStartAsync(cts.Token);        // 10372=0
-                await svc.ClearTailstockOpenAsync(cts.Token);      // 10373=0
-                await svc.StopTailstockAsync(cts.Token);           // 10374=1→PLC自动复位, 这里写1触发停止(不写0)
+        await RunSingleDeviceClearAsync(button, code, deviceName, registers,
+            ip => isModbus
+                ? ClearModbusSkewDeviceAsync(ip)
+                : ClearFanucSkewDeviceAsync(ip));
+    }
 
-                Log($"  ✔ {code} 10370~10374 已清空");
-            }
-            catch (Exception ex) { Log($"  ✘ {code}: {ex.Message}", true); }
-        }
-        Log("✔ 锦州斜床处理完成");
+    private static async Task ClearModbusSkewDeviceAsync(string ip)
+    {
+        using var svc = new ModbusSkewBedService(ip);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await svc.ConnectAsync(cts.Token);
+
+        // 服务层只写上位机拥有的参数/命令寄存器，所有值均清0；
+        // 不再沿用旧页面“10374写1触发停止”的做法。
+        await svc.ClearEmergencyRegistersAsync(cts.Token);
+    }
+
+    private static async Task ClearFanucSkewDeviceAsync(string ip)
+    {
+        using var svc = new FanucSkewBedService(ip);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await svc.ConnectAsync(cts.Token);
+
+        // 包含加工参数和全部握手输出，不清#1000~#1014机床输入状态。
+        await svc.ClearEmergencyRegistersAsync(cts.Token);
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  ST112 + 2号线 FANUC 斜床 清空 #1101~#1105（上位机写入的全部宏变量）
-    //
-    //  ⚠ 注意事项:
-    //    1. FANUC宏变量编号: #1101(上料到位) #1102(上料完成) #1103(下料到位) #1104(下料完成) #1105(预留)
-    //    2. 使用 SafeSetMacro 而非直接写, 内部有 -8 自动重连和 sem 锁保护
-    //    3. Clear-Before-Set 顺序: 从后往前 (#1105→#1101)
-    //    4. 不清 #1001~#1005(CNC→上位机只读信号)
+    // 研磨机：ST701/702为新代TypeB，ST703/704为西门子TypeA。
+    // ClearEmergencyRegistersAsync同时清握手输出和加工参数，不再只清输出位。
     // ═══════════════════════════════════════════════════════════════
 
-    private async void BtnSkewST112_Click(object sender, RoutedEventArgs e)
-        => await ClearFanucSkewAsync(new[] { "ST112" }, "ST112 FANUC");
-
-    // ═══════════════════════════════════════════════════════════════
-    //  2号线 FANUC ST606~ST610
-    // ═══════════════════════════════════════════════════════════════
-
-    private async void BtnSkewLine2_Click(object sender, RoutedEventArgs e)
-        => await ClearFanucSkewAsync(new[] { "ST606", "ST607", "ST608", "ST609", "ST610" },
-            "2号线FANUC斜床");
-
-    private async Task ClearFanucSkewAsync(string[] codes, string name)
+    private async void GrinderButton_Click(object sender, RoutedEventArgs e)
     {
-        foreach (var code in codes)
-        {
-            var ip = Ip(code);
-            if (string.IsNullOrWhiteSpace(ip)) { Log($"  {code}: 无IP,跳过"); continue; }
+        if (sender is not Button button || button.Tag is not string code) return;
 
-            try
-            {
-                Log($"▶ {code} {ip} ...");
-                using var svc = new FanucSkewBedService(ip);
-                using var cts = new CancellationTokenSource(5000);
-                await svc.ConnectAsync(cts.Token);
+        bool isTypeB = code is "ST701" or "ST702";
+        PlcGrinderService.GrinderType type = isTypeB
+            ? PlcGrinderService.GrinderType.TypeB
+            : PlcGrinderService.GrinderType.TypeA;
+        string deviceName = isTypeB ? "新代研磨机" : "西门子研磨机";
+        string registers = isTypeB ? "R7311~R7318→0" : "40011~40014→0";
 
-                // 级联清零: 从后往前
-                svc.SafeSetMacro(1105, 0);
-                svc.SafeSetMacro(1104, 0);
-                svc.SafeSetMacro(1103, 0);
-                svc.SafeSetMacro(1102, 0);
-                svc.SafeSetMacro(1101, 0);
-
-                Log($"  ✔ {code} #1101~#1105 → 0");
-            }
-            catch (Exception ex) { Log($"  ✘ {code}: {ex.Message}", true); }
-        }
-        Log($"✔ {name}处理完成");
+        await RunSingleDeviceClearAsync(button, code, deviceName, registers,
+            ip => ClearGrinderDeviceAsync(code, ip, type));
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  研磨机 清空所有输出信号
-    //
-    //  ⚠ 注意事项:
-    //    1. TypeB(新代) ST701/ST702 和 TypeA(西门子) ST703/ST704 使用不同的PLC协议
-    //    2. ClearAllOutputsAsync 内部根据类型发送不同的清空指令
-    //    3. 4台研磨机互不干扰, 可独立清空
-    // ═══════════════════════════════════════════════════════════════
-
-    private async void BtnGrinderB_Click(object sender, RoutedEventArgs e)
-        => await ClearGrinderAsync(new[] { "ST701", "ST702" }, PlcGrinderService.GrinderType.TypeB, "新代研磨机");
-
-    // ═══════════════════════════════════════════════════════════════
-    //  研磨机 TypeA 西门子
-    // ═══════════════════════════════════════════════════════════════
-
-    private async void BtnGrinderA_Click(object sender, RoutedEventArgs e)
-        => await ClearGrinderAsync(new[] { "ST703", "ST704" }, PlcGrinderService.GrinderType.TypeA, "西门子研磨机");
-
-    private async Task ClearGrinderAsync(string[] codes, PlcGrinderService.GrinderType type, string name)
+    private static async Task ClearGrinderDeviceAsync(
+        string code,
+        string ip,
+        PlcGrinderService.GrinderType type)
     {
-        foreach (var code in codes)
-        {
-            var ip = Ip(code);
-            if (string.IsNullOrWhiteSpace(ip)) { Log($"  {code}: 无IP,跳过"); continue; }
-
-            try
-            {
-                Log($"▶ {code} {ip} ({name}) ...");
-                using var svc = new PlcGrinderService(code, ip, type);
-                using var cts = new CancellationTokenSource(5000);
-                await svc.ConnectAsync(cts.Token);
-                await svc.ClearAllOutputsAsync(cts.Token);
-                Log($"  ✔ {code} 输出信号已清空");
-            }
-            catch (Exception ex) { Log($"  ✘ {code}: {ex.Message}", true); }
-        }
-        Log($"✔ {name}处理完成");
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  一键全清 — 依次清空全部设备, 每步独立 try-catch 互不影响
-    //
-    //  ⚠ 使用前必须:
-    //    1. 确认所有引擎已停止(暂停)
-    //    2. 确认所有设备已停止运行(无加工中工件)
-    //    3. 确认无天车/机械手正在移动
-    //
-    //  ⚠ 清空顺序:
-    //    双头镗 → 锦州斜床 → FANUC斜床 → 研磨机
-    //    先清 CNC 侧(握手信号), 再清 PLC 侧(动作信号)
-    //
-    //  ⚠ 清空后所有上位机→设备信号归零, 引擎需重新启动才能恢复自动化
-    // ═══════════════════════════════════════════════════════════════
-
-    private async void BtnClearAll_Click(object sender, RoutedEventArgs e)
-    {
-        var result = MessageBox.Show("确认清空全部机器状态？\n\n这将清零所有上位机写入的信号。\n\n⚠ 请确认:\n① 所有引擎已停止\n② 所有设备已停止运行\n③ 无天车/机械手正在移动",
-            "确认一键全清", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-        if (result != MessageBoxResult.Yes) return;
-
-        BtnClearAll.IsEnabled = false;
-        Log("══════ 开始一键全清 ══════");
-
-        await ClearBoringAsync("ST103", "1号线双头镗");
-        await ClearBoringAsync("ST402", "2号线双头镗");
-        await ClearModbusSkewAsync();
-        await ClearFanucSkewAsync(new[] { "ST112" }, "ST112 FANUC");
-        await ClearFanucSkewAsync(new[] { "ST606", "ST607", "ST608", "ST609", "ST610" }, "2号线FANUC");
-        await ClearGrinderAsync(new[] { "ST701", "ST702" }, PlcGrinderService.GrinderType.TypeB, "新代研磨机");
-        await ClearGrinderAsync(new[] { "ST703", "ST704" }, PlcGrinderService.GrinderType.TypeA, "西门子研磨机");
-
-        Log("══════ 一键全清完成 ══════");
-        BtnClearAll.IsEnabled = true;
+        using var svc = new PlcGrinderService(code, ip, type);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await svc.ConnectAsync(cts.Token);
+        await svc.ClearEmergencyRegistersAsync(cts.Token);
     }
 
     private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();
