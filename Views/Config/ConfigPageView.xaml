@@ -356,8 +356,12 @@
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="机械手安全 Y (mm)" />
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                        <TextBlock Text="M1" Width="36" Style="{StaticResource ParamLabelStyle}" />
-                                        <TextBox Text="{Binding Manipulator1SafeY, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
+                                        <TextBlock Text="1线M1" Width="52" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding Manipulator1Line1SafeY, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="2线M1" Width="52" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding Manipulator1Line2SafeY, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                         <TextBlock Text="M2" Width="36" Style="{StaticResource ParamLabelStyle}" />

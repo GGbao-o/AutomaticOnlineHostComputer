@@ -787,7 +787,10 @@ public sealed class HomeViewModel : ObservableObject
             manipulatorCard.ConnectedBrush = connected ? Brushes.LimeGreen : Brushes.Gray;
             manipulatorCard.Status1 = connected ? (safe ? "安全位" : $"Y={y}") : "断开";
             manipulatorCard.Status1Brush = connected ? (safe ? Brushes.Green : Brushes.Orange) : Brushes.Gray;
-            manipulatorCard.Status2 = connected ? $"安全Y={_cfg.SkewBed.Manipulator1SafeY}" : "—";
+            // 机械手1是两线共用设备：任一现场确认安全点都表示已离开两条前天车危险区。
+            manipulatorCard.Status2 = connected
+                ? $"安全Y:1线={_cfg.SkewBed.Manipulator1Line1SafeY} 2线={_cfg.SkewBed.Manipulator1Line2SafeY}"
+                : "—";
         }
     }
 

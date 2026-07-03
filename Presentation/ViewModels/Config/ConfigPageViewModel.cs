@@ -87,7 +87,10 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     public int Crane4HomeX { get => GetHomeX(4); set => SetHomeX(4, value); }
     public int Crane5HomeX { get => GetHomeX(5); set => SetHomeX(5, value); }
 
-    public int Manipulator1SafeY { get => _cfg.SkewBed.Manipulator1SafeY; set { _cfg.SkewBed.Manipulator1SafeY = value; OnPropertyChanged(); } }
+    // 机械手1是两线共用设备，但给ST711/ST712放板后分别回到就近安全点。
+    // 分开配置可缩短回位时间；保存后引擎使用同一MotionConfig实例，下一次任务即时生效。
+    public int Manipulator1Line1SafeY { get => _cfg.SkewBed.Manipulator1Line1SafeY; set { _cfg.SkewBed.Manipulator1Line1SafeY = value; OnPropertyChanged(); } }
+    public int Manipulator1Line2SafeY { get => _cfg.SkewBed.Manipulator1Line2SafeY; set { _cfg.SkewBed.Manipulator1Line2SafeY = value; OnPropertyChanged(); } }
     public int Manipulator2SafeY { get => _cfg.SkewBed.Manipulator2SafeY; set { _cfg.SkewBed.Manipulator2SafeY = value; OnPropertyChanged(); } }
     public int Manipulator3SafeY { get => _cfg.SkewBed.Manipulator3SafeY; set { _cfg.SkewBed.Manipulator3SafeY = value; OnPropertyChanged(); } }
 

@@ -260,8 +260,34 @@ public sealed class MotionConfig
         public int LargeBoreOffset { get; set; } = 122;
         /// <summary>小孔(堵孔70) Y轴移动距离，默认 65mm</summary>
         public int SmallBoreOffset { get; set; } = 55;
-        /// <summary>机械手1 安全位 Y 坐标(mm)，机械手无X轴, 每次取完料Y回1000</summary>
-        public int Manipulator1SafeY { get; set; } = 1000;
+        /// <summary>
+        /// 机械手1旧版单安全位配置。仅为兼容旧motion_settings.json保留；
+        /// 1/2号线正常流程改用下面两个分线路安全位，避免共用一个远端坐标造成无效长距离返回。
+        /// </summary>
+        public int Manipulator1SafeY { get; set; } = 11500;
+        /// <summary>机械手1给1号线货叉ST711放板后的就近安全Y。</summary>
+        public int Manipulator1Line1SafeY { get; set; } = 1000;
+        /// <summary>机械手1给2号线货叉ST712放板后的就近安全Y。</summary>
+        public int Manipulator1Line2SafeY { get; set; } = 11500;
+        /// <summary>机械手1安全位判断容差(mm)。保持原生产逻辑的±10mm。</summary>
+        public const int Manipulator1SafeYTolerance = 10;
+
+        /// <summary>取得机械手1给指定线路放板后必须到达的安全Y。</summary>
+        public int GetManipulator1SafeYForLine(int lineNo) => lineNo switch
+        {
+            1 => Manipulator1Line1SafeY,
+            2 => Manipulator1Line2SafeY,
+            _ => throw new ArgumentOutOfRangeException(nameof(lineNo), lineNo, "机械手1只服务1号线和2号线")
+        };
+
+        /// <summary>
+        /// 前天车/主页面使用的全局安全判断。
+        /// 现场已确认Y=1000和Y=11500对两条前天车都安全，因此到达任意一个配置点都可视为离开危险区。
+        /// 本线货叉启动不能使用本方法，必须用GetManipulator1SafeYForLine校验本线路目标。
+        /// </summary>
+        public bool IsManipulator1AtAnySafeY(int currentY)
+            => Math.Abs(currentY - Manipulator1Line1SafeY) <= Manipulator1SafeYTolerance
+               || Math.Abs(currentY - Manipulator1Line2SafeY) <= Manipulator1SafeYTolerance;
         /// <summary>机械手2 安全位 Y 坐标(mm)</summary>
         public int Manipulator2SafeY { get; set; } = 1000;
         /// <summary>机械手3 安全位 Y 坐标(mm)</summary>
@@ -369,6 +395,7 @@ public sealed class MotionConfig
             Console.WriteLine($"[MotionConfig] 配置加载成功：{path}");
             Console.WriteLine($"[MotionConfig]   AbsSpeed X={config!.AbsMove.X.Speed} Y={config.AbsMove.Y.Speed} Z={config.AbsMove.Z.Speed}");
             Console.WriteLine($"[MotionConfig]   ZAxis Fast={config.ZAxis.FastSpeed} Slow={config.ZAxis.SlowSpeed}");
+            Console.WriteLine($"[MotionConfig]   机械手1安全Y: 1号线={config.SkewBed.Manipulator1Line1SafeY}, 2号线={config.SkewBed.Manipulator1Line2SafeY}, 容差=±{SkewBedSection.Manipulator1SafeYTolerance}");
             return config;
         }
         catch (Exception ex)

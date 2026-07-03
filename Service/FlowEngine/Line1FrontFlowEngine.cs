@@ -231,7 +231,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
         _paused = false;
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("  [Line1Front] 1号线前端流程引擎启动");
-        Console.WriteLine($"  机械手1安全Y={_cfg.SkewBed.Manipulator1SafeY}mm  安全高度={_cfg.Grinding.SafeZHeight}mm");
+        Console.WriteLine($"  机械手1安全Y: 本线={_cfg.SkewBed.GetManipulator1SafeYForLine(1)}mm, 另一安全点={_cfg.SkewBed.GetManipulator1SafeYForLine(2)}mm  安全高度={_cfg.Grinding.SafeZHeight}mm");
         Console.WriteLine($"  zFactor1={_cfg.Grinding.ZFactor1} zFactor2={_cfg.Grinding.ZFactor2}");
         Console.WriteLine("══════════════════════════════════════════");
         _markerMonitor.Start(_engineCts.Token);
@@ -746,7 +746,10 @@ public sealed class Line1FrontFlowEngine : IDisposable
                                 {
                                     var ms = await _manipulator1.ReadStatusAsync(ct);
                                     //判断机械手是否到了安全距离
-                                    manipSafe = ms != null && Math.Abs(ms.YPos - _cfg.SkewBed.Manipulator1SafeY) <= 10;
+                                    // 货叉1产生物理动作前必须到达1号线自己的安全点；
+                                    // 不能使用“任一安全点”，否则机械手停在2号线一侧时可能误启动ST711。
+                                    int lineSafeY = _cfg.SkewBed.GetManipulator1SafeYForLine(1);
+                                    manipSafe = ms != null && Math.Abs(ms.YPos - lineSafeY) <= MotionConfig.SkewBedSection.Manipulator1SafeYTolerance;
                                 }
                                 catch { /* 读失败→保守不触发 */ }
                             }
@@ -1135,7 +1138,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     {
                         var s = await _manipulator1.ReadStatusAsync(ct);
                         ds.Manipulator1Y = s?.YPos ?? 0;
-                        ds.Manipulator1Safe = s != null && Math.Abs(s.YPos - _cfg.SkewBed.Manipulator1SafeY) <= 10;
+                        // 页面显示的是全局“已离开两条前天车危险区”；现场确认两个配置点都安全。
+                        ds.Manipulator1Safe = s != null && _cfg.SkewBed.IsManipulator1AtAnySafeY(s.YPos);
                     }
                     catch
                     {
@@ -1336,7 +1340,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
             // ④ Y先回安全位(机械手臂离开叉区), 再通知PLC取料完成 M801=1→0
             //    先移动后发信号: 防止PLC收到M801后立即复位送料机构时机械手Y轴还在叉区
             Console.WriteLine("[Line1Front] 货叉绝对移动");
-            int safeY = _cfg.SkewBed.Manipulator1SafeY;
+            // ST711位于1号线一侧，放板后回1号线就近安全点，避免绕行到2号线远端。
+            int safeY = _cfg.SkewBed.GetManipulator1SafeYForLine(1);
             await _manipulator1!.MoveAbsoluteAsync(-1, safeY, -1, ct: ct);
             Console.WriteLine($"[Line1Front] [机械手1]   Y={safeY} Z=0 ✓");
             if (_rackSvc != null)
@@ -1418,7 +1423,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
             Console.WriteLine($"[Line1Front] [前天车] ═══ 天车流程开始 {wp.IdentityText} d={wp.Diameter} L={wp.Length} ═══");
 
             // ① 等机械手1回安全位
-            Console.WriteLine($"[Line1Front] [前天车] ① 等机械手1安全位 Y={_cfg.SkewBed.Manipulator1SafeY}mm...");
+            Console.WriteLine($"[Line1Front] [前天车] ① 等机械手1进入任一安全位 Y={_cfg.SkewBed.Manipulator1Line1SafeY}/{_cfg.SkewBed.Manipulator1Line2SafeY}mm...");
             await WaitForManipulatorSafeAsync(ct);
             Console.WriteLine("[Line1Front] [前天车] ① 机械手1已在安全位 ✓");
 
@@ -1925,16 +1930,16 @@ public sealed class Line1FrontFlowEngine : IDisposable
         Console.WriteLine($"[Line1Front] 设备初始化完成: 机械手1✓ 货叉✓ 上料架✓ 双头镗✓ 天车偏移({_craneOffsetX},{_craneOffsetY},{_craneOffsetZ})");
     }
 
-    /// <summary>等待机械手1回到安全Y位 — 轮询 ReadStatusAsync, 容差±10mm, 默认60s超时。
-    /// 天车进入叉区前的安全检查，防止碰撞。</summary>
+    /// <summary>等待机械手1回到任一已确认安全Y位 — 轮询 ReadStatusAsync, 容差±10mm, 默认60s超时。
+    /// 1000和11500均已由现场确认对两条前天车安全；接受任一位置可避免另一条线刚完成任务后永久等待。</summary>
     private async Task WaitForManipulatorSafeAsync(CancellationToken ct)
     {
-        int safeY = _cfg.SkewBed.Manipulator1SafeY;
         var dl = DateTime.UtcNow.AddMilliseconds(_cfg.Grinding.HandshakeTimeoutMs);
         var nextReconnectAt = DateTime.MinValue;
         var reconnectInterval = TimeSpan.FromSeconds(3);
         bool forceReconnect = false;
-        Console.WriteLine($"[Line1Front] 机械手1 安全检查: 目标Y={safeY} 超时={_cfg.Grinding.HandshakeTimeoutMs / 1000}s");
+        Console.WriteLine($"[Line1Front] 机械手1 安全检查: 任一目标Y={_cfg.SkewBed.Manipulator1Line1SafeY}/{_cfg.SkewBed.Manipulator1Line2SafeY} " +
+                          $"容差=±{MotionConfig.SkewBedSection.Manipulator1SafeYTolerance} 超时={_cfg.Grinding.HandshakeTimeoutMs / 1000}s");
         while (DateTime.UtcNow < dl)
         {
             ct.ThrowIfCancellationRequested();
@@ -1967,9 +1972,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     continue;
                 }
 
-                // ── Y坐标在安全值±10mm以内 → 视为已到位 ──
-                if (Math.Abs(s.YPos - safeY) <= 10) { Console.WriteLine($"[Line1Front] 机械手1 Y={s.YPos} 在安全位 ✓"); return; }
-                Console.WriteLine($"[Line1Front] 机械手1 Y={s.YPos} 安全Y={safeY} 等待中...");
+                // 前天车只关心机械手是否已离开危险区域，因此两个现场确认安全点均可通过。
+                if (_cfg.SkewBed.IsManipulator1AtAnySafeY(s.YPos)) { Console.WriteLine($"[Line1Front] 机械手1 Y={s.YPos} 在安全位 ✓"); return; }
+                Console.WriteLine($"[Line1Front] 机械手1 Y={s.YPos} 安全Y={_cfg.SkewBed.Manipulator1Line1SafeY}/{_cfg.SkewBed.Manipulator1Line2SafeY} 等待中...");
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { Console.WriteLine($"[Line1Front] 读机械手1异常：{ex.Message}"); }

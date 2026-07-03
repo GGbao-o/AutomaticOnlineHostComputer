@@ -1,187 +1,24 @@
+
 {
   "absMove": {
     "tolerance": 5,
     "timeoutMs": 240000,
     "pollIntervalMs": 500,
-    "x": {
-      "speed": 200,
-      "accel": 80,
-      "decel": 80
-    },
-    "y": {
-      "speed": 300,
-      "accel": 60,
-      "decel": 60
-    },
-    "z": {
-      "speed": 70,
-      "accel": 40,
-      "decel": 40
-    }
+    "x": { "speed": 200, "accel": 80, "decel": 80 },
+    "y": { "speed": 300, "accel": 60, "decel": 60 },
+    "z": { "speed": 70, "accel": 40,  "decel": 40 }
   },
   "craneSpeeds": {
-    "1": {
-      "tolerance": 5,
-      "timeoutMs": 240000,
-      "pollIntervalMs": 500,
-      "x": {
-        "speed": 350,
-        "accel": 100,
-        "decel": 80
-      },
-      "y": {
-        "speed": 70,
-        "accel": 40,
-        "decel": 40
-      },
-      "z": {
-        "speed": 150,
-        "accel": 80,
-        "decel": 40
-      }
-    },
-    "2": {
-      "tolerance": 5,
-      "timeoutMs": 240000,
-      "pollIntervalMs": 500,
-      "x": {
-        "speed": 350,
-        "accel": 100,
-        "decel": 80
-      },
-      "y": {
-        "speed": 70,
-        "accel": 40,
-        "decel": 40
-      },
-      "z": {
-        "speed": 150,
-        "accel": 80,
-        "decel": 40
-      }
-    },
-    "3": {
-      "tolerance": 5,
-      "timeoutMs": 240000,
-      "pollIntervalMs": 500,
-      "x": {
-        "speed": 350,
-        "accel": 100,
-        "decel": 80
-      },
-      "y": {
-        "speed": 70,
-        "accel": 40,
-        "decel": 40
-      },
-      "z": {
-        "speed": 150,
-        "accel": 80,
-        "decel": 40
-      }
-    },
-    "4": {
-      "tolerance": 5,
-      "timeoutMs": 240000,
-      "pollIntervalMs": 500,
-      "x": {
-        "speed": 350,
-        "accel": 100,
-        "decel": 80
-      },
-      "y": {
-        "speed": 70,
-        "accel": 40,
-        "decel": 40
-      },
-      "z": {
-        "speed": 150,
-        "accel": 80,
-        "decel": 40
-      }
-    },
-    "5": {
-      "tolerance": 5,
-      "timeoutMs": 240000,
-      "pollIntervalMs": 500,
-      "x": {
-        "speed": 350,
-        "accel": 100,
-        "decel": 80
-      },
-      "y": {
-        "speed": 70,
-        "accel": 40,
-        "decel": 40
-      },
-      "z": {
-        "speed": 150,
-        "accel": 80,
-        "decel": 40
-      }
-    }
+    "1": { "x": { "speed": 350, "accel": 100, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 150, "accel": 80, "decel": 40 } },
+    "2": { "x": { "speed": 350, "accel": 100, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 150, "accel": 80, "decel": 40 } },
+    "3": { "x": { "speed": 350, "accel": 100, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 150, "accel": 80, "decel": 40 } },
+    "4": { "x": { "speed": 350, "accel": 100, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 150, "accel": 80, "decel": 40 } },
+    "5": { "x": { "speed": 350, "accel": 100, "decel": 80 }, "y": { "speed": 70, "accel": 40, "decel": 40 }, "z": { "speed": 150, "accel": 80, "decel": 40 } }
   },
   "manipulatorSpeeds": {
-    "1": {
-      "tolerance": 5,
-      "timeoutMs": 240000,
-      "pollIntervalMs": 500,
-      "x": {
-        "speed": 100,
-        "accel": 80,
-        "decel": 80
-      },
-      "y": {
-        "speed": 600,
-        "accel": 300,
-        "decel": 100
-      },
-      "z": {
-        "speed": 80,
-        "accel": 40,
-        "decel": 40
-      }
-    },
-    "2": {
-      "tolerance": 5,
-      "timeoutMs": 240000,
-      "pollIntervalMs": 500,
-      "x": {
-        "speed": 100,
-        "accel": 80,
-        "decel": 80
-      },
-      "y": {
-        "speed": 600,
-        "accel": 300,
-        "decel": 100
-      },
-      "z": {
-        "speed": 80,
-        "accel": 40,
-        "decel": 40
-      }
-    },
-    "3": {
-      "tolerance": 5,
-      "timeoutMs": 240000,
-      "pollIntervalMs": 500,
-      "x": {
-        "speed": 100,
-        "accel": 80,
-        "decel": 80
-      },
-      "y": {
-        "speed": 600,
-        "accel": 300,
-        "decel": 100
-      },
-      "z": {
-        "speed": 80,
-        "accel": 40,
-        "decel": 40
-      }
-    }
+    "1": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 600, "accel": 300, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
+    "2": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 600, "accel": 300, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } },
+    "3": { "x": { "speed": 100, "accel": 80, "decel": 80 }, "y": { "speed": 600, "accel": 300, "decel": 100 }, "z": { "speed": 80, "accel": 40, "decel": 40 } }
   },
   "relMove": {
     "defaultSpeed": 300,
@@ -238,23 +75,24 @@
     "maxAdjustMm": 1000,
     "stationTargets": {
       "1": {
-        "ST713": -2764,
+        "ST713": -1,
         "ST107": 419,
         "ST105": 1347,
         "ST101": 1919,
         "ST106": 2444
       },
       "2": {
-        "ST105": -29506,
-        "ST101": -28937,
-        "ST106": -28412,
-        "ST108": -26432,
-        "ST109": -23703,
-        "ST111": -20947,
-        "ST110": -18229,
-        "ST112": -15142,
-        "ST019": -12752,
-        "ST010": -12150
+        "ST105": -29487,
+        "ST101": -28918,
+        "ST106": -28393,
+        
+        "ST108": -26413,
+        "ST109": -23684,
+        "ST111": -20955,
+        "ST110": -18210,
+        "ST112": -15123,
+        "ST019": -1,
+        "ST010": -1
       },
       "3": {
         "ST714": -1,
@@ -276,7 +114,7 @@
         "ST021": -1
       },
       "5": {
-        "ST709": -10603,
+        "ST709": -10201,
         "ST701": -8924,
         "ST702": -5680,
         "ST703": -1,
@@ -299,30 +137,12 @@
   "balancing": {
     "rearCraneSafeX": -3000,
     "armCoords": {
-      "M817": {
-        "y": 15670,
-        "z": 494
-      },
-      "M818": {
-        "y": 4655,
-        "z": 459
-      },
-      "M710": {
-        "y": 970,
-        "z": 667
-      },
-      "M700": {
-        "y": 3,
-        "z": 696
-      },
-      "M821": {
-        "y": 5608,
-        "z": 479
-      },
-      "M720": {
-        "y": 16795,
-        "z": 452
-      }
+      "M817": { "y": 15670, "z": 494 },
+      "M818": { "y": 4655, "z": 459 },
+      "M710": { "y": 970, "z": 667 },
+      "M700": { "y": 3, "z": 696 },
+      "M821": { "y": 5608, "z": 479},
+      "M720": { "y": 16795, "z": 452 }
     }
   },
   "craneHomeX": {
@@ -332,48 +152,20 @@
     "4": -5000,
     "5": 2000
   },
-  "diameterOffsets": {
-    "boring1": 1.5,
-    "boring2": 1.5,
-    "ST108": 0,
-    "ST109": 0,
-    "ST110": 0,
-    "ST111": 0,
-    "ST112": 0,
-    "ST606": 0,
-    "ST607": 0,
-    "ST608": 0,
-    "ST609": 0,
-    "ST610": 0
-  },
   "skewBed": {
     "centerDistances": {
-      "ST606": 1350,
-      "ST607": 1450,
-      "ST608": 1450,
-      "ST609": 1450,
-      "ST610": 1325,
-      "ST108": 1424,
-      "ST109": 1387,
-      "ST111": 1387,
-      "ST110": 1387,
-      "ST112": 1240
+      "ST606": 1350, "ST607": 1450, "ST608": 1450, "ST609": 1450, "ST610": 1325,
+      "ST108": 1424, "ST109": 1387, "ST111": 1387, "ST110": 1387, "ST112": 1240
     },
-    "maxWorkpieceLengthMm": {
-      "ST606": 1280,
-      "ST607": 1280,
-      "ST608": 1280,
-      "ST609": 1280,
-      "ST610": 1255,
-      "ST108": 1350,
-      "ST109": 1300,
-      "ST111": 1300,
-      "ST110": 1300,
-      "ST112": 1170
+    "maxWorkpieceLengthMm":{
+      "ST606": 1280, "ST607": 1280, "ST608": 1280, "ST609": 1280, "ST610": 1255,
+      "ST108": 1350, "ST109": 1300, "ST111": 1300, "ST110": 1300, "ST112": 1170
     },
     "largeBoreOffset": 122,
     "smallBoreOffset": 55,
     "manipulator1SafeY": 11500,
+    "manipulator1Line1SafeY": 1000,
+    "manipulator1Line2SafeY": 11500,
     "manipulator2SafeY": 1000,
     "manipulator3SafeY": 1500,
     "largeDiameterLine1OnlyMm": 280,
@@ -393,5 +185,19 @@
       "ST609": false,
       "ST610": false
     }
+  },
+  "diameterOffsets": {
+    "boring1": 1.5,
+    "boring2": 1.5,
+    "ST108": 0.0,
+    "ST109": 0.0,
+    "ST110": 0.0,
+    "ST111": 0.0,
+    "ST112": 0.0,
+    "ST606": 0.0,
+    "ST607": 0.0,
+    "ST608": 0.0,
+    "ST609": 0.0,
+    "ST610": 0.0
   }
 }

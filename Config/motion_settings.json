@@ -164,6 +164,8 @@
     "largeBoreOffset": 122,
     "smallBoreOffset": 55,
     "manipulator1SafeY": 11500,
+    "manipulator1Line1SafeY": 1000,
+    "manipulator1Line2SafeY": 11500,
     "manipulator2SafeY": 1000,
     "manipulator3SafeY": 1500,
     "largeDiameterLine1OnlyMm": 280,
