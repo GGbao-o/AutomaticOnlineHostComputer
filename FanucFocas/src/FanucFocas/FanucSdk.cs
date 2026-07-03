@@ -14,14 +14,18 @@ namespace FanucFocas
 
         #region 连接 / 断开
 
-        /// <summary>连接 CNC</summary>
-        public bool Connect(string ip, ushort port = 8193, int timeoutMs = 500)
+        /// <summary>
+        /// 连接 CNC。
+        /// 注意：FOCAS cnc_allclibhndl3 的 timeout 参数单位是“秒”，不是毫秒。
+        /// 调用方应直接传秒数，避免离线设备把预期 3 秒误放大成 30 秒。
+        /// </summary>
+        public bool Connect(string ip, ushort port = 8193, int timeoutSeconds = 3)
         {
             lock (_lock)
             {
                 if (_connected) return true;
-                int t = Math.Max(1, timeoutMs / 10);
-                short ret = cnc_allclibhndl3(ip, port, t, out _hndl);
+                int seconds = Math.Max(1, timeoutSeconds);
+                short ret = cnc_allclibhndl3(ip, port, seconds, out _hndl);
                 _connected = (ret == EW_OK);
                 return _connected;
             }
@@ -368,6 +372,7 @@ namespace FanucFocas
         {
             0 => "EW_OK", -1 => "EW_BUSY", -2 => "EW_RESET", -5 => "EW_SYSTEM", -6 => "EW_UNEXP",
             -7 => "EW_VERSION(DLL不匹配)", -15 => "EW_NODLL", -16 => "EW_SOCKET(网络不通)", -17 => "EW_PROTOCOL",
+            -8 => "EW_HANDLE(FOCAS句柄无效)",
             1 => "EW_FUNC", 2 => "EW_LENGTH", 5 => "EW_DATA", 7 => "EW_PROT", 12 => "EW_MODE", 15 => "EW_ALARM", 16 => "EW_STOP",
             _ => $"错误码={code}"
         }) { ErrorCode = code; }

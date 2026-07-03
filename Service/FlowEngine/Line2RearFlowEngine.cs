@@ -1239,6 +1239,7 @@ public sealed class Line2RearFlowEngine : IDisposable
         {
             Console.WriteLine($"│ [上料] ⚠ {bed.Code} 当前动作已被应急取消, 不再继续写CNC/天车动作");
         }
+        //处理异常
         catch (Exception ex)
         {
             Console.WriteLine($"│ [上料] ❌ 异常: {wp.IdentityText} {ex.Message}");
@@ -1253,6 +1254,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                     (loadState.LoadDoneNotified ? "CNC已收到上料完成" : "CNC上料完成尚未确认") +
                     $"。引擎已暂停，请确认后天车、斜床和工件状态。异常：{ex.Message}");
             }
+            //x11=1 说明充磁了有板 不会防磁放板 
             else if (holdingWorkpiece)
             {
                 _paused = true;
@@ -1284,6 +1286,7 @@ public sealed class Line2RearFlowEngine : IDisposable
         finally
         {
             bool releasedSharedInFinally = false;
+            //拿到共享区锁了
             if (sharedLocked)
             {
                 if (!operation.IsHeld("SharedArea"))
