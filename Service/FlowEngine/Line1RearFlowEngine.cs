@@ -123,6 +123,11 @@ public sealed class Line1RearFlowEngine : IDisposable
     {
         public bool PlacedOnBed;      // 已退磁放到斜床; 后续异常不能再按“工件仍在中转架”自动重试
         public bool LoadDoneNotified; // 已通知CNC上料完成/启动加工; 异常时斜床应保持Machining语义
+        // 仅用于异常收尾判断，不改变正常上料步骤。
+        // 在发送Z下降命令以前置true：即使运动调用报错，也可能是PLC已收到命令而响应丢失，不能再横移X。
+        public bool ZMayBeDown;
+        // 退磁后Z成功回到安全高度才置true；供异常日志说明现场已经完成到哪个物理阶段。
+        public bool ZSafeAfterPlace;
     }
 
     /// <summary>斜床引擎状态</summary>
@@ -1127,6 +1132,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         bool holdingWorkpiece = false; // 只有X11确认后才算工件已经离开中转架并由后天车持有
         bool sharedLocked = false;
         var loadState = new LoadHandshakeState();
+        string? pendingSafetyAlarm = null; // 异常正文先保留，等finally完成退避和锁释放后只弹一次完整信息。
         CraneService? cr = null;
         using var operation = BeginSkewOperation(bed, "上料", ct, transferLocked);
         ct = operation.Token;
@@ -1286,16 +1292,16 @@ public sealed class Line1RearFlowEngine : IDisposable
                 Console.WriteLine(loadState.LoadDoneNotified
                     ? "│ [上料] ⚠ 工件已放入斜床且CNC已收到上料完成, 但后续动作异常; 引擎已暂停, 请确认后天车安全位置"
                     : "│ [上料] ⚠ 工件已物理放到斜床但CNC上料完成未确认; 引擎已暂停, 禁止把斜床改Idle");
-                OnRearCraneSafetyAlarm?.Invoke($"1号线后天车给{bed.Code}上料时发生异常。工件{wp.IdentityText}已放入斜床，" +
+                pendingSafetyAlarm = $"1号线后天车给{bed.Code}上料时发生异常。工件{wp.IdentityText}已放入斜床，" +
                     (loadState.LoadDoneNotified ? "CNC已收到上料完成" : "CNC上料完成尚未确认") +
-                    $"。引擎已暂停，请确认后天车、斜床和工件状态。异常：{ex.Message}");
+                    $"。引擎已暂停，请确认后天车、斜床和工件状态。异常：{ex.Message}";
             }
             else if (holdingWorkpiece)
             {
                 _paused = true;
                 bed.St = SkewState.Loading;
                 Console.WriteLine("│ [上料] ⚠ X11已确认工件在后天车上但未放到斜床; 引擎已暂停, 需人工确认后天车和工件位置");
-                OnRearCraneSafetyAlarm?.Invoke($"1号线后天车给{bed.Code}上料时发生异常，X11已确认工件{wp.IdentityText}在天车上但尚未放入斜床。引擎已暂停，请人工确认位置。异常：{ex.Message}");
+                pendingSafetyAlarm = $"1号线后天车给{bed.Code}上料时发生异常，X11已确认工件{wp.IdentityText}在天车上但尚未放入斜床。引擎已暂停，请人工确认位置。异常：{ex.Message}";
             }
             else
             {
@@ -1323,35 +1329,60 @@ public sealed class Line1RearFlowEngine : IDisposable
         finally
         {
             bool releasedSharedInFinally = false;
+            string sharedCleanupText = string.Empty;
             if (sharedLocked)
             {
                 if (!operation.IsHeld("SharedArea"))
                 {
                     sharedLocked = false;
+                    sharedCleanupText = "共享区锁已由斜床应急提前释放";
                     Console.WriteLine("│ [上料] 共享区锁已由应急释放, 跳过finally退避释放");
                 }
                 else
                 {
-                // 兜底释放共享区锁前, 后天车可能仍在ST108上方。
-                // 必须先按当前X坐标加配置退避距离退离共享区(不加数据库偏移), 成功后才允许前天车进入打号区域。
-                if (await TryRetreatSharedAreaBeforeReleaseAsync(cr, "ST108", "上料", ct))
-                {
-                    try
+                    bool retreatSucceeded = false;
+                    if (loadState.ZMayBeDown)
                     {
-                        operation.TryRelease("SharedArea", _safety.SharedAreaLock);
-                        releasedSharedInFinally = true;
-                    } catch (SemaphoreFullException) { }
+                        // 情景：已发送Z下降命令，或正在等待尾座夹紧/退磁/Z回升。
+                        // 此时Z、Y和尾座结果可能未知，禁止finally自动执行X+1000，避免低位横移。
+                        sharedCleanupText = "Z轴已经或可能已经下降，程序未执行X轴+1000毫米退避";
+                        Console.WriteLine("│ [上料] ⚠ Z轴已经或可能已经下降, 禁止X+1000低位横移");
+                    }
+                    else
+                    {
+                        // 情景：请求数据/请求上料阶段异常，Z下降命令尚未发出；按现场策略尝试X+1000。
+                        retreatSucceeded = await TryRetreatSharedAreaBeforeReleaseAsync(cr, "ST108", "上料", ct);
+                        sharedCleanupText = retreatSucceeded
+                            ? "Z轴尚未下降，X轴+1000毫米退避成功"
+                            : "Z轴尚未下降，但X轴+1000毫米退避失败或位置无法确认";
+                    }
+
+                    // 现场已确认的异常策略：无论退避成功、失败或因Z下降而跳过，
+                    // 都释放本次上料动作持有的共享区锁；红色弹窗会明确提示锁已释放并要求立即人工处理。
+                    releasedSharedInFinally = operation.TryRelease("SharedArea", _safety.SharedAreaLock);
                     sharedLocked = false;
-                }
-                else
-                {
-                    _paused = true;
-                    Console.WriteLine("│ [上料] ⚠ 共享区退避失败, 未释放共享区锁; 引擎已暂停, 请人工确认后天车位置");
-                    OnRearCraneSafetyAlarm?.Invoke($"1号线后天车在{bed.Code}上料异常收尾时无法退出共享区，共享区锁未释放。引擎已暂停，请人工确认天车位置。");
-                }
+                    sharedCleanupText += "；共享区锁已释放";
+
+                    if (!retreatSucceeded && pendingSafetyAlarm == null)
+                    {
+                        _paused = true;
+                        pendingSafetyAlarm = $"1号线后天车在{bed.Code}上料异常收尾时未完成共享区X退避。引擎已暂停，请立即人工确认天车位置";
+                    }
                 }
             }
-            operation.TryRelease("RearCrane", _craneRearLock);
+
+            bool releasedRearInFinally = operation.TryRelease("RearCrane", _craneRearLock);
+            string rearCleanupText = releasedRearInFinally ? "后天车锁已释放" : "后天车锁已由斜床应急提前释放";
+
+            if (pendingSafetyAlarm != null)
+            {
+                string lockAndRetreat = string.IsNullOrWhiteSpace(sharedCleanupText)
+                    ? rearCleanupText
+                    : $"{sharedCleanupText}；{rearCleanupText}";
+                pendingSafetyAlarm += $"。异常收尾：{lockAndRetreat}。禁止直接点击启动；请先人工处理现场，确认安全后执行斜床应急恢复。";
+                Console.WriteLine($"│ [上料] ⚠ {pendingSafetyAlarm}");
+                OnRearCraneSafetyAlarm?.Invoke(pendingSafetyAlarm);
+            }
             
             _fastNextCycle = true; // 刚完成上料, 通知主循环快速检查下料任务
             Console.WriteLine("│ [上料] 释放后天车锁" + (releasedSharedInFinally ? " + 共享区" : ""));
@@ -1395,6 +1426,9 @@ public sealed class Line1RearFlowEngine : IDisposable
         await W(async () => isF ? await bed.F!.IsRequestLoadAsync(ct) : await bed.M!.IsRequestLoadAsync(ct), "请求上料", ct);
         //下降到装料位置
         Console.WriteLine($"│ [握手] ④ Z下降到装料位置{lz + _oz}");
+        // 从发送Z下降命令这一刻起，异常收尾不能再假设Z仍在安全位。
+        // 即使MoveAbsoluteAsync抛出通信异常，PLC也可能已经收到下降命令，只是响应没有返回。
+        loadState.ZMayBeDown = true;
         try
         {
             //z移动   下降到装料位置   加上了数据库的偏移
@@ -1431,6 +1465,9 @@ public sealed class Line1RearFlowEngine : IDisposable
         await cr.MagnetOffAsync(ct);
         loadState.PlacedOnBed = true; // 退磁成功后工件已经离开后天车, 后续异常必须人工确认斜床状态
         await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+        // 只有Z回安全运动成功返回，异常finally才允许ST108执行X+1000退避。
+        loadState.ZMayBeDown = false;
+        loadState.ZSafeAfterPlace = true;
         Console.WriteLine("│ [握手] ⑧ 清上一步信号 → 写天车上料完成,CNC启动加工");
         if (isF) bed.F!.SafeSetMacro(1102, 0); // 清#1102
         else await bed.M!.ClearTailstockClampAsync(ct); // 清10371=0
