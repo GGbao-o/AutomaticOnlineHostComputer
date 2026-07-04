@@ -95,6 +95,11 @@ public sealed class Line2FrontFlowEngine : IDisposable
     private ForkBoringPhase _forkPhase = ForkBoringPhase.Idle;
     /// <summary>握手子步骤是否正在执行(防重复触发)。</summary>
     private volatile bool _forkHandshakeInProgress;
+    /// <summary>
+    /// 当前在途工件是否已满足货叉放行条件。
+    /// 只有退磁放板、Z回0、到达2号线首次安全Y且M801写入成功后才置true。
+    /// </summary>
+    private volatile bool _manipulatorClearedFork;
     /// <summary>R6108 下料完成信号是否已发送(防重复触发)。</summary>
     private volatile bool _boringUnloadDoneSent;
     /// <summary>M912 送料命令是否已发送。M912 是保持命令位，成功写入后不需要每轮重复写。</summary>
@@ -718,6 +723,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                     && TryDequeueCache(out var wp))
                                 {
                                     lock (_wpLock) { _currentWp = wp; }
+                                    // 新工件必须重新完成“放板→Z安全→Y安全→M801”才能放行货叉，禁止沿用上一任务门闩。
+                                    _manipulatorClearedFork = false;
                                     _forkHandshakeInProgress = false;
                                     _boringUnloadDoneSent = false;
                                     _m912Sent = false;
@@ -763,29 +770,19 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
                         // ── 条件: 待机位 + 有版 + 有在途工件 + 货叉空闲 + 机械手已离开叉区 ──
                         //     必须确认机械手Y回到安全位后才分派, 防机械手还在叉区时货叉移动碰撞
-                        if (fs.HasPlate && fs.AtStandbyPos && _currentWp != null && _forkPhase == ForkBoringPhase.Idle)
+                        if (fs.HasPlate && fs.AtStandbyPos && _currentWp != null
+                            && _forkPhase == ForkBoringPhase.Idle)
                         {
-                            // 前置安全: 机械手1必须在安全Y位 (Z↑完成不代表Y也移开了)
-                            bool manipSafe = false;
-                            if (_manipulator1?.IsConnected == true)
-                            {
-                                try
-                                {
-                                    var ms = await _manipulator1.ReadStatusAsync(ct);
-                                    // 货叉2产生物理动作前必须到达2号线自己的安全点；
-                                    // 不能使用“任一安全点”，否则机械手停在1号线一侧时可能误启动ST712。
-                                    int lineSafeY = _cfg.SkewBed.GetManipulator1SafeYForLine(2);
-                                    manipSafe = ms != null && Math.Abs(ms.YPos - lineSafeY) <= MotionConfig.SkewBedSection.Manipulator1SafeYTolerance;
-                                }
-                                catch { /* 读失败→保守不触发 */ }
-                            }
+                            // 2号线门闩只会在机械手到Y=1000且M801成功后打开；使用持久门闩可避免重复设备读取。
+                            bool manipSafe = _manipulatorClearedFork;
                             if (!manipSafe)
                             {
                                 if (_cycleCount % 10 == 1)
-                                    Console.WriteLine("[Line2Front] [货叉分派] ⚠ 机械手1未回安全Y位(可能在叉区),等待...");
+                                    Console.WriteLine("[Line2Front] [货叉分派] ⚠ 机械手1尚未完成Z安全/首次安全Y/M801，等待门闩...");
                             }
                             else
                             {
+                                Console.WriteLine("[Line2Front] [货叉分派] 机械手放行门闩=ON，允许货叉启动");
                                 var wp = _currentWp.Value;
                                 if (wp.SkipBoring)
                                 {
@@ -802,7 +799,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                         else if (_cycleCount % 10 == 1)
                         {
                             // 诊断: 条件不满足时打印各字段
-                            Console.WriteLine($"[Line2Front] [货叉分派] 条件不满足 HasPlate={fs.HasPlate} Standby={fs.AtStandbyPos} 在途={_currentWp != null} 阶段={_forkPhase}");
+                            Console.WriteLine($"[Line2Front] [货叉分派] 条件不满足 HasPlate={fs.HasPlate} Standby={fs.AtStandbyPos} 在途={_currentWp != null} 机械手放行={_manipulatorClearedFork} 阶段={_forkPhase}");
                         }
                     }
                     catch (Exception ex)
@@ -1018,6 +1015,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                         Console.WriteLine($"[Line2Front] [货叉] 下料完成已发送，R6108保持为1，R6102/R6104已清零 ✓ → 工件入天车队列 {_currentWp?.IdentityText}");
                                         _craneQueue.Enqueue(_currentWp!.Value);
                                         lock (_wpLock) { _currentWp = null; }
+                                        _manipulatorClearedFork = false;
                                     }
                                 }
                                 break;
@@ -1047,6 +1045,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                             _forkPhase = ForkBoringPhase.WaitingForkReturnFromSkip;
                                             _craneQueue.Enqueue(_currentWp!.Value);
                                             lock (_wpLock) { _currentWp = null; }
+                                            _manipulatorClearedFork = false;
                                         }
                                     }
                                 }
@@ -1314,11 +1313,14 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
             // ②d. Z回原点0 (取料完成先回Z, 下压误触清除后重试最多3次)
             Console.WriteLine("[Line2Front] [机械手1] ②d Z回原点0");
+            bool pickupZAtZero = false;
             for (int retry = 0; retry < 3; retry++)
             {
-                try { await _manipulator1!.MoveAbsoluteAsync(-1, -1, 0, ct: ct); break; }
+                try { await _manipulator1!.MoveAbsoluteAsync(-1, -1, 0, ct: ct); pickupZAtZero = true; break; }
                 catch (PressureStopException) { Console.WriteLine($"[Line2Front] [机械手1]   ⚠ Z升下压误触→清除→重试{retry+1}"); await RecoverFromPressureStopAsync(ct); }
             }
+            if (!pickupZAtZero)
+                throw new InvalidOperationException("机械手1取料后Z三次回0均失败，禁止横移到货叉");
 
             // ③ 送货叉 ST712 — 前置检查: 叉在待机位且无版, 防止叉在Pos2/Pos3时碰撞
             if (!TryGetStationCoords("ST712", out int f1x, out int f1y, out int f1z))
@@ -1350,23 +1352,27 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
             // ③d. Z回原点0 (送完货叉先回Z, 下压误触清除后重试最多3次)
             Console.WriteLine("[Line2Front] [机械手1]   Z回原点0");
+            bool placeZAtZero = false;
             for (int retry = 0; retry < 3; retry++)
             {
-                try { await _manipulator1!.MoveAbsoluteAsync(-1, -1, 0, ct: ct); break; }
+                try { await _manipulator1!.MoveAbsoluteAsync(-1, -1, 0, ct: ct); placeZAtZero = true; break; }
                 catch (PressureStopException) { Console.WriteLine($"[Line2Front] [机械手1]   ⚠ Z升下压误触→清除→重试{retry+1}"); await RecoverFromPressureStopAsync(ct); }
             }
-            // ④ Y先回安全位(机械手臂离开叉区), 再通知PLC取料完成 M801=1→0
-            //    先移动后发信号: 防止PLC收到M801后立即复位送料机构时机械手Y轴还在叉区
-            Console.WriteLine("[Line2Front] 货叉绝对移动");
-            // ST712位于2号线一侧，放板后回2号线就近安全点，不再跨线绕回另一端。
-            int safeY = _cfg.SkewBed.GetManipulator1SafeYForLine(2);
-            await _manipulator1!.MoveAbsoluteAsync(-1, safeY, -1, ct: ct);
-            Console.WriteLine($"[Line2Front] [机械手1]   safeY={safeY} Z=0 ✓");
-            if (_rackSvc != null)
-            {
-                await _rackSvc.SetPickupDoneAsync(ct);
-                Console.WriteLine($"[Line2Front] [机械手1] ④ M801=1→0 取料完成 ✓ {wp.IdentityText}");
-            }
+            if (!placeZAtZero)
+                throw new InvalidOperationException("机械手1放板后Z三次回0均失败，禁止放行货叉");
+
+            // ④ 2号线首次安全点就是取板待机点Y=1000，到位并成功写M801后即可放行货叉和释放共享锁。
+            int releaseSafeY = _cfg.SkewBed.GetManipulator1SafeYForLine(2);
+            Console.WriteLine($"[Line2Front] [机械手1] ④ Y→2号线货叉释放安全点/取板待机点 {releaseSafeY}");
+            await _manipulator1!.MoveAbsoluteAsync(-1, releaseSafeY, -1, ct: ct);
+            Console.WriteLine($"[Line2Front] [机械手1]   Y={releaseSafeY} Z=0，已离开2号线叉区 ✓");
+
+            if (_rackSvc == null)
+                throw new InvalidOperationException("总上料架服务为空，M801未写入，禁止放行货叉");
+            await _rackSvc.SetPickupDoneAsync(ct);
+            Console.WriteLine($"[Line2Front] [机械手1] ④ M801=1→0 取料完成 ✓ {wp.IdentityText}");
+            _manipulatorClearedFork = true;
+            Console.WriteLine("[Line2Front] [机械手1]   货叉放行门闩=ON，当前位置也是取板待机点，可释放共享机械手锁");
             Console.WriteLine($"[Line2Front] [机械手1] ═══ 取料送叉完成 {wp.IdentityText} ═══");
         }
         catch (Exception ex)
@@ -1382,8 +1388,16 @@ public sealed class Line2FrontFlowEngine : IDisposable
             }
             else if (placedOnFork)
             {
-                // 工件已安全放在货叉上 → 保持 _currentWp, 让 ForkBoringPhase 状态机接管。
-                Console.WriteLine("[Line2Front] [机械手1] 工件已安全放在货叉上, 保持 _currentWp 等 ForkBoringPhase 接管");
+                if (!_manipulatorClearedFork)
+                {
+                    _paused = true;
+                    Console.WriteLine("[Line2Front] ⚠ 工件已放在货叉，但机械手安全退出/M801未完整完成；货叉门闩保持关闭");
+                    OnSafetyAlarm?.Invoke($"2号线机械手1已将{wp.IdentityText}放到货叉，但Z回0、Y到货叉释放安全点或M801通知未完整完成。货叉未启动，引擎已暂停，请人工确认。异常：{ex.Message}");
+                }
+                else
+                {
+                    Console.WriteLine("[Line2Front] [机械手1] 工件已安全放在货叉且门闩已开，保持 _currentWp 让 ForkBoringPhase 接管");
+                }
             }
             else
             {

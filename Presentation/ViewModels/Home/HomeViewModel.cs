@@ -1302,6 +1302,33 @@ public sealed class HomeViewModel : ObservableObject
         else dispatcher.BeginInvoke((Action)UpdateUiAndShowAlarm);
     }
 
+    /// <summary>
+    /// 机械手1是1/2号线共用设备。若其在两个安全端点之间停止或位置读不到，
+    /// 仅暂停发生异常的一条线仍可能让另一条线取得共享锁并继续发运动命令，因此必须同步暂停两条线。
+    /// 已经打开的货叉状态机不回Idle、不清工件身份，避免恢复后重复派发同一块板。
+    /// </summary>
+    private void HandleSharedManipulatorSafetyAlarm(string message)
+    {
+        // 先在当前后台线程同步关闭四个派发门，再调度UI弹窗；不能把安全暂停延后到Dispatcher执行。
+        _line1Engine?.Pause();
+        _line1RearEngine?.Pause();
+        _line2Engine?.Pause();
+        _line2RearEngine?.Pause();
+
+        void UpdateUiAndShowAlarm()
+        {
+            IsLine1Running = false;
+            IsLine2Running = false;
+            Console.WriteLine($"[HomeViewModel] ⚠ 共享机械手1安全异常: {message}");
+            MessageBox.Show(message, "共享机械手1安全异常 - 1/2号线已暂停",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess()) UpdateUiAndShowAlarm();
+        else dispatcher.BeginInvoke((Action)UpdateUiAndShowAlarm);
+    }
+
     /// <summary>X11连续无板但已安全退磁回升：只提示一次，不改变引擎运行状态。</summary>
     private static void HandleRearCraneWarning(int line, string message)
     {
@@ -1741,6 +1768,8 @@ public sealed class HomeViewModel : ObservableObject
         _line2RearEngine.OnRearCraneWarning = message => HandleRearCraneWarning(2, message);
         _line1Engine.OnSafetyAlarm = message => HandleLineSafetyAlarm(1, "前端流程异常", message);
         _line2Engine.OnSafetyAlarm = message => HandleLineSafetyAlarm(2, "前端流程异常", message);
+        // 机械手1由两条线共享。若货叉放行后的预定位停在未知中间位置，必须在释放共享锁前同步关闭两线派发门。
+        _line1Engine.OnSharedManipulatorSafetyAlarm = HandleSharedManipulatorSafetyAlarm;
         _line1BalancingEngine.OnSafetyAlarm = message => HandleStandaloneSafetyAlarm("动平衡", message);
         _grindingEngine.OnSafetyAlarm = message => HandleStandaloneSafetyAlarm("研磨", message);
 

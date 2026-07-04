@@ -265,10 +265,15 @@ public sealed class MotionConfig
         /// 1/2号线正常流程改用下面两个分线路安全位，避免共用一个远端坐标造成无效长距离返回。
         /// </summary>
         public int Manipulator1SafeY { get; set; } = 11500;
-        /// <summary>机械手1给1号线货叉ST711放板后的就近安全Y。</summary>
-        public int Manipulator1Line1SafeY { get; set; } = 1000;
-        /// <summary>机械手1给2号线货叉ST712放板后的就近安全Y。</summary>
-        public int Manipulator1Line2SafeY { get; set; } = 11500;
+        /// <summary>机械手1给1号线货叉ST711放板后，首次离开叉区并允许货叉启动的安全Y。</summary>
+        public int Manipulator1Line1SafeY { get; set; } = 11500;
+        /// <summary>机械手1给2号线货叉ST712放板后，首次离开叉区并允许货叉启动的安全Y。</summary>
+        public int Manipulator1Line2SafeY { get; set; } = 1000;
+        /// <summary>
+        /// 机械手1完成货叉放行后，为下一次从总上料架取板而继续前往的待机Y。
+        /// 该位置与“货叉释放安全Y”职责不同，不能通过复用某条线的安全点隐式表达。
+        /// </summary>
+        public int Manipulator1PickupStandbyY { get; set; } = 1000;
         /// <summary>机械手1安全位判断容差(mm)。保持原生产逻辑的±10mm。</summary>
         public const int Manipulator1SafeYTolerance = 10;
 
@@ -283,7 +288,8 @@ public sealed class MotionConfig
         /// <summary>
         /// 前天车/主页面使用的全局安全判断。
         /// 现场已确认Y=1000和Y=11500对两条前天车都安全，因此到达任意一个配置点都可视为离开危险区。
-        /// 本线货叉启动不能使用本方法，必须用GetManipulator1SafeYForLine校验本线路目标。
+        /// 本线货叉首次放行仍使用GetManipulator1SafeYForLine校验本线路目标；
+        /// 放行后机械手可继续前往Manipulator1PickupStandbyY，不再阻塞已启动的货叉状态机。
         /// </summary>
         public bool IsManipulator1AtAnySafeY(int currentY)
             => Math.Abs(currentY - Manipulator1Line1SafeY) <= Manipulator1SafeYTolerance
@@ -395,7 +401,7 @@ public sealed class MotionConfig
             Console.WriteLine($"[MotionConfig] 配置加载成功：{path}");
             Console.WriteLine($"[MotionConfig]   AbsSpeed X={config!.AbsMove.X.Speed} Y={config.AbsMove.Y.Speed} Z={config.AbsMove.Z.Speed}");
             Console.WriteLine($"[MotionConfig]   ZAxis Fast={config.ZAxis.FastSpeed} Slow={config.ZAxis.SlowSpeed}");
-            Console.WriteLine($"[MotionConfig]   机械手1安全Y: 1号线={config.SkewBed.Manipulator1Line1SafeY}, 2号线={config.SkewBed.Manipulator1Line2SafeY}, 容差=±{SkewBedSection.Manipulator1SafeYTolerance}");
+            Console.WriteLine($"[MotionConfig]   机械手1货叉释放安全Y: 1号线={config.SkewBed.Manipulator1Line1SafeY}, 2号线={config.SkewBed.Manipulator1Line2SafeY}, 取板待机Y={config.SkewBed.Manipulator1PickupStandbyY}, 容差=±{SkewBedSection.Manipulator1SafeYTolerance}");
             return config;
         }
         catch (Exception ex)

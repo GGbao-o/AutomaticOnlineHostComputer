@@ -354,14 +354,18 @@
                             <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
                                 <StackPanel>
-                                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="机械手安全 Y (mm)" />
+                                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="机械手安全/待机 Y (mm)" />
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                        <TextBlock Text="1线M1" Width="52" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBlock Text="1线M1释放" Width="76" Style="{StaticResource ParamLabelStyle}" />
                                         <TextBox Text="{Binding Manipulator1Line1SafeY, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                        <TextBlock Text="2线M1" Width="52" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBlock Text="2线M1释放" Width="76" Style="{StaticResource ParamLabelStyle}" />
                                         <TextBox Text="{Binding Manipulator1Line2SafeY, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="M1取板待机" Width="76" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding Manipulator1PickupStandbyY, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                         <TextBlock Text="M2" Width="36" Style="{StaticResource ParamLabelStyle}" />
