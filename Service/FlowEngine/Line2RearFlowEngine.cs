@@ -1439,6 +1439,11 @@ public sealed class Line2RearFlowEngine : IDisposable
         bool holdingWorkpiece = false;       // X11确认有版后才算工件已经在后天车上, 不能只看是否发过充磁命令
         bool placedToDestination = false;    // 退磁放到目标位 + Z升安全 + 必要通知完成后, 才允许斜床Idle并清Wp
         bool sharedLocked = false;
+        bool sharedWasAcquired = false;       // 用于后续分流异常弹窗说明：共享区锁可能已在正常提前退避后释放
+        bool zMayBeDown = false;              // 只用于异常收尾：Z下降命令发出后，到确认Z回安全高度前均为true
+        bool sharedRetreatAttempted = false;  // 防止正常提前退避失败后，finally再次发送同一X运动
+        bool sharedRetreatSucceeded = false;
+        string? pendingSafetyAlarm = null;    // 等finally完成退避判断和两把锁释放后，再统一弹一次完整告警
         CraneService? cr = null;
         using var operation = BeginSkewOperation(bed, "下料", ct, holdsTransferRack: false);
         ct = operation.Token;
@@ -1462,6 +1467,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 Console.WriteLine("│ [下料] 获取共享区锁(ST606)...");
                 await operation.AcquireAsync("SharedArea", _safety.SharedAreaLock, ct);
                 sharedLocked = true;
+                sharedWasAcquired = true;
                 Console.WriteLine("│ [下料] 共享区锁已获取(ST606) ✓");
             }
 
@@ -1504,6 +1510,9 @@ public sealed class Line2RearFlowEngine : IDisposable
             //下降取料    加上数据库的偏移值   lz是计算公式算的
             int zDown = lz + _oz;
             Console.WriteLine($"│ [下料] ① Z下降到{lz}(Z-半径)+天车偏移({_oz})={zDown} 充磁取料");
+            // 从发送Z下降命令起，异常finally不能再假定Z位于安全高度。
+            // 即使运动调用报错，也可能是PLC已执行下降而上位机没有收到响应。
+            zMayBeDown = true;
             try
             {
                 await cr.MoveAbsoluteAsync(-1, -1, zDown, ct: ct);
@@ -1579,6 +1588,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                     try
                     {
                         await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+                        zMayBeDown = false; // X11失败恢复已确认Z回安全高度，异常收尾才允许尝试X退避
                         Console.WriteLine($"│ [下料恢复] Z已回安全高度 {sz}");
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1593,15 +1603,15 @@ public sealed class Line2RearFlowEngine : IDisposable
 
                     if (recoveryErrors.Count > 0)
                     {
-                        // 使任务牌失效并保留到应急流程：共享区斜床不得在Z/磁铁状态不确定时执行X退避，
-                        // EndSkewOperation也不能丢掉仍可能持有SharedArea的任务牌。
+                        // 使旧动作失效并暂停。若Z回升失败，finally会依据zMayBeDown禁止X横移；
+                        // 按现场确认策略，异常收尾仍释放本动作的共享区锁和后天车锁，并在弹窗中写明。
                         operation.CancelAndInvalidate();
                         _paused = true;
                         string alarm = $"2号线后天车从{bed.Code}下料取料时，X11连续三次为0，且安全恢复失败：" +
                                        string.Join("；", recoveryErrors) +
                                        $"。工件{wp.IdentityText}仍保留在斜床等待下料，后端已暂停。请人工确认磁铁和Z轴位置。";
                         Console.WriteLine($"│ [下料恢复] ⚠ {alarm}");
-                        OnRearCraneSafetyAlarm?.Invoke(alarm);
+                        pendingSafetyAlarm = alarm;
                         throw new InvalidOperationException(alarm);
                     }
 
@@ -1631,6 +1641,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             await cr.MoveAbsoluteAsync(-1, by + _oy, -1, ct: ct);
             //z升安全高度
             await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+            zMayBeDown = false; // 正常下料已确认Z安全，保留原提前X退避流程
             Console.WriteLine("│ [下料] 清上一步信号 → 写天车下料完成");
             if (isF) bed.F!.SafeSetMacro(1104, 0); // 清#1104
             // 2号线全FANUC  今洲斜床
@@ -1640,7 +1651,9 @@ public sealed class Line2RearFlowEngine : IDisposable
             {
                 // ST606下料已完成: 尾座张开、Y回数据库坐标、Z已升安全、CNC已收到下料完成。
                 // Y/Z安全不等于X已离开共享碰撞区; 释放共享区锁前必须先按配置退避X。
-                if (await TryRetreatSharedAreaBeforeReleaseAsync(cr, bed.Code, "下料", ct))
+                sharedRetreatAttempted = true;
+                sharedRetreatSucceeded = await TryRetreatSharedAreaBeforeReleaseAsync(cr, bed.Code, "下料", ct);
+                if (sharedRetreatSucceeded)
                 {
                     operation.TryRelease("SharedArea", _safety.SharedAreaLock);
                     sharedLocked = false;
@@ -1649,8 +1662,8 @@ public sealed class Line2RearFlowEngine : IDisposable
                 else
                 {
                     _paused = true;
-                    Console.WriteLine("│ [下料] ⚠ ST606共享区退避失败, 未释放共享区锁; 引擎已暂停, 请人工确认后天车位置");
-                    throw new InvalidOperationException("ST606下料完成后共享区退避失败, 已暂停, 未释放共享区锁");
+                    Console.WriteLine("│ [下料] ⚠ ST606共享区退避失败; 引擎已暂停, finally仍会释放共享区锁和后天车锁");
+                    throw new InvalidOperationException("ST606下料完成后共享区退避失败；已暂停，finally将释放共享区锁和后天车锁");
                 }
             }
 
@@ -1802,7 +1815,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 _paused = true;
                 bed.St = SkewState.Unloading;
                 Console.WriteLine("│ ⚠ X11已确认工件离开斜床但未完成目标位放料/通知, 引擎已暂停, 请人工确认后天车和工件位置");
-                OnRearCraneSafetyAlarm?.Invoke($"2号线后天车从{bed.Code}下料时发生异常，X11已确认工件在天车上，但目标位放料或通知尚未完成。引擎已暂停，请人工确认天车和工件位置。异常：{ex.Message}");
+                pendingSafetyAlarm = $"2号线后天车从{bed.Code}下料时发生异常，X11已确认工件在天车上，但目标位放料或通知尚未完成。引擎已暂停，请人工确认天车和工件位置。异常：{ex.Message}";
             }
             else if (magnetOn)
             {
@@ -1826,34 +1839,72 @@ public sealed class Line2RearFlowEngine : IDisposable
         }
         finally
         {
+            string sharedCleanupText = string.Empty;
             if (sharedLocked)
             {
                 if (!operation.IsHeld("SharedArea"))
                 {
                     sharedLocked = false;
+                    sharedCleanupText = "共享区锁已由斜床应急提前释放";
                     Console.WriteLine("│ [下料] 共享区锁已由应急释放, 跳过finally退避释放");
                 }
                 else
                 {
-                // 仅异常或未到提前释放点时兜底释放共享区锁。
-                // 释放前必须先退避X; 退避失败宁可保持锁并暂停, 不能放前天车进入共享区。
-                if (await TryRetreatSharedAreaBeforeReleaseAsync(cr, bed.Code, "下料finally", ct))
-                {
+                    if (sharedRetreatAttempted)
+                    {
+                        // 情景：正常安全点的提前X退避已经失败。禁止finally重复发送同一运动命令。
+                        sharedCleanupText = "Z轴已回安全高度，但X轴+1000毫米提前退避失败，finally未重复运动";
+                    }
+                    else if (zMayBeDown)
+                    {
+                        // 情景：Z下降、尾座张开等待、磁铁或Z回升阶段异常，实际Z位置可能不安全。
+                        sharedCleanupText = "Z轴已经或可能已经下降，程序未执行X轴+1000毫米退避";
+                        Console.WriteLine("│ [下料] ⚠ Z轴已经或可能已经下降, 禁止X+1000低位横移");
+                    }
+                    else
+                    {
+                        // 情景：异常发生在Z下降前，或已确认Z回安全高度；按现场策略尝试一次X+1000。
+                        sharedRetreatAttempted = true;
+                        sharedRetreatSucceeded = await TryRetreatSharedAreaBeforeReleaseAsync(cr, bed.Code, "下料finally", ct);
+                        sharedCleanupText = sharedRetreatSucceeded
+                            ? "Z轴处于安全阶段，X轴+1000毫米退避成功"
+                            : "Z轴处于安全阶段，但X轴+1000毫米退避失败或位置无法确认";
+                    }
+
+                    // 与ST606上料保持一致：无论退避成功、失败或因低Z跳过，
+                    // 都释放本次下料动作持有的共享区锁；弹窗明确说明锁已释放并要求立即人工处理。
                     operation.TryRelease("SharedArea", _safety.SharedAreaLock);
                     sharedLocked = false;
-                }
-                else
-                {
-                    _paused = true;
-                    Console.WriteLine("│ [下料] ⚠ 共享区兜底退避失败, 未释放共享区锁; 引擎已暂停, 请人工确认后天车位置");
-                    OnRearCraneSafetyAlarm?.Invoke($"2号线后天车在{bed.Code}下料异常收尾时无法退出共享区，共享区锁未释放。引擎已暂停，请人工确认天车位置。");
-                }
+                    sharedCleanupText += "；共享区锁已释放";
+
+                    if (!sharedRetreatSucceeded && pendingSafetyAlarm == null)
+                    {
+                        _paused = true;
+                        pendingSafetyAlarm = $"2号线后天车在{bed.Code}下料异常收尾时未完成共享区X退避。引擎已暂停，请立即人工确认天车位置";
+                    }
                 }
             }
-            operation.TryRelease("RearCrane", _craneRearLock);
+
+            // 情景：ST606已正常完成X退避并提前释放共享区锁，随后分流/目的位又发生异常。
+            // finally无需再次释放，但最终弹窗仍应明确告诉操作员共享区锁已经释放。
+            if (sharedWasAcquired && !sharedLocked && string.IsNullOrWhiteSpace(sharedCleanupText))
+                sharedCleanupText = "共享区锁已在正常提前退避后释放";
+
+            bool rearReleased = operation.TryRelease("RearCrane", _craneRearLock);
+            string rearCleanupText = rearReleased ? "后天车锁已释放" : "后天车锁已由斜床应急提前释放";
+
+            if (pendingSafetyAlarm != null)
+            {
+                string cleanupText = string.IsNullOrWhiteSpace(sharedCleanupText)
+                    ? rearCleanupText
+                    : $"{sharedCleanupText}；{rearCleanupText}";
+                pendingSafetyAlarm += $"。异常收尾：{cleanupText}。禁止直接点击启动；请先人工处理现场，确认安全后执行斜床应急恢复。";
+                Console.WriteLine($"│ [下料] ⚠ {pendingSafetyAlarm}");
+                OnRearCraneSafetyAlarm?.Invoke(pendingSafetyAlarm);
+            }
             
             _fastNextCycle = true;
-            Console.WriteLine("│ [下料] 释放后天车锁" + (sharedLocked ? " + 共享区" : ""));
+            Console.WriteLine("│ [下料] 后天车锁收尾完成" + (!string.IsNullOrWhiteSpace(sharedCleanupText) ? " + 共享区锁收尾完成" : ""));
             Console.WriteLine("└── [下料] 结束 ──────────────────────────");
             EndSkewOperation(bed, operation);
         }
