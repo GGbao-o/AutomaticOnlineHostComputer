@@ -2014,7 +2014,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 Console.WriteLine($"│ [{flowName}] 共享区退避距离未配置或<=0: {stationCode}={retreatX}, 禁止释放共享区锁");
                 return false;
             }
-
+            //目标位置
             int targetX = status.XPos + retreatX;
             Console.WriteLine($"│ [{flowName}] 共享区释放前退避: {stationCode} 当前X={status.XPos}, 目标X={targetX}(当前X+配置{retreatX}, 不加偏移)");
             await cr.MoveAbsoluteAsync(targetX, -1, -1, ct: ct);

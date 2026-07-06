@@ -1588,7 +1588,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
                 int homeX = _cfg.GetCraneHomeX(CraneFront2No);
                 Console.WriteLine($"[Line2Front] [前天车] X→{homeX + _craneOffsetX} Z回原点 并发执行");
-                var xTask = crane.MoveAbsoluteAsync(homeX + _craneOffsetX, -1, -1, ct: ct);
+                //天车回安全位置时候顺便y回货叉pos3y位置 方便下一次取板
+                var xTask = crane.MoveAbsoluteAsync(homeX + _craneOffsetX, f2y, -1, ct: ct);
                 var zTask = crane.HomeZAsync(ct);
                 await Task.WhenAll(xTask, zTask);
                 Console.WriteLine($"[Line2Front] [前天车] ═══ 天车流程完成 {wp.IdentityText} ═══");
@@ -1610,24 +1611,23 @@ public sealed class Line2FrontFlowEngine : IDisposable
             if (ex is TransferRackCacheException rackEx)
             {
                 // 工件已经不在天车/叉上, 不能回队列; 保持暂停, 等人工确认中转架缓存。
-                _forkPhase = ForkBoringPhase.Idle;
-                _boringUnloadDoneSent = false;
-                _m912Sent = false;
-                _skipBoringTriggered = false;
+                // 前天车处理的是上一块工件；此时下一块工件可能已经进入货叉/双头镗。
+                // 禁止在前天车异常中复位_forkPhase或清握手门闩，否则会把下一块工件
+                // 从WaitingMachine等有效阶段错误改成Idle，造成R6107=1也不写M913的永久卡停。
                 _paused = true;
                 Console.WriteLine($"[Line2Front] ⚠⚠⚠ 工件已在{rackEx.RackStation}, 但后端缓存未确认；不回队列，等待人工补缓存/确认现场");
-                OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时，工件已放到{rackEx.RackStation}，但后端缓存未确认。引擎已暂停，请人工补缓存并确认现场。");
+                Console.WriteLine($"[Line2Front] [前天车] 货叉—双头镗阶段保持={_forkPhase}，相关门闩未清除；中转架锁/共享区锁已按finally释放，前天车锁将在调度finally释放");
+                OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时，工件已放到{rackEx.RackStation}，但后端缓存未确认。引擎已暂停，货叉—双头镗阶段保持={_forkPhase}、相关门闩未清除。中转架锁和共享区锁已释放，前天车锁将在任务退出时释放。请人工补缓存，确认旧工件和前天车处于安全位置后再恢复。");
             }
             else if (magnetOn)
             {
-                // magnetOn=true → 工件在天车上 → 暂停引擎等人工确认
-                _forkPhase = ForkBoringPhase.Idle;
-                _boringUnloadDoneSent = false;
-                _m912Sent = false;
-                _skipBoringTriggered = false;
+                // magnetOn=true表示本任务已经进入充磁后的不确定区间；若异常来自打号机超时，
+                // 工件可能已经在ST107退磁放下。无论旧工件实际在哪，都不能改动可能属于
+                // 下一块工件的货叉/双头镗阶段和门闩，只暂停并交由人工确认现场。
                 _paused = true;
-                Console.WriteLine("[Line2Front] ⚠⚠⚠ 天车已充磁但流程中断！工件在天车上！引擎已暂停,需人工处理！");
-                OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时流程中断，天车磁铁已启动，工件位置不确定。引擎已暂停，请人工确认天车和工件位置。异常：{ex.Message}");
+                Console.WriteLine("[Line2Front] ⚠⚠⚠ 前天车在充磁后的流程区间中断！工件可能在天车、打号机或后续位置，引擎已暂停,需人工处理！");
+                Console.WriteLine($"[Line2Front] [前天车] 货叉—双头镗阶段保持={_forkPhase}，相关门闩未清除；中转架锁/共享区锁已按finally释放，前天车锁将在调度finally释放");
+                OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时流程中断，工件可能在天车、打号机或后续位置。引擎已暂停，货叉—双头镗阶段保持={_forkPhase}、相关门闩未清除。中转架锁和共享区锁已释放，前天车锁将在任务退出时释放。请人工退磁/处理旧工件并将前天车升到安全位置后再恢复。异常：{ex.Message}");
             }
             else
             {
