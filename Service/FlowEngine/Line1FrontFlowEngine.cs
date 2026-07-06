@@ -1992,7 +1992,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
     /// <summary>
     /// 打号机文件握手:
     ///   Z降(公式)→退磁放下工件→Z升安全→写 D:\job1\A (内容=刻印+直径)
-    ///   →轮询等 D:\job1\B 出现(120s超时)→Z降→充磁取料→Z升→删B
+    ///   →轮询等 D:\job1\B 出现(1小时超时)→Z降→充磁取料→Z升→删B
     /// </summary>
     private async Task MarkingHandshakeAsync(CraneService crane, WorkpieceCache wp, int safeZ, CancellationToken ct)
     {
@@ -2059,9 +2059,10 @@ public sealed class Line1FrontFlowEngine : IDisposable
         await Task.WhenAll(zUpTask, writeATask);  // 等Z升+写A都完成
         Console.WriteLine($"[Line1Front] [打号机] Z升完成 + A.txt已写入 ✓ {wp.IdentityText}");
 
-        // ── 轮询等 B.txt (打标完成, 120s超时) ──
-        Console.WriteLine("[Line1Front] [打号机] 等待B.txt (超时120s)...");
-        var dl = DateTime.UtcNow.AddSeconds(120);
+        // ── 轮询等 B.txt (打标完成, 1小时超时) ──
+        const int markerTimeoutSeconds = 60 * 60;
+        Console.WriteLine("[Line1Front] [打号机] 等待B.txt (超时1小时/3600s)...");
+        var dl = DateTime.UtcNow.AddSeconds(markerTimeoutSeconds);
         int pollCount = 0;
         while (!File.Exists(fileB) && DateTime.UtcNow < dl)
         {
@@ -2069,7 +2070,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
             pollCount++;
             if (pollCount % 20 == 0) Console.WriteLine($"[Line1Front] [打号机]   轮询中...({pollCount * 500 / 1000}s)");
         }
-        if (!File.Exists(fileB)) throw new TimeoutException("打标机超时：120s 未生成 B.txt");
+        if (!File.Exists(fileB)) throw new TimeoutException("打标机超时：1小时(3600s)未生成 B.txt");
         Console.WriteLine($"[Line1Front] [打号机] B.txt已生成 ✓ {wp.IdentityText}");
 
         // Z降充磁取料→X11检测→Z升→删B.txt
