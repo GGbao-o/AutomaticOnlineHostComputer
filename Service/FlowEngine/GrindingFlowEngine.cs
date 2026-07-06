@@ -1330,6 +1330,9 @@ public sealed class GrindingFlowEngine : IDisposable
             // XY先到上料架位置, 绝对编码器稳定确认后再下降取料。
             int pickupZ = ComputePickupZ(rackZ, wp.Diameter);
             Console.WriteLine($"[GrindingEngine] [{craneName}] ④ 目标 Z={pickupZ} (基准{rackZ}) 偏移({_craneOffsetX},{_craneOffsetY},{_craneOffsetZ})");
+            // 新上料动作首次跨工位横移前确认Z零位，防止上次异常遗留低Z直接横移。
+            Console.WriteLine($"[GrindingEngine] [{craneName}] 去ST709取料前确认Z=0±5mm");
+            await crane.EnsureZAtZeroAsync(5, ct);
             await crane.MoveAbsoluteAsync(ApplyOffsetX(rackX), ApplyOffsetY(rackY), -1, ct: ct);
             await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, _cfg.Grinding.CraneNo, "ST709", "研磨天车-ST709上料架取料前", ct);
             await crane.MoveAbsoluteAsync(-1, -1, ApplyOffsetZ(pickupZ), ct: ct);
@@ -1613,6 +1616,9 @@ public sealed class GrindingFlowEngine : IDisposable
                 grSpd.X.Speed, grSpd.X.Accel, grSpd.X.Decel,
                 grSpd.Y.Speed, grSpd.Y.Accel, grSpd.Y.Decel,
                 grSpd.Z.Speed, grSpd.Z.Accel, grSpd.Z.Decel, ct);
+            // 新下料动作首次去研磨机取板前确认Z零位；失败时禁止继续XY靠近设备。
+            Console.WriteLine($"[GrindingEngine] [{craneName}] 去{grinder.StationCode}下料取板前确认Z=0±5mm");
+            await crane.EnsureZAtZeroAsync(5, ct);
             await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(ApplyOffsetX(gx), ApplyOffsetY(gy), -1, ct: c), "XY去研磨机取料位", ct);
             await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, _cfg.Grinding.CraneNo, grinder.StationCode, $"研磨天车-{grinder.StationCode}下料取料前", ct);
             await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(-1, -1, ApplyOffsetZ(pickupZ), ct: c), "Z降研磨机取料位", ct);

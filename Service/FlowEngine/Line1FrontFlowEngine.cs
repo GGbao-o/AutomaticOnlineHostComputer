@@ -1817,6 +1817,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
             //设置速度
             await crane.SetAbsSpeedAsync(crSpd.X.Speed, crSpd.X.Accel, crSpd.X.Decel, crSpd.Y.Speed, crSpd.Y.Accel,
                 crSpd.Y.Decel, crSpd.Z.Speed, crSpd.Z.Accel, crSpd.Z.Decel, ct);
+            // 新任务可能承接上一次异常/急停后的天车位置；首次去Pos3横移前必须实时确认Z已回零。
+            Console.WriteLine("[Line1Front] [前天车] 去货叉Pos3前确认Z=0±5mm");
+            await crane.EnsureZAtZeroAsync(5, ct);
             // X绝对编码器微调必须在Z下降前执行: 先XY到货叉Pos3上方, 复核D5014~D5015, 合格后才下降。
             await crane.MoveAbsoluteAsync(f2xOff, f2yOff, -1, ct: ct);
             await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, CraneFront1No, "ST713", "1号线前天车-货叉Pos3取料前", ct);

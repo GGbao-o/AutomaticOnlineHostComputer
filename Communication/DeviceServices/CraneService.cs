@@ -730,6 +730,38 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         }
 
         /// <summary>
+        /// 确认Z轴位于零位允许范围。用于新取料任务首次XY横移前，避免上一次异常后低Z横移。
+        /// 状态未知、回零失败或回零后复核失败均直接抛出，调用方不得继续XY动作。
+        /// </summary>
+        public async Task EnsureZAtZeroAsync(int tolerance = 5, CancellationToken ct = default)
+        {
+            if (tolerance < 0)
+                throw new ArgumentOutOfRangeException(nameof(tolerance), tolerance, "Z零位容差不能小于0");
+
+            var status = await ReadStatusAsync(ct);
+            if (status == null)
+                throw new InvalidOperationException($"[CraneService] [{_name}] 无法读取当前Z，禁止XY横移");
+
+            if (Math.Abs(status.ZPos) <= tolerance)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] Z零位检查通过: Z={status.ZPos}, 容差=±{tolerance}mm");
+                return;
+            }
+
+            Console.WriteLine($"[CraneService] [{_name}] Z={status.ZPos}超出零位容差±{tolerance}mm，先回Z=0再允许XY");
+            await MoveAbsoluteAsync(-1, -1, 0, tolerance: tolerance, ct: ct);
+
+            var verified = await ReadStatusAsync(ct);
+            if (verified == null)
+                throw new InvalidOperationException($"[CraneService] [{_name}] Z回零后状态读取失败，禁止XY横移");
+            if (Math.Abs(verified.ZPos) > tolerance)
+                throw new InvalidOperationException(
+                    $"[CraneService] [{_name}] Z回零复核失败: Z={verified.ZPos}, 容差=±{tolerance}mm，禁止XY横移");
+
+            Console.WriteLine($"[CraneService] [{_name}] Z回零复核通过: Z={verified.ZPos}, 容差=±{tolerance}mm");
+        }
+
+        /// <summary>
         /// 绝对位移：写入目标坐标 → 按 Z 轴方向决定触发顺序 → 轮询到位 → 复位。
         /// <para>安全规范：Z 下降时先走 XY 再走 Z（防撞），Z 上升时先走 Z 再走 XY（防拖拽）。</para>
         /// <para>

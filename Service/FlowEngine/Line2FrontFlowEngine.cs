@@ -1747,6 +1747,9 @@ public sealed class Line2FrontFlowEngine : IDisposable
             var crSpd = _cfg.GetCraneSpeed(CraneFront2No); // 2号线前天车=3号
             await crane.SetAbsSpeedAsync(crSpd.X.Speed, crSpd.X.Accel, crSpd.X.Decel, crSpd.Y.Speed, crSpd.Y.Accel,
                 crSpd.Y.Decel, crSpd.Z.Speed, crSpd.Z.Accel, crSpd.Z.Decel, ct);
+            // 新任务可能承接上一次异常/急停后的天车位置；首次去Pos3横移前必须实时确认Z已回零。
+            Console.WriteLine("[Line2Front] [前天车] 去货叉Pos3前确认Z=0±5mm");
+            await crane.EnsureZAtZeroAsync(5, ct);
             await crane.MoveAbsoluteAsync(f2xOff, f2yOff, -1, ct: ct);
             await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, CraneFront2No, "ST714", "2号线前天车-货叉Pos3取料前", ct);
             try

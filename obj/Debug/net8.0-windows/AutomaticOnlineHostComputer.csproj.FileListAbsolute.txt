@@ -204,3 +204,47 @@ D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\refint\Automat
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlineHostComputer.pdb
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlineHostComputer.genruntimeconfig.cache
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\ref\AutomaticOnlineHostComputer.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\fwlib0DN.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\Fwlib0i.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\Fwlib0iB.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\Fwlib0iD.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\fwlib30i.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\Fwlib32.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\fwlibe1.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\FwlibNCG.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\Modbus.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\OCApi.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\OCKrnl.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\OCKrnlDrv.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\OPLog_Fixed.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\Syntec.OpenCNC.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\SyntecFS.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\Config\motion_settings.json
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\dbsettings.json
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\AutomaticOnlineHostComputer.exe
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\AutomaticOnlineHostComputer.deps.json
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\AutomaticOnlineHostComputer.runtimeconfig.json
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\AutomaticOnlineHostComputer.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final\AutomaticOnlineHostComputer.pdb
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\fwlib0DN.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\Fwlib0i.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\Fwlib0iB.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\Fwlib0iD.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\fwlib30i.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\Fwlib32.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\fwlibe1.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\FwlibNCG.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\Modbus.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\OCApi.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\OCKrnl.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\OCKrnlDrv.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\OPLog_Fixed.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\Syntec.OpenCNC.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\SyntecFS.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\Config\motion_settings.json
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\dbsettings.json
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\AutomaticOnlineHostComputer.exe
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\AutomaticOnlineHostComputer.deps.json
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\AutomaticOnlineHostComputer.runtimeconfig.json
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\AutomaticOnlineHostComputer.dll
+C:\Users\30935\AppData\Local\Temp\codex-zguard-final-verify\AutomaticOnlineHostComputer.pdb
