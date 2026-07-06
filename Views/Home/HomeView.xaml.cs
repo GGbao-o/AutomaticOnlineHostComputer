@@ -65,7 +65,9 @@ public partial class HomeView : UserControl
     /// </summary>
     private void ClearMachineStatus_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new ClearMachineStatusDialog(_viewModel.IpMap) { Owner = Window.GetWindow(this) };
+        var dialog = new ClearMachineStatusDialog(
+            _viewModel.IpMap,
+            _viewModel.GetBoringClearBlockReason) { Owner = Window.GetWindow(this) };
         dialog.ShowDialog();
     }
 

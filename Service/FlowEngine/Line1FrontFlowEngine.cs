@@ -118,6 +118,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
     private readonly SemaphoreSlim _forkDispatchLock = new(1, 1);  // 货叉分派(本线独立,不与机械手锁竞争)
     private readonly SemaphoreSlim _craneFrontLock = new(1, 1);    // 前天车流程
     private readonly SemaphoreSlim _transferRackLock;               // 中转架操作 (与后端引擎共享)
+    /// <summary>仅串行化人工前端应急；正常主循环不取得此锁。</summary>
+    private readonly SemaphoreSlim _frontEmergencyLock = new(1, 1);
     private readonly SafetyFlags _safety;                      // 前后天车共享安全标志
 
     private const int CraneFront1No = 1; // 1号线前天车编号
@@ -254,6 +256,279 @@ public sealed class Line1FrontFlowEngine : IDisposable
 
     /// <summary>恢复 — 清除暂停标志，主循环继续执行。</summary>
     public void Resume() { _paused = false; Console.WriteLine("[Line1Front] ▶ 恢复"); }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  前端在途应急（仅由人工应急中心调用；正常主循环不调用）
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>普通双头镗清零是否会破坏当前软件在途阶段。</summary>
+    public bool HasFrontInTransit => GetBoringClearBlockReason() != null;
+
+    /// <summary>
+    /// 返回普通双头镗清零的阻断原因。这里只读内存，不清状态、不释放锁。
+    /// 前天车队列不属于双头镗当前握手，因此不作为阻断条件。
+    /// </summary>
+    public string? GetBoringClearBlockReason()
+    {
+        WorkpieceCache? wp;
+        lock (_wpLock) wp = _currentWp;
+        bool blocked = wp != null
+                       || _forkPhase != ForkBoringPhase.Idle
+                       || _forkHandshakeInProgress
+                       || _manipulatorClearedFork
+                       || _boringUnloadDoneSent
+                       || _m912Sent
+                       || _skipBoringTriggered;
+        if (!blocked) return null;
+
+        return $"1号线存在前端在途状态：当前工件={(wp?.IdentityText ?? "无")}，" +
+               $"货叉阶段={_forkPhase}，握手执行中={_forkHandshakeInProgress}，机械手离叉门闩={_manipulatorClearedFork}，" +
+               $"R6108已发送={_boringUnloadDoneSent}，M912已发送={_m912Sent}，" +
+               $"跳镗已触发={_skipBoringTriggered}。";
+    }
+
+    /// <summary>
+    /// 生成前端在途实时诊断。设备读取互相独立，某台设备读取失败不会用旧快照冒充实时状态。
+    /// </summary>
+    public async Task<string> GetFrontEmergencyInfoAsync(CancellationToken ct = default)
+    {
+        var sb = new StringBuilder();
+        WorkpieceCache? wp;
+        lock (_wpLock) wp = _currentWp;
+        _craneQueue.TryPeek(out var craneHead);
+
+        sb.AppendLine("【1号线前端在途应急诊断】");
+        sb.AppendLine($"引擎: 运行={IsRunning} 暂停={_paused}");
+        sb.AppendLine($"当前工件 _currentWp: {(wp?.IdentityText ?? "无")}");
+        sb.AppendLine($"货叉阶段 _forkPhase: {_forkPhase}");
+        sb.AppendLine($"门闩: 机械手已安全离叉={_manipulatorClearedFork} 握手执行中={_forkHandshakeInProgress} R6108已发送={_boringUnloadDoneSent} M912已发送={_m912Sent} 跳镗已触发={_skipBoringTriggered}");
+        sb.AppendLine($"锁: 机械手={LockText(_manipulatorLock)} 货叉分派={LockText(_forkDispatchLock)} 前天车={LockText(_craneFrontLock)} 中转架={LockText(_transferRackLock)}");
+        sb.AppendLine($"前天车队列: 数量={_craneQueue.Count} 队头={(_craneQueue.IsEmpty ? "无" : craneHead.IdentityText)}（丢弃当前工件不会清此队列）");
+
+        try
+        {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            if (_forkSvc == null || !_forkSvc.IsConnected)
+                sb.AppendLine("货叉实时状态: 未连接，未使用缓存值");
+            else
+            {
+                var fs = await _forkSvc.ReadAllStatusAsync(linked.Token);
+                sb.Append("货叉实时 M900~M914:");
+                for (int bit = 0; bit <= 14; bit++)
+                    sb.Append($" M{900 + bit}={((fs.RawValue & (1 << bit)) != 0 ? 1 : 0)}");
+                sb.AppendLine();
+            }
+        }
+        catch (Exception ex) { sb.AppendLine($"货叉实时状态读取失败: {ex.GetType().Name} - {ex.Message}"); }
+
+        try
+        {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            if (_boringSvc == null || !_boringSvc.IsConnected)
+                sb.AppendLine("双头镗实时状态: 未连接，未使用缓存值");
+            else
+            {
+                var r = await _boringSvc.ReadCycleRawAsync(linked.Token);
+                sb.AppendLine($"双头镗实时: R6101={r.R6101} R6102={r.R6102} R6103={r.R6103} R6104={r.R6104} R6105={r.R6105} R6106={r.R6106} R6107={r.R6107} R6108={r.R6108}");
+            }
+        }
+        catch (Exception ex) { sb.AppendLine($"双头镗实时状态读取失败: {ex.GetType().Name} - {ex.Message}"); }
+
+        try
+        {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            _manipulator1 ??= _manipulatorCache.GetOrCreateService(1);
+            if (!_manipulator1.IsConnected)
+                sb.AppendLine("机械手1实时状态: 未连接，未使用缓存值");
+            else
+            {
+                var ms = await _manipulator1.ReadStatusAsync(linked.Token);
+                if (ms == null) sb.AppendLine("机械手1实时状态: 读取返回空，安全状态未知");
+                else
+                {
+                    int safeY = _cfg.SkewBed.GetManipulator1SafeYForLine(1);
+                    bool ySafe = Math.Abs(ms.YPos - safeY) <= MotionConfig.SkewBedSection.Manipulator1SafeYTolerance;
+                    sb.AppendLine($"机械手1实时: X={ms.XPos} Y={ms.YPos} Z={ms.ZPos} 本线安全Y={safeY} Y安全={ySafe} Z回零={ms.ZPos == 0} 持件={ms.HasRoller}");
+                }
+            }
+        }
+        catch (Exception ex) { sb.AppendLine($"机械手1实时状态读取失败: {ex.GetType().Name} - {ex.Message}"); }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// 板已放在货叉但门闩未打开时的人工续跑入口。
+    /// 不移动设备、不改阶段；实时安全条件和M801全部成功后只打开本任务门闩。
+    /// </summary>
+    public async Task<string> EmergencyContinuePlateOnForkAsync(CancellationToken ct = default)
+    {
+        _paused = true;
+        await Task.Delay(600, ct); // 让已经进入的500ms主循环退出本轮，不影响正常流程。
+        if (!await _frontEmergencyLock.WaitAsync(0, ct)) return "前端应急正在执行，请勿重复操作。";
+        try
+        {
+            var (guards, guardError) = await TryAcquireFrontEmergencyGuardsAsync(ct);
+            if (guards == null) return guardError;
+            using (guards)
+            {
+                WorkpieceCache? wp;
+                lock (_wpLock) wp = _currentWp;
+                if (wp == null) return "继续失败：_currentWp为空，没有可继续的当前工件。";
+                if (_forkPhase != ForkBoringPhase.Idle) return $"继续失败：仅允许Idle门闩卡死场景，当前阶段={_forkPhase}。";
+                if (_manipulatorClearedFork) return "继续失败：机械手离叉门闩已经打开，无需重复操作。";
+                if (_forkHandshakeInProgress) return "继续失败：货叉/双头镗握手仍在执行。";
+                if (_forkSvc == null || !_forkSvc.IsConnected) return "继续失败：货叉未连接，无法实时确认板和位置。";
+                if (_manipulator1 == null || !_manipulator1.IsConnected) return "继续失败：机械手1未连接，无法实时确认安全位置。";
+                if (_rackSvc == null || !_rackSvc.IsConnected) return "继续失败：总上料架服务未连接，无法补发M801。";
+
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+                var fs = await _forkSvc.ReadAllStatusAsync(linked.Token);
+                if (!fs.HasPlate || !fs.AtStandbyPos || fs.AtPos3)
+                    return $"继续失败：货叉必须满足M900=1、M901=1、M902=0；当前M900={(fs.HasPlate ? 1 : 0)} M901={(fs.AtStandbyPos ? 1 : 0)} M902={(fs.AtPos3 ? 1 : 0)}。";
+
+                var ms = await _manipulator1.ReadStatusAsync(linked.Token);
+                if (ms == null) return "继续失败：机械手1实时状态读取为空，安全状态未知。";
+                int safeY = _cfg.SkewBed.GetManipulator1SafeYForLine(1);
+                bool ySafe = Math.Abs(ms.YPos - safeY) <= MotionConfig.SkewBedSection.Manipulator1SafeYTolerance;
+                if (ms.ZPos != 0 || !ySafe)
+                    return $"继续失败：机械手必须Z=0且位于1号线安全Y={safeY}±{MotionConfig.SkewBedSection.Manipulator1SafeYTolerance}；当前Y={ms.YPos} Z={ms.ZPos}。";
+                if (ms.HasRoller != 0)
+                    return $"继续失败：机械手持件状态HasRoller={ms.HasRoller}，不能确认板已安全留在货叉。";
+
+                // 与正常流程保持相同安全承诺：M801成功以后才允许打开货叉门闩。
+                await _rackSvc.SetPickupDoneAsync(linked.Token);
+                _manipulatorClearedFork = true;
+                string result = $"1号线当前板已允许继续：{wp.Value.IdentityText}。已实时确认货叉有板且在待机位、机械手Y={ms.YPos}/Z=0且不持件，并成功补发M801；仅打开货叉门闩，阶段仍为Idle。线体保持暂停，请检查后手动恢复。";
+                Console.WriteLine($"[Line1Front] [前端应急] {result}");
+                return result;
+            }
+        }
+        catch (Exception ex)
+        {
+            string result = $"继续失败：{ex.GetType().Name} - {ex.Message}。门闩和业务阶段保持不变，线体保持暂停。";
+            Console.WriteLine($"[Line1Front] [前端应急] {result}");
+            return result;
+        }
+        finally { _frontEmergencyLock.Release(); }
+    }
+
+    /// <summary>
+    /// 人工确认实物已处理后的当前工件作废入口。
+    /// 第一级先清设备输出再清软件；设备失败时保持软件状态，由UI二次确认后才能仅清软件。
+    /// </summary>
+    public async Task<string> EmergencyDiscardCurrentAsync(bool skipDeviceClear, CancellationToken ct = default)
+    {
+        _paused = true;
+        await Task.Delay(600, ct);
+        if (!await _frontEmergencyLock.WaitAsync(0, ct)) return "前端应急正在执行，请勿重复操作。";
+        try
+        {
+            var (guards, guardError) = await TryAcquireFrontEmergencyGuardsAsync(ct);
+            if (guards == null) return guardError;
+            using (guards)
+            {
+                if (_forkHandshakeInProgress) return "丢弃失败：货叉/双头镗握手仍在执行，软件状态未修改。";
+                WorkpieceCache? discarded;
+                lock (_wpLock) discarded = _currentWp;
+
+                if (!skipDeviceClear)
+                {
+                    try
+                    {
+                        if (_forkSvc == null || !_forkSvc.IsConnected)
+                            throw new InvalidOperationException("货叉未连接，无法清M911~M914");
+                        if (_boringSvc == null || !_boringSvc.IsConnected)
+                            throw new InvalidOperationException("双头镗未连接，无法清R6108/R6104/R6102");
+                        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+                        await _forkSvc.ClearMotionCommandsAsync(linked.Token);
+                        await _boringSvc.ClearEmergencyOutputsAsync(linked.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        string failed = $"设备侧清零失败: {ex.GetType().Name} - {ex.Message}。软件当前工件和阶段未清，线体保持暂停。设备写入可能部分完成，请核对M911~M914及R6102/R6104/R6108后再决定是否仅清软件。";
+                        Console.WriteLine($"[Line1Front] [前端应急] {failed}");
+                        return failed;
+                    }
+                }
+
+                lock (_wpLock) _currentWp = null;
+                _forkPhase = ForkBoringPhase.Idle;
+                _manipulatorClearedFork = false;
+                _forkHandshakeInProgress = false;
+                _boringUnloadDoneSent = false;
+                _m912Sent = false;
+                _skipBoringTriggered = false;
+
+                string mode = skipDeviceClear
+                    ? "仅清软件；设备信号未由本次操作确认清除"
+                    : "已清M911~M914及R6108/R6104/R6102，并清软件状态";
+                string result = $"1号线前端当前工件已丢弃并回Idle：{(discarded?.IdentityText ?? "原本无_currentWp")}。{mode}。缓存FIFO和前天车队列未清，线体保持暂停，请检查后手动恢复。";
+                Console.WriteLine($"[Line1Front] [前端应急] {result}");
+                return result;
+            }
+        }
+        catch (Exception ex)
+        {
+            string result = $"丢弃失败：{ex.GetType().Name} - {ex.Message}。软件状态未修改，线体保持暂停。";
+            Console.WriteLine($"[Line1Front] [前端应急] {result}");
+            return result;
+        }
+        finally { _frontEmergencyLock.Release(); }
+    }
+
+    private static string LockText(SemaphoreSlim semaphore) => semaphore.CurrentCount > 0 ? "空闲" : "占用";
+
+    /// <summary>
+    /// 以零等待方式实际取得三个关键锁，避免“检查CurrentCount后旧动作又进入”的竞态。
+    /// 取得失败立即释放本方法已经取得的锁；绝不强行释放别的动作持有的锁。
+    /// </summary>
+    private async Task<(FrontEmergencyGuardLease? Lease, string Error)> TryAcquireFrontEmergencyGuardsAsync(CancellationToken ct)
+    {
+        bool manipulator = false, fork = false, crane = false;
+        try
+        {
+            manipulator = await _manipulatorLock.WaitAsync(0, ct);
+            if (!manipulator) return (null, "应急拒绝：机械手动作锁仍被占用，旧动作可能尚未退出。线体保持暂停。需要等待动作退出后刷新诊断。");
+            fork = await _forkDispatchLock.WaitAsync(0, ct);
+            if (!fork) return (null, "应急拒绝：货叉分派锁仍被占用，旧动作可能尚未退出。线体保持暂停。需要等待动作退出后刷新诊断。");
+            crane = await _craneFrontLock.WaitAsync(0, ct);
+            if (!crane) return (null, "应急拒绝：前天车锁仍被占用，旧动作可能尚未退出。线体保持暂停。需要等待动作退出后刷新诊断。");
+            return (new FrontEmergencyGuardLease(_manipulatorLock, _forkDispatchLock, _craneFrontLock), "");
+        }
+        finally
+        {
+            if (!crane)
+            {
+                if (fork) _forkDispatchLock.Release();
+                if (manipulator) _manipulatorLock.Release();
+            }
+        }
+    }
+
+    private sealed class FrontEmergencyGuardLease : IDisposable
+    {
+        private readonly SemaphoreSlim _manipulator;
+        private readonly SemaphoreSlim _fork;
+        private readonly SemaphoreSlim _crane;
+        private int _released;
+
+        public FrontEmergencyGuardLease(SemaphoreSlim manipulator, SemaphoreSlim fork, SemaphoreSlim crane)
+        { _manipulator = manipulator; _fork = fork; _crane = crane; }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            _crane.Release();
+            _fork.Release();
+            _manipulator.Release();
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     //  工件缓存方法
@@ -2148,6 +2423,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
         _boringSvc?.Dispose();
         _forkSvc?.Dispose();
         if (_ownsManipulatorLock) _manipulatorLock.Dispose();
+        _frontEmergencyLock.Dispose();
         _forkDispatchLock.Dispose();
         _craneFrontLock.Dispose();
         if (_ownsTransferRackLock) _transferRackLock.Dispose();

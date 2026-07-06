@@ -1439,6 +1439,73 @@ public sealed class HomeViewModel : ObservableObject
         };
     }
 
+    /// <summary>读取1/2号线前端在途实时诊断；只读，不自动暂停或修改状态。</summary>
+    public Task<string> GetFrontEmergencyInfoAsync(int line, CancellationToken ct = default)
+    {
+        return line switch
+        {
+            1 => _line1Engine?.GetFrontEmergencyInfoAsync(ct) ?? Task.FromResult("1号线前端引擎未初始化"),
+            2 => _line2Engine?.GetFrontEmergencyInfoAsync(ct) ?? Task.FromResult("2号线前端引擎未初始化"),
+            _ => Task.FromResult($"无效线体: {line}")
+        };
+    }
+
+    /// <summary>
+    /// 查询普通双头镗清零是否会破坏前端在途阶段。
+    /// 返回null表示没有软件在途阻断；这不代表设备物理状态安全。
+    /// </summary>
+    public string? GetBoringClearBlockReason(int line)
+    {
+        return line switch
+        {
+            1 => _line1Engine?.GetBoringClearBlockReason(),
+            2 => _line2Engine?.GetBoringClearBlockReason(),
+            _ => $"无效线体: {line}"
+        };
+    }
+
+    /// <summary>暂停对应整线后，尝试安全打开“板已在货叉”的当前任务门闩。</summary>
+    public async Task<string> EmergencyContinueFrontPlateAsync(int line, CancellationToken ct = default)
+    {
+        PauseWholeLineForFrontEmergency(line);
+        return line switch
+        {
+            1 => _line1Engine == null ? "1号线前端引擎未初始化" : await _line1Engine.EmergencyContinuePlateOnForkAsync(ct),
+            2 => _line2Engine == null ? "2号线前端引擎未初始化" : await _line2Engine.EmergencyContinuePlateOnForkAsync(ct),
+            _ => $"无效线体: {line}"
+        };
+    }
+
+    /// <summary>暂停对应整线后，执行前端当前工件的设备优先/仅软件两级作废。</summary>
+    public async Task<string> EmergencyDiscardFrontCurrentAsync(int line, bool skipDeviceClear, CancellationToken ct = default)
+    {
+        PauseWholeLineForFrontEmergency(line);
+        return line switch
+        {
+            1 => _line1Engine == null ? "1号线前端引擎未初始化" : await _line1Engine.EmergencyDiscardCurrentAsync(skipDeviceClear, ct),
+            2 => _line2Engine == null ? "2号线前端引擎未初始化" : await _line2Engine.EmergencyDiscardCurrentAsync(skipDeviceClear, ct),
+            _ => $"无效线体: {line}"
+        };
+    }
+
+    private void PauseWholeLineForFrontEmergency(int line)
+    {
+        // 前端应急可能涉及共享机械手、货叉和前天车；先同步关闭该线前后端派发门，
+        // 再由引擎内部取得实际动作锁。这里只暂停，不取消动作、不释放锁。
+        if (line == 1)
+        {
+            _line1Engine?.Pause();
+            _line1RearEngine?.Pause();
+            IsLine1Running = false;
+        }
+        else if (line == 2)
+        {
+            _line2Engine?.Pause();
+            _line2RearEngine?.Pause();
+            IsLine2Running = false;
+        }
+    }
+
     public string GetBalancingEmergencyInfo(string position)
         => _line1BalancingEngine?.GetBalancingEmergencyInfo(position) ?? "动平衡引擎未初始化";
 

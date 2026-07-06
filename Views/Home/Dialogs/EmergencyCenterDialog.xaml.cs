@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -9,6 +10,7 @@ namespace AutomaticOnlineHostComputer.Views.Home.Dialogs;
 public partial class EmergencyCenterDialog : Window
 {
     private readonly HomeViewModel _viewModel;
+    private int _frontActionInProgress;
     private static readonly string[] Line1Beds = { "ST108", "ST109", "ST111", "ST110", "ST112" };
     private static readonly string[] Line2Beds = { "ST606", "ST607", "ST608", "ST609", "ST610" };
 
@@ -18,8 +20,10 @@ public partial class EmergencyCenterDialog : Window
         _viewModel = viewModel;
         ResetSkewBeds();
         RefreshAll();
+        Loaded += async (_, _) => await RefreshFrontInfoAsync();
     }
 
+    private int SelectedFrontLine => int.Parse(((ComboBoxItem)FrontLineBox.SelectedItem).Tag?.ToString() ?? "1");
     private int SelectedSkewLine => int.Parse(((ComboBoxItem)SkewLineBox.SelectedItem).Tag?.ToString() ?? "1");
     private string SelectedSkewBed => SkewBedBox.SelectedItem?.ToString() ?? "";
     private string SelectedBalancePosition => ((ComboBoxItem)BalancePositionBox.SelectedItem).Tag?.ToString() ?? "";
@@ -56,6 +60,36 @@ public partial class EmergencyCenterDialog : Window
             GrindingInfoBox.Text = _viewModel.GetGrindingEmergencyInfo(SelectedGrindingTarget);
     }
 
+    private async Task RefreshFrontInfoAsync()
+    {
+        try
+        {
+            FrontInfoBox.Text = await _viewModel.GetFrontEmergencyInfoAsync(SelectedFrontLine);
+        }
+        catch (Exception ex)
+        {
+            ShowEmergencyException("前端实时诊断异常", ex, text => FrontInfoBox.Text = text);
+        }
+    }
+
+    private async Task AppendFrontInfoAsync()
+    {
+        try
+        {
+            FrontInfoBox.Text += "\n\n" + await _viewModel.GetFrontEmergencyInfoAsync(SelectedFrontLine);
+            FrontInfoBox.ScrollToEnd();
+        }
+        catch (Exception ex)
+        {
+            FrontInfoBox.Text += $"\n\n刷新诊断失败: {ex.GetType().Name} - {ex.Message}";
+        }
+    }
+
+    private async void Front_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsLoaded) await RefreshFrontInfoAsync();
+    }
+
     private void Skew_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded) return;
@@ -76,7 +110,88 @@ public partial class EmergencyCenterDialog : Window
     private void RefreshSkew_Click(object sender, RoutedEventArgs e) => RefreshSkewInfo();
     private void RefreshBalance_Click(object sender, RoutedEventArgs e) => RefreshBalanceInfo();
     private void RefreshGrinding_Click(object sender, RoutedEventArgs e) => RefreshGrindingInfo();
+    private async void RefreshFront_Click(object sender, RoutedEventArgs e) => await RefreshFrontInfoAsync();
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private async void ContinueFront_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this,
+                $"确认允许{SelectedFrontLine}号线货叉继续当前板？\n\n" +
+                "仅适用于：板已经稳定放在货叉待机位，但机械手安全退出或M801异常导致门闩未打开。\n\n" +
+                "请人工确认：\n1. 板稳定在货叉，机械手不持件；\n2. 机械手Z已回0并在本线安全Y；\n3. 货叉、机械手、前天车均未运动，现场无人处于危险区。\n\n" +
+                "系统还会实时复核M900/M901/M902、机械手Y/Z/持件状态并补发M801。不会自动移动设备，也不会自动恢复线体。",
+                "确认前端当前板继续", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        if (!TryBeginFrontAction()) return;
+        try
+        {
+            string result = await _viewModel.EmergencyContinueFrontPlateAsync(SelectedFrontLine);
+            FrontInfoBox.Text = result;
+            ShowEmergencyFailureIfNeeded("前端当前板继续失败", result);
+            await AppendFrontInfoAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowEmergencyException("前端当前板继续异常", ex, text => FrontInfoBox.Text = text);
+        }
+        finally { EndFrontAction(); }
+    }
+
+    private async void DiscardFront_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this,
+                $"确认丢弃{SelectedFrontLine}号线前端当前工件并回Idle？\n\n" +
+                "请先人工确认工件已经移走或确定报废，机械手/货叉/双头镗/前天车均停止，磁铁和现场人员安全。\n\n" +
+                "系统会先清货叉M911~M914和双头镗R6108/R6104/R6102，全部成功后才清_currentWp、阶段和门闩。不会清缓存FIFO或前天车队列，也不会自动恢复线体。",
+                "确认丢弃前端当前工件", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        if (!TryBeginFrontAction()) return;
+        try
+        {
+            string result = await _viewModel.EmergencyDiscardFrontCurrentAsync(
+                SelectedFrontLine, skipDeviceClear: false);
+            FrontInfoBox.Text = result;
+            if (await HandleDeviceClearFailureAsync(result,
+                    () => _viewModel.EmergencyDiscardFrontCurrentAsync(
+                        SelectedFrontLine, skipDeviceClear: true),
+                    text => FrontInfoBox.Text = text))
+            {
+                await AppendFrontInfoAsync();
+                return;
+            }
+
+            ShowEmergencyFailureIfNeeded("前端当前工件丢弃失败", result);
+            await AppendFrontInfoAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowEmergencyException("前端当前工件丢弃异常", ex, text => FrontInfoBox.Text = text);
+        }
+        finally { EndFrontAction(); }
+    }
+
+    private bool TryBeginFrontAction()
+    {
+        if (Interlocked.CompareExchange(ref _frontActionInProgress, 1, 0) != 0)
+        {
+            MessageBox.Show(this, "前端应急操作正在执行，请勿重复点击。", "操作进行中",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return false;
+        }
+
+        ContinueFrontButton.IsEnabled = false;
+        DiscardFrontButton.IsEnabled = false;
+        return true;
+    }
+
+    private void EndFrontAction()
+    {
+        ContinueFrontButton.IsEnabled = true;
+        DiscardFrontButton.IsEnabled = true;
+        Interlocked.Exchange(ref _frontActionInProgress, 0);
+    }
 
     private async void ClearSkew_Click(object sender, RoutedEventArgs e)
     {
@@ -176,6 +291,8 @@ public partial class EmergencyCenterDialog : Window
         // 应急接口目前返回可读文本而不是结构化结果；统一兜底常见失败关键词，
         // 防止新增异常分支只显示在信息框、现场没有醒目的弹窗提示。
         bool failed = result.Contains("失败", StringComparison.Ordinal)
+                      || result.Contains("拒绝", StringComparison.Ordinal)
+                      || result.Contains("禁止", StringComparison.Ordinal)
                       || result.Contains("未找到", StringComparison.Ordinal)
                       || result.Contains("超时", StringComparison.Ordinal)
                       || result.Contains("旧动作6秒内未退出", StringComparison.Ordinal)

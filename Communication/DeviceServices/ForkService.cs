@@ -138,6 +138,24 @@ public sealed class ForkService : IDisposable
     public Task GoStandbyToPos3Async(CancellationToken ct = default) =>
         WriteMotionCommandAsync(Addr.M_StandbyToPos3, "待机位直接送Pos3", ct);
 
+    /// <summary>
+    /// 应急清除中控拥有的货叉动作输出 M911~M914。
+    /// 只清动作命令位，保留 M900~M902 输入反馈及 M903~M910 未使用位；
+    /// 正常状态机不会调用此方法，只供人工确认后的前端在途应急使用。
+    /// </summary>
+    public async Task ClearMotionCommandsAsync(CancellationToken ct = default)
+    {
+        var result = await _client.ReadAsync(Addr.ReadStartAddr, Addr.ReadWordCount, ct);
+        int current = result.IntValues.Length > 0 ? result.IntValues[0] : 0;
+        int commandMask = 0;
+        for (int m = Addr.M_GoStandby; m <= Addr.M_StandbyToPos3; m++)
+            commandMask |= 1 << (m - Addr.ReadStartAddr);
+
+        int next = current & ~commandMask;
+        await _client.WriteAsync(Addr.ReadStartAddr, next, ct);
+        Console.WriteLine($"[ForkSvc] [{_name}] 应急清除 M911~M914 (word 0x{current:X4}→0x{next:X4})");
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

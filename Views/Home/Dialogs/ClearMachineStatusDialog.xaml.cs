@@ -18,16 +18,21 @@ namespace AutomaticOnlineHostComputer.Views.Home.Dialogs;
 public partial class ClearMachineStatusDialog : Window
 {
     private readonly Dictionary<string, string> _stationIps;
+    private readonly Func<int, string?> _getBoringClearBlockReason;
 
     // 即使操作员快速点击不同按钮，也只允许一个设备清理在途。
     // 设备清理会建立连接并连续写多个寄存器，并行执行不仅难以判断日志，也可能与共享通信资源竞争。
     private int _clearInProgress;
 
     /// <param name="stationIps">站号→IP映射, 从HomeViewModel传入</param>
-    public ClearMachineStatusDialog(Dictionary<string, string> stationIps)
+    /// <param name="getBoringClearBlockReason">按线体查询前端软件在途状态；非空时禁止普通双头镗清零。</param>
+    public ClearMachineStatusDialog(
+        Dictionary<string, string> stationIps,
+        Func<int, string?> getBoringClearBlockReason)
     {
         InitializeComponent();
         _stationIps = stationIps;
+        _getBoringClearBlockReason = getBoringClearBlockReason;
     }
 
     private void Log(string msg, bool isError = false)
@@ -50,7 +55,8 @@ public partial class ClearMachineStatusDialog : Window
         string code,
         string deviceName,
         string registerText,
-        Func<string, Task> clearAction)
+        Func<string, Task> clearAction,
+        string? additionalWarning = null)
     {
         string? ip = Ip(code);
         if (string.IsNullOrWhiteSpace(ip))
@@ -66,7 +72,8 @@ public partial class ClearMachineStatusDialog : Window
             $"IP：{ip}\n" +
             $"清理：{registerText}\n\n" +
             "只清上位机写入的设备数据，不清任务、缓存、锁或引擎状态。\n" +
-            "请确认对应引擎已经停止或暂停，且设备没有正在执行的动作。";
+            "请确认对应引擎已经停止或暂停，且设备没有正在执行的动作。" +
+            (string.IsNullOrWhiteSpace(additionalWarning) ? "" : $"\n\n{additionalWarning}");
 
         if (MessageBox.Show(this, prompt, $"确认清空 {code}",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
@@ -105,12 +112,29 @@ public partial class ClearMachineStatusDialog : Window
     // ═══════════════════════════════════════════════════════════════
 
     private async void BtnBoring1_Click(object sender, RoutedEventArgs e)
-        => await RunSingleDeviceClearAsync(BtnBoring1, "ST103", "1号线双头镗",
-            "R6102/R6104/R6108→0", ip => ClearBoringDeviceAsync("1号线双头镗", ip));
+        => await ClearBoringAsync(BtnBoring1, 1, "ST103", "1号线双头镗");
 
     private async void BtnBoring2_Click(object sender, RoutedEventArgs e)
-        => await RunSingleDeviceClearAsync(BtnBoring2, "ST402", "2号线双头镗",
-            "R6102/R6104/R6108→0", ip => ClearBoringDeviceAsync("2号线双头镗", ip));
+        => await ClearBoringAsync(BtnBoring2, 2, "ST402", "2号线双头镗");
+
+    private async Task ClearBoringAsync(Button button, int line, string code, string name)
+    {
+        string? blockReason = _getBoringClearBlockReason(line);
+        if (!string.IsNullOrWhiteSpace(blockReason))
+        {
+            string message = blockReason +
+                "\n\n普通清零只会清设备R6102/R6104/R6108，不会恢复_currentWp、_forkPhase或门闩。" +
+                "\n有在途工件时禁止单独使用。请进入“应急处理中心 → 前端在途应急”处理。";
+            Log($"✘ {name} ({code}) 普通清零已阻止：{blockReason}", true);
+            MessageBox.Show(this, message, $"禁止清空 {code}", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        await RunSingleDeviceClearAsync(button, code, name,
+            "R6102/R6104/R6108→0",
+            ip => ClearBoringDeviceAsync(name, ip),
+            "特别注意：本按钮只清设备寄存器，软件阶段不会恢复；有在途工件时禁止单独使用。需要处理_currentWp、_forkPhase或门闩时，请使用“前端在途应急”。");
+    }
 
     private static async Task ClearBoringDeviceAsync(string name, string ip)
     {
@@ -118,10 +142,8 @@ public partial class ClearMachineStatusDialog : Window
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await svc.ConnectAsync(cts.Token);
 
-        // 保持现场既定清理顺序：下料完成→上料完成→数据完成。
-        await svc.WriteRAsync(6108, 0, cts.Token);
-        await svc.WriteRAsync(6104, 0, cts.Token);
-        await svc.WriteRAsync(6102, 0, cts.Token);
+        // 服务层统一保持现场既定清理顺序：下料完成→上料完成→数据完成。
+        await svc.ClearEmergencyOutputsAsync(cts.Token);
     }
 
     // ═══════════════════════════════════════════════════════════════

@@ -29,6 +29,23 @@ public sealed class BoringModbusService : IDisposable
 
     public async Task<BoringModbusStatusSnapshot> ReadAllSignalsAsync(CancellationToken ct = default)
     {
+        var raw = await ReadCycleRawAsync(ct);
+        return new BoringModbusStatusSnapshot(
+            raw.R6101 != 0,
+            raw.R6102 != 0,
+            raw.R6103 != 0,
+            raw.R6104 != 0,
+            raw.R6107 != 0,
+            raw.R6108 != 0);
+    }
+
+    /// <summary>
+    /// 实时读取双头镗本轮握手区 R6101~R6108 的原始整数值。
+    /// R6105/R6106 当前没有上位机业务定义，但应急诊断仍显示原值，
+    /// 防止未定义位被现场PLC逻辑使用时遗漏关键信息。
+    /// </summary>
+    public async Task<BoringCycleRawSnapshot> ReadCycleRawAsync(CancellationToken ct = default)
+    {
         int start = Addr.RToModbus(Addr.R_RequestData);
         int end = Addr.RToModbus(Addr.R_UnloadDone);
         var result = await _client.ReadAsync(start, end - start + 1, ct);
@@ -41,13 +58,9 @@ public sealed class BoringModbusService : IDisposable
             return result.IntValues[index];
         }
 
-        return new BoringModbusStatusSnapshot(
-            At(Addr.R_RequestData) != 0,
-            At(Addr.R_DataSentDone) != 0,
-            At(Addr.R_RequestLoad) != 0,
-            At(Addr.R_LoadDone) != 0,
-            At(Addr.R_RequestUnload) != 0,
-            At(Addr.R_UnloadDone) != 0);
+        return new BoringCycleRawSnapshot(
+            At(6101), At(6102), At(6103), At(6104),
+            At(6105), At(6106), At(6107), At(6108));
     }
 
     public Task<bool> IsRequestDataAsync(CancellationToken ct = default)
@@ -104,6 +117,19 @@ public sealed class BoringModbusService : IDisposable
         => WriteRAsync(Addr.R_UnloadDone, 1, ct);
 
     /// <summary>
+    /// 应急清除上位机拥有的双头镗输出，保持现场既定顺序：
+    /// R6108 下料完成 → R6104 上料完成 → R6102 数据完成。
+    /// 不写 R6101/R6103/R6107 等 CNC→上位机输入。
+    /// </summary>
+    public async Task ClearEmergencyOutputsAsync(CancellationToken ct = default)
+    {
+        await WriteRAsync(Addr.R_UnloadDone, 0, ct);
+        await WriteRAsync(Addr.R_LoadDone, 0, ct);
+        await WriteRAsync(Addr.R_DataSentDone, 0, ct);
+        Console.WriteLine($"[BoringModbusSvc] [{_name}] 应急清除 R6108/R6104/R6102→0");
+    }
+
+    /// <summary>
     /// 通知本轮下料完成，并立即清除本轮数据下发/上料完成握手位。
     /// 顺序固定为 R6108=1 → R6102=0 → R6104=0，R6108保持为1，不等待设备反馈。
     /// </summary>
@@ -157,3 +183,14 @@ public sealed record BoringModbusStatusSnapshot(
     bool LoadDone,
     bool RequestUnload,
     bool UnloadDone);
+
+/// <summary>双头镗本轮握手区 R6101~R6108 原始值，仅用于实时诊断和人工恢复判断。</summary>
+public sealed record BoringCycleRawSnapshot(
+    int R6101,
+    int R6102,
+    int R6103,
+    int R6104,
+    int R6105,
+    int R6106,
+    int R6107,
+    int R6108);
