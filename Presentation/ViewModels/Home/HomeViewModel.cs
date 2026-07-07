@@ -404,6 +404,10 @@ public sealed class HomeViewModel : ObservableObject
     private readonly Queue<FrontDispatchItem> _frontDispatchQueue = new();
     private bool _frontDispatchWaitingM800Clear;
     private int _frontDispatchLoopCycle;
+    /// <summary>总上料架全局分线的统一轮询周期。总上料架是一板一板到位，1秒足够且避免无意义刷屏。</summary>
+    private static readonly TimeSpan FrontDispatchPollInterval = TimeSpan.FromSeconds(1);
+    /// <summary>两线压力相同时的交替记忆；只在成功写入线路前端缓存后更新。</summary>
+    private int _lastFrontDispatchLine;
 
     private sealed class FrontDispatchItem
     {
@@ -2468,6 +2472,9 @@ public sealed class HomeViewModel : ObservableObject
         return await svc.ReadAllStatusAsync(linked.Token);
     }
 
+    private static Task DelayFrontDispatchPollAsync(CancellationToken ct)
+        => Task.Delay(FrontDispatchPollInterval, ct);
+
     private async Task FrontDispatchLoopAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -2483,7 +2490,7 @@ public sealed class HomeViewModel : ObservableObject
                 // M800=0，后续新板已经让M800重新变1时，调度器会永久误认为仍在等待上一块复位。
                 if (!hasPendingItem && !_frontDispatchWaitingM800Clear)
                 {
-                    await Task.Delay(500, ct);
+                    await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
@@ -2497,7 +2504,8 @@ public sealed class HomeViewModel : ObservableObject
                             $"[FrontDispatch] ⚠ 总上料架服务未初始化, 等待LoadAsync完成; " +
                             $"复位门={(_frontDispatchWaitingM800Clear ? "等待上一块M800=0" : "已就绪")} " +
                             $"全局FIFO={FrontDispatchCachedCount}");
-                    await Task.Delay(500, ct);
+                    item?.Workpiece.ReportStage("等待总上料架通信/服务初始化", "等待中");
+                    await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
@@ -2522,14 +2530,14 @@ public sealed class HomeViewModel : ObservableObject
                         item?.Workpiece.ReportStage("等待上一块M800复位", "等待中");
                     }
 
-                    await Task.Delay(300, ct);
+                    await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
                 // 正常情况下无任务已在方法开头返回；保留兜底，防止UI删除队列与本轮快照并发交错。
                 if (!hasPendingItem || item == null)
                 {
-                    await Task.Delay(500, ct);
+                    await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
@@ -2537,7 +2545,8 @@ public sealed class HomeViewModel : ObservableObject
                 {
                     if (_frontDispatchLoopCycle % 10 == 1)
                         Console.WriteLine($"[FrontDispatch] 队头{item.Workpiece.IdentityText} 当前任务行未启动/已暂停, 保持FIFO等待恢复或删除");
-                    await Task.Delay(500, ct);
+                    item.Workpiece.ReportStage("任务行未启动/已暂停，等待恢复或删除", "等待中");
+                    await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
@@ -2545,7 +2554,8 @@ public sealed class HomeViewModel : ObservableObject
                 {
                     if (_frontDispatchLoopCycle % 20 == 1)
                         Console.WriteLine($"[FrontDispatch] 等M800=1 当前队头={item.Workpiece.IdentityText} 全局队列={FrontDispatchCachedCount}");
-                    await Task.Delay(500, ct);
+                    item.Workpiece.ReportStage("等待总上料架M800=1（物理板到位）", "等待中");
+                    await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
@@ -2555,7 +2565,8 @@ public sealed class HomeViewModel : ObservableObject
                 {
                     if (_frontDispatchLoopCycle % 10 == 1)
                         Console.WriteLine($"[FrontDispatch] 等线路前端缓存消化: 1号={line1FrontCount} 2号={line2FrontCount}");
-                    await Task.Delay(500, ct);
+                    item.Workpiece.ReportStage($"物理板已到位，等待线路前端缓存消化：1号={line1FrontCount}，2号={line2FrontCount}", "等待中");
+                    await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
@@ -2564,8 +2575,21 @@ public sealed class HomeViewModel : ObservableObject
                 {
                     if (_frontDispatchLoopCycle % 10 == 1)
                         Console.WriteLine($"[FrontDispatch] 队头暂不能派发 {item.Workpiece.IdentityText}: {routeReason}");
-                    item.Workpiece.ReportStage($"等待派发: {routeReason}", "等待中");
-                    await Task.Delay(800, ct);
+                    item.Workpiece.ReportStage(routeReason, "等待中");
+                    await DelayFrontDispatchPollAsync(ct);
+                    continue;
+                }
+
+                // 选线和真正写入线路缓存之间仍可能跨过一个调度间隙。
+                // 因此出全局FIFO前再读一次只读准入快照；若现场状态变了，任务继续留在队头，不盲目塞入线路缓存。
+                var selectedReadiness = GetFrontDispatchReadiness(line);
+                if (!selectedReadiness.CanAccept)
+                {
+                    string waitReason = $"物理板已到位，等待{line}号线可接板：{selectedReadiness.RejectReason}";
+                    if (_frontDispatchLoopCycle % 10 == 1)
+                        Console.WriteLine($"[FrontDispatch] 二次准入失败 {item.Workpiece.IdentityText}: {waitReason}");
+                    item.Workpiece.ReportStage(waitReason, "等待中");
+                    await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
@@ -2599,7 +2623,8 @@ public sealed class HomeViewModel : ObservableObject
                     dequeued.Row.AssignedLine = 0;
                     RequeueFrontDispatchHead(dequeued);
                     Console.WriteLine($"[FrontDispatch] ⚠ 写入{line}号线前端缓存失败, 已回队头: {ex.GetType().Name} - {ex.Message}");
-                    await Task.Delay(800, ct);
+                    dequeued.Workpiece.ReportStage($"写入{line}号线前端缓存失败，已回全局队头：{ex.Message}", "等待中");
+                    await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
@@ -2611,6 +2636,7 @@ public sealed class HomeViewModel : ObservableObject
                 });
 
                 dequeued.Workpiece.ReportStage($"已派发{line}号线前端缓存");
+                _lastFrontDispatchLine = line;
                 _frontDispatchWaitingM800Clear = true;
                 Console.WriteLine(
                     $"[FrontDispatch] 🚀 M800=1 D100={status.PlateLength}mm 队头{dequeued.Workpiece.IdentityText} " +
@@ -2625,7 +2651,7 @@ public sealed class HomeViewModel : ObservableObject
             {
                 if (_frontDispatchLoopCycle % 10 == 1)
                     Console.WriteLine($"[FrontDispatch] ⚠ 派发循环异常: {ex.GetType().Name} - {ex.Message}");
-                await Task.Delay(800, ct);
+                await DelayFrontDispatchPollAsync(ct);
             }
         }
 
@@ -2679,14 +2705,27 @@ public sealed class HomeViewModel : ObservableObject
         return false;
     }
 
+    private FrontDispatchReadinessSnapshot GetFrontDispatchReadiness(int line)
+    {
+        return line switch
+        {
+            1 when !_isLine1Running => new FrontDispatchReadinessSnapshot(1, false, "1号线未启动或已暂停", 999, DateTime.UtcNow),
+            2 when !_isLine2Running => new FrontDispatchReadinessSnapshot(2, false, "2号线未启动或已暂停", 999, DateTime.UtcNow),
+            1 when _line1Engine != null => _line1Engine.GetFrontDispatchReadiness(),
+            2 when _line2Engine != null => _line2Engine.GetFrontDispatchReadiness(),
+            1 or 2 => new FrontDispatchReadinessSnapshot(line, false, "前端引擎未初始化", 999, DateTime.UtcNow),
+            _ => new FrontDispatchReadinessSnapshot(line, false, "无效线号", 999, DateTime.UtcNow)
+        };
+    }
+
     private int SelectRouteLineBySkewCapacity(TaskRowViewModel taskRow, out string routeReason)
     {
         double length = taskRow.Length;
         int largeDiameterLine1OnlyMm = _cfg.SkewBed.LargeDiameterLine1OnlyMm;
         bool line1CanProcess = _cfg.SkewBed.AnyBedCanProcessLine(1, length);
         bool line2CanProcess = _cfg.SkewBed.AnyBedCanProcessLine(2, length);
-        bool l1run = _isLine1Running && _line1Engine?.IsRunning == true && _line1Engine.IsPaused != true;
-        bool l2run = _isLine2Running && _line2Engine?.IsRunning == true && _line2Engine.IsPaused != true;
+        var line1Ready = GetFrontDispatchReadiness(1);
+        var line2Ready = GetFrontDispatchReadiness(2);
 
         if (largeDiameterLine1OnlyMm > 0 && taskRow.Diameter >= largeDiameterLine1OnlyMm)
         {
@@ -2696,13 +2735,13 @@ public sealed class HomeViewModel : ObservableObject
                 return 0;
             }
 
-            if (!l1run)
+            if (!line1Ready.CanAccept)
             {
-                routeReason = $"直径{taskRow.Diameter}mm>={largeDiameterLine1OnlyMm}mm需走1号线, 但1号线未启动或已暂停";
+                routeReason = $"大直径必须走1号线，等待1号线可接板：{line1Ready.RejectReason}";
                 return 0;
             }
 
-            routeReason = $"直径{taskRow.Diameter}mm>={largeDiameterLine1OnlyMm}mm, 强制1号线防止穿越2号线货叉区域大板干涉";
+            routeReason = $"直径{taskRow.Diameter}mm>={largeDiameterLine1OnlyMm}mm, 强制1号线防止穿越2号线货叉区域大板干涉；1号线可接板(压力={line1Ready.Pressure})";
             return 1;
         }
 
@@ -2714,51 +2753,56 @@ public sealed class HomeViewModel : ObservableObject
 
         if (line1CanProcess && !line2CanProcess)
         {
-            if (!l1run)
+            if (!line1Ready.CanAccept)
             {
-                routeReason = $"版长{length}mm仅1号线有斜床可加工, 但1号线未启动或已暂停";
+                routeReason = $"版长{length}mm仅1号线有斜床可加工，但1号线暂不可接板：{line1Ready.RejectReason}";
                 return 0;
             }
 
-            routeReason = $"版长{length}mm仅1号线有斜床可加工";
+            routeReason = $"版长{length}mm仅1号线有斜床可加工；1号线可接板(压力={line1Ready.Pressure})";
             return 1;
         }
 
         if (!line1CanProcess && line2CanProcess)
         {
-            if (!l2run)
+            if (!line2Ready.CanAccept)
             {
-                routeReason = $"版长{length}mm仅2号线有斜床可加工, 但2号线未启动或已暂停";
+                routeReason = $"版长{length}mm仅2号线有斜床可加工，但2号线暂不可接板：{line2Ready.RejectReason}";
                 return 0;
             }
 
-            routeReason = $"版长{length}mm仅2号线有斜床可加工";
+            routeReason = $"版长{length}mm仅2号线有斜床可加工；2号线可接板(压力={line2Ready.Pressure})";
             return 2;
         }
 
-        int l1cnt = _line1Engine?.DispatchPressure ?? 999;
-        int l2cnt = _line2Engine?.DispatchPressure ?? 999;
-
-        if (!l1run && !l2run)
+        if (!line1Ready.CanAccept && !line2Ready.CanAccept)
         {
-            routeReason = "两线斜床均可加工, 但1/2号线当前都未启动或处于暂停, 等待线路启动";
+            routeReason = $"物理板已到位，等待可接线路：1号线={line1Ready.RejectReason}；2号线={line2Ready.RejectReason}";
             return 0;
         }
 
-        if (!l1run)
+        if (!line1Ready.CanAccept)
         {
-            routeReason = "两线斜床均可加工, 只有2号线运行";
+            routeReason = $"两线斜床均可加工，1号线暂不可接板：{line1Ready.RejectReason}；选择2号线(压力={line2Ready.Pressure})";
             return 2;
         }
 
-        if (!l2run)
+        if (!line2Ready.CanAccept)
         {
-            routeReason = "两线斜床均可加工, 只有1号线运行";
+            routeReason = $"两线斜床均可加工，2号线暂不可接板：{line2Ready.RejectReason}；选择1号线(压力={line1Ready.Pressure})";
             return 1;
         }
 
-        int selected = l1cnt <= l2cnt ? 1 : 2;
-        routeReason = $"两线斜床均可加工, 按前端压力少优先(1号={l1cnt},2号={l2cnt})";
+        int selected;
+        if (line1Ready.Pressure == line2Ready.Pressure)
+        {
+            selected = _lastFrontDispatchLine == 1 ? 2 : 1;
+            routeReason = $"两线斜床均可加工且都可接板，压力相同(1号={line1Ready.Pressure},2号={line2Ready.Pressure})，按上次成功分线={(_lastFrontDispatchLine == 0 ? "无" : $"{_lastFrontDispatchLine}号线")}交替选择{selected}号线";
+            return selected;
+        }
+
+        selected = line1Ready.Pressure < line2Ready.Pressure ? 1 : 2;
+        routeReason = $"两线斜床均可加工且都可接板，按前端压力少优先(1号={line1Ready.Pressure},2号={line2Ready.Pressure})";
         return selected;
     }
 

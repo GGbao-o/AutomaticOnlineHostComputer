@@ -73,6 +73,11 @@ public sealed class Line2FrontFlowEngine : IDisposable
     private readonly object _wpLock = new();
     /// <summary>天车任务队列 — 货叉Pos3到位后入队, 天车独立循环消费</summary>
     private readonly ConcurrentQueue<WorkpieceCache> _craneQueue = new();
+    /// <summary>
+    /// 前天车正在处理已出队工件的只读压力标志。
+    /// 只用于全局分线选择更空闲的线路；不参与锁控制，也不改变前天车动作。
+    /// </summary>
+    private int _frontCraneActive;
 
     /// <summary>货叉-双头镗交互状态机 — 完整 clear-before-set 握手。</summary>
     private enum ForkBoringPhase
@@ -172,6 +177,9 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
         public bool ForkConnected { get; set; }
         public bool ForkHasPlate { get; set; }
+        public bool ForkSnapshotValid { get; set; } // 最近一次货叉M900~M914是否读取成功；失败时全局分线必须保守拒绝
+        public DateTime ForkSnapshotAtUtc { get; set; }
+        public bool ForkAtStandby { get; set; } // 最近一次成功读取时M901待机位
         public string ForkPosition { get; set; } = "未知";
         public string ForkCommand { get; set; } = "无命令";
         public bool RackConnected { get; set; }
@@ -192,6 +200,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         public bool CraneFrontConnected { get; set; }
         public bool BoringConnected { get; set; }
         public bool BoringSnapshotValid { get; set; } // 仅供状态页面区分TCP在线与本轮信号读取成功
+        public DateTime BoringSnapshotAtUtc { get; set; }
         public bool Boring_R6101 { get; set; } // 请求数据
         public bool Boring_R6102 { get; set; } // 数据下发完成
         public bool Boring_R6103 { get; set; } // 请求上料
@@ -226,6 +235,55 @@ public sealed class Line2FrontFlowEngine : IDisposable
         _safety = safety ?? new SafetyFlags();
         _rackSvc = rackSvc;
         Console.WriteLine("[Line2Front] 2号线前端引擎实例已创建");
+    }
+
+    /// <summary>
+    /// 给总上料架全局分线使用的只读准入快照。
+    /// 只读取本引擎已经维护的内存状态和设备快照，不直接读PLC、不拿动作锁；
+    /// 后续机械手/货叉/双头镗动作仍按原流程实时复核，防止分线快照替代安全检查。
+    /// </summary>
+    public FrontDispatchReadinessSnapshot GetFrontDispatchReadiness()
+    {
+        WorkpieceCache? current;
+        lock (_wpLock)
+            current = _currentWp;
+
+        var ds = DeviceStatus;
+        var input = new FrontDispatchReadinessInput(
+            Line: 2,
+            IsRunning: IsRunning,
+            IsPaused: IsPaused,
+            HasCurrentWorkpiece: current != null,
+            ForkPhaseIdle: _forkPhase == ForkBoringPhase.Idle,
+            CachedCount: CachedCount,
+            ForkSnapshotValid: ds.ForkSnapshotValid,
+            ForkSnapshotAtUtc: ds.ForkSnapshotAtUtc,
+            ForkAtStandby: ds.ForkAtStandby,
+            ForkHasPlate: ds.ForkHasPlate,
+            BoringSnapshotValid: ds.BoringSnapshotValid,
+            BoringSnapshotAtUtc: ds.BoringSnapshotAtUtc,
+            BoringRequestData: ds.Boring_R6101,
+            CraneQueueCount: _craneQueue.Count,
+            FrontCraneActive: Volatile.Read(ref _frontCraneActive) != 0);
+
+        return FrontDispatchReadinessEvaluator.Evaluate(input, DateTime.UtcNow, TimeSpan.FromSeconds(3));
+    }
+
+    private static void ApplyForkSnapshot(Line2DeviceStatus ds, ForkStatus fs)
+    {
+        ds.ForkConnected = true;
+        ds.ForkHasPlate = fs.HasPlate;
+        ds.ForkAtStandby = fs.AtStandbyPos;
+        ds.ForkPosition = fs.CurrentPosition;
+        ds.ForkCommand = fs.CommandText;
+        ds.ForkSnapshotValid = true;
+        ds.ForkSnapshotAtUtc = DateTime.UtcNow;
+    }
+
+    private static void MarkForkSnapshotFailed(Line2DeviceStatus ds)
+    {
+        ds.ForkConnected = false;
+        ds.ForkSnapshotValid = false;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -746,7 +804,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
     {
         if (_forkSvc == null || !_forkSvc.IsConnected)
         {
-            if (ds != null) ds.ForkConnected = false;
+            if (ds != null) MarkForkSnapshotFailed(ds);
             if (_cycleCount % 10 == 1)
                 Console.WriteLine($"[Line2Front] [{context}] ⚠ 货叉未连接 → 禁止机械手1取料/送叉");
             return false;
@@ -755,13 +813,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         try
         {
             var fs = await _forkSvc.ReadAllStatusAsync(ct);
-            if (ds != null)
-            {
-                ds.ForkConnected = true;
-                ds.ForkHasPlate = fs.HasPlate;
-                ds.ForkPosition = fs.CurrentPosition;
-                ds.ForkCommand = fs.CommandText;
-            }
+            if (ds != null) ApplyForkSnapshot(ds, fs);
 
             if (!fs.AtStandbyPos)
             {
@@ -781,7 +833,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
-            if (ds != null) ds.ForkConnected = false;
+            if (ds != null) MarkForkSnapshotFailed(ds);
             if (_cycleCount % 10 == 1)
                 Console.WriteLine($"[Line2Front] [{context}] ⚠ 读取货叉状态失败 → 禁止机械手1取料/送叉: {ex.Message}");
             return false;
@@ -1033,10 +1085,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     try
                     {
                         var fs = await (forkCycleReadTask ??= _forkSvc.ReadAllStatusAsync(ct));
-                        ds.ForkConnected = true;
-                        ds.ForkHasPlate = fs.HasPlate;
-                        ds.ForkPosition = fs.CurrentPosition;
-                        ds.ForkCommand = fs.CommandText;
+                        ApplyForkSnapshot(ds, fs);
 
                         // ── 条件: 待机位 + 有版 + 有在途工件 + 货叉空闲 + 机械手已离开叉区 ──
                         //     必须确认机械手Y回到安全位后才分派, 防机械手还在叉区时货叉移动碰撞
@@ -1074,7 +1123,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     }
                     catch (Exception ex)
                     {
-                        ds.ForkConnected = false;
+                        MarkForkSnapshotFailed(ds);
                         if (_cycleCount % 10 == 1)
                             Console.WriteLine($"[Line2Front] [货叉分派] 读取/判断异常: {ex.GetType().Name} - {ex.Message}");
                     }
@@ -1094,9 +1143,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     try
                     {
                         var fs = await (forkCycleReadTask ??= _forkSvc.ReadAllStatusAsync(ct));
-                        ds.ForkHasPlate = fs.HasPlate;
-                        ds.ForkPosition = fs.CurrentPosition;
-                        ds.ForkCommand = fs.CommandText;
+                        ApplyForkSnapshot(ds, fs);
                         if (ShouldLogForkState(fs))
                         {
                             Console.WriteLine(
@@ -1360,7 +1407,17 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                     break;
 
                                 Console.WriteLine($"[Line2Front] [天车调度] ▶ 出队 {craneWp.IdentityText} d={craneWp.Diameter} L={craneWp.Length} 队列剩余={_craneQueue.Count}");
-                                await ProcessCraneFrontAsync(craneWp, ct);
+                                Interlocked.Exchange(ref _frontCraneActive, 1);
+                                try
+                                {
+                                    await ProcessCraneFrontAsync(craneWp, ct);
+                                }
+                                finally
+                                {
+                                    // 只清只读压力标志，不接管前天车锁和异常恢复。
+                                    // 这样全局调度能看到“工件已出队但仍在前天车/打号/中转架通道”。
+                                    Interlocked.Exchange(ref _frontCraneActive, 0);
+                                }
                                 if (_paused) break; // 当前任务已进入人工确认状态，禁止继续消费后续天车任务。
                             }
                             Console.WriteLine("[Line2Front] [天车调度] 队列空, 天车归位");
@@ -1383,10 +1440,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     try
                     {
                         var fs = await (forkCycleReadTask ??= _forkSvc.ReadAllStatusAsync(ct));
-                        ds.ForkConnected = true;
-                        ds.ForkHasPlate = fs.HasPlate;
-                        ds.ForkPosition = fs.CurrentPosition;
-                        ds.ForkCommand = fs.CommandText;
+                        ApplyForkSnapshot(ds, fs);
                         // 天车接管后, 只等待货叉回待机且无板再复位Idle; 等待阶段不会再写M913/M914。
                         if (((_forkPhase == ForkBoringPhase.WaitingForkReturnFromBoring && _boringUnloadDoneSent) ||
                              (_forkPhase == ForkBoringPhase.WaitingForkReturnFromSkip && _skipBoringTriggered))
@@ -1402,7 +1456,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     }
                     catch (Exception ex)
                     {
-                        ds.ForkConnected = false;
+                        MarkForkSnapshotFailed(ds);
                         if (_cycleCount % 10 == 1)
                             Console.WriteLine($"[Line2Front] [货叉状态机] 状态刷新异常: {ex.GetType().Name} - {ex.Message}");
                     }
@@ -1449,6 +1503,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                         ds.Boring_R6107 = v.RequestUnload;
                         ds.Boring_R6108 = v.UnloadDone;
                         ds.BoringSnapshotValid = true;
+                        ds.BoringSnapshotAtUtc = DateTime.UtcNow;
                     }
                     catch (Exception ex)
                     {
