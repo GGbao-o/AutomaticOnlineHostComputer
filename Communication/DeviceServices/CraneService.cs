@@ -445,62 +445,48 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         }
 
         /// <summary>
-        /// 退磁释放工件：D4511=2 → 轮询X7(FC01)=1 → D4511=0 → 查D5029=0确认。
-        /// 失败容错：10次→先充磁再退磁，总上限50次。
+        /// 退磁释放工件：D4511=2 → 轮询X7(FC01)=1且X6=0 → D4511=0。
+        /// D5029不作为退磁成功条件；X7不到位则重新触发退磁，最多10次。
         /// </summary>
         public async Task MagnetOffAsync(CancellationToken ct = default)
         {
             Console.WriteLine($"[CraneService] [{_name}] ▶ 退磁释放工件");
             await EnsureManualModeAsync(ct);
 
-            const int maxTotalRetries = 50;
-            int failCount = 0;
-            int totalRetries = 0;
+            const int maxRetries = 10;
 
-            while (!ct.IsCancellationRequested && totalRetries < maxTotalRetries)
+            for (int retry = 1; retry <= maxRetries; retry++)
             {
-                totalRetries++;
-
-                await WriteRegAsync(Addr.D_ManualMagnetOff, 2, "退磁(触发)", ct);
-
                 bool x7ok = false;
-                var dl = DateTime.UtcNow.AddSeconds(3);
-                while (DateTime.UtcNow < dl)
+                bool x6on = true;
+
+                try
                 {
-                    await Task.Delay(100, ct);
-                    if (await ReadXBitAsync(Addr.D_X7_DemagnetizeOk, ct))
+                    await WriteRegAsync(Addr.D_ManualMagnetOff, 2, "退磁(触发)", ct);
+
+                    var deadline = DateTime.UtcNow.AddSeconds(3);
+                    while (DateTime.UtcNow < deadline)
                     {
-                        Console.WriteLine($"[CraneService] [{_name}] ✔ X7退磁反馈=1");
-                        x7ok = true;
-                        break;
+                        await Task.Delay(100, ct);
+                        x6on = await ReadXBitAsync(Addr.D_X6_MagnetizeOk, ct);
+                        x7ok = await ReadXBitAsync(Addr.D_X7_DemagnetizeOk, ct);
+
+                        if (x7ok && !x6on)
+                        {
+                            Console.WriteLine($"[CraneService] [{_name}] ✔ 退磁成功 X6=0 X7=1（第{retry}次）");
+                            return;
+                        }
                     }
                 }
-
-                await WriteRegAsync(Addr.D_ManualMagnetOff, 0, "退磁(停止)", ct);
-
-                var status = await ReadStatusAsync(ct);
-                if (status != null && status.HasRoller == 0)
+                finally
                 {
-                    Console.WriteLine($"[CraneService] [{_name}] ✔ 退磁成功 D5029=0（重试{failCount}次）");
-                    return;
+                    await WriteRegAsync(Addr.D_ManualMagnetOff, 0, "退磁(停止)", ct);
                 }
 
-                failCount++;
-                Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁失败 第{failCount}次 X7={(x7ok?"1":"超时")} D5029={status?.HasRoller}");
-
-                if (failCount >= 10)
-                {
-                    Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁连续失败{failCount}次 → 先充磁再退磁");
-                    failCount = 0;
-                    await WriteRegAsync(Addr.D_ManualMagnetOn, 2, "充磁(容错)", ct);
-                    await Task.Delay(2000, ct);
-                    await WriteRegAsync(Addr.D_ManualMagnetOn, 0, "充磁(容错停止)", ct);
-                    await Task.Delay(300, ct);
-                }
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁未到位 第{retry}/{maxRetries}次 X6={(x6on ? 1 : 0)} X7={(x7ok ? 1 : 0)}");
             }
 
-            if (totalRetries >= maxTotalRetries)
-                throw new TimeoutException($"退磁失败：超过最大重试次数 {maxTotalRetries}，请检查电磁铁");
+            throw new TimeoutException($"退磁失败：X7退磁反馈未到位或X6仍为充磁状态，已重试 {maxRetries} 次，请检查电磁铁");
         }
 
         /// <summary>
