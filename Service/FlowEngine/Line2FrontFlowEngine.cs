@@ -102,7 +102,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
     private volatile bool _forkHandshakeInProgress;
     /// <summary>
     /// 当前在途工件是否已满足货叉放行条件。
-    /// 只有退磁放板、Z回0、到达2号线首次安全Y且M801写入成功后才置true。
+    /// 只有退磁放板、Z回0、到达2号线首次安全Y且M801写入成功后才置true；
+    /// 机械手随后回取板待机点时，货叉可依靠此门闩并行推进双头镗握手。
     /// </summary>
     private volatile bool _manipulatorClearedFork;
     /// <summary>R6108 下料完成信号是否已发送(防重复触发)。</summary>
@@ -147,6 +148,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
     public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
     /// <summary>前端进入人工确认暂停时通知主页面弹窗。</summary>
     public Action<string>? OnSafetyAlarm;
+    /// <summary>共享机械手1位置不确定时通知主页面同步暂停1/2号线。</summary>
+    public Action<string>? OnSharedManipulatorSafetyAlarm;
 
     /// <summary>物理工件已放到中转架, 但后端缓存回调未确认。用于外层catch区分“已在中转架”和“仍在天车上”。</summary>
     private sealed class TransferRackCacheException : Exception
@@ -1696,8 +1699,16 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 throw new InvalidOperationException("总上料架服务为空，M801未写入，禁止放行货叉");
             await _rackSvc.SetPickupDoneAsync(ct);
             Console.WriteLine($"[Line2Front] [机械手1] ④ M801=1→0 取料完成 ✓ {wp.IdentityText}");
+            // 门闩必须放在M801成功之后；主循环可能与本方法并行，提前置位会让货叉在M801失败时误启动。
             _manipulatorClearedFork = true;
-            Console.WriteLine("[Line2Front] [机械手1]   货叉放行门闩=ON，当前位置也是取板待机点，可释放共享机械手锁");
+            Console.WriteLine("[Line2Front] [机械手1]   货叉放行门闩=ON，双头镗可开始交互；机械手继续回取板待机点");
+
+            // 同1号线：货叉放行后仍保持两线共享机械手锁，先回取板待机点，再释放锁。
+            // 这样当2号线货叉释放安全点与取板待机点不同，例如2000→1000时，
+            // 货叉可以先启动，机械手继续预定位，不会停在释放安全点。
+            if (!await MoveManipulator1ToPickupStandbyAfterForkReleaseAsync(wp, ct))
+                return; // 货叉门闩保持开启，但共享机械手位置不确定；告警已同步暂停两条线。
+
             Console.WriteLine($"[Line2Front] [机械手1] ═══ 取料送叉完成 {wp.IdentityText} ═══");
         }
         catch (Exception ex)
@@ -1744,6 +1755,72 @@ public sealed class Line2FrontFlowEngine : IDisposable
             Console.WriteLine("[Line2Front] [DEBUG] 机械手释放 _manipulatorLock");
             _manipulatorLock.Release();
         }  // 无论如何释放锁
+    }
+
+    /// <summary>
+    /// 2号线货叉已安全放行后，把机械手1预定位到总上料架附近，缩短下一次取板空行程。
+    /// 调用期间仍持有两线共享的_manipulatorLock；货叉依靠独立门闩和状态机并行工作。
+    /// </summary>
+    private async Task<bool> MoveManipulator1ToPickupStandbyAfterForkReleaseAsync(
+        WorkpieceCache wp, CancellationToken ct)
+    {
+        int targetY = _cfg.SkewBed.Manipulator1PickupStandbyY;
+        int releaseY = _cfg.SkewBed.GetManipulator1SafeYForLine(2);
+        if (Math.Abs(targetY - releaseY) <= MotionConfig.SkewBedSection.Manipulator1SafeYTolerance)
+        {
+            Console.WriteLine($"[Line2Front] [机械手1] ⑤ 取板待机Y={targetY}与货叉释放点相同，无需第二段移动");
+            return true;
+        }
+
+        try
+        {
+            Console.WriteLine($"[Line2Front] [机械手1] ⑤ 货叉已开始独立工作，保持共享机械手锁并预定位 Y:{releaseY}→{targetY}");
+            await _manipulator1!.MoveAbsoluteAsync(-1, targetY, -1, ct: ct);
+
+            // MoveAbsoluteAsync正常返回后再读一次实际Y，避免通信/PLC异常把“命令完成”误当成“到位完成”。
+            var status = await _manipulator1.ReadStatusAsync(ct);
+            if (status == null || Math.Abs(status.YPos - targetY) > MotionConfig.SkewBedSection.Manipulator1SafeYTolerance)
+                throw new InvalidOperationException(status == null
+                    ? $"回取板待机Y={targetY}后状态读取为空"
+                    : $"回取板待机Y未到位，实际Y={status.YPos}，目标Y={targetY}");
+
+            Console.WriteLine($"[Line2Front] [机械手1]   取板待机Y={status.YPos}到位 ✓，下一块板可从近端取料");
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception moveEx)
+        {
+            int? actualY = null;
+            string readDetail;
+            try
+            {
+                var status = await _manipulator1!.ReadStatusAsync(ct);
+                actualY = status?.YPos;
+                readDetail = status == null ? "实际Y读取为空" : $"实际Y={status.YPos}";
+            }
+            catch (Exception readEx)
+            {
+                readDetail = $"实际Y读取失败: {readEx.Message}";
+            }
+
+            // 若移动命令失败但机械手仍停在任一已确认安全端点，货叉和下一任务均不存在位置不确定风险。
+            // 此时只记录警告，不回退已打开的货叉门闩；下一次取板可能多走一段，但业务可继续。
+            if (actualY.HasValue && _cfg.SkewBed.IsManipulator1AtAnySafeY(actualY.Value))
+            {
+                Console.WriteLine($"[Line2Front] [机械手1] ⚠ 回取板待机点失败，但仍在已确认安全端点({readDetail})，货叉继续工作。异常：{moveEx.Message}");
+                return true;
+            }
+
+            _paused = true;
+            string alarm = $"共享机械手1在2号线货叉已放行后回取板待机Y={targetY}时异常，{readDetail}。" +
+                           $"工件{wp.IdentityText}已在货叉且货叉状态不回退；机械手位置不确定，1/2号线新派发必须暂停。异常：{moveEx.Message}";
+            Console.WriteLine($"[Line2Front] [机械手1] ❌ {alarm}");
+            OnSharedManipulatorSafetyAlarm?.Invoke(alarm);
+            return false;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

@@ -1841,6 +1841,7 @@ public sealed class HomeViewModel : ObservableObject
         _line2Engine.OnSafetyAlarm = message => HandleLineSafetyAlarm(2, "前端流程异常", message);
         // 机械手1由两条线共享。若货叉放行后的预定位停在未知中间位置，必须在释放共享锁前同步关闭两线派发门。
         _line1Engine.OnSharedManipulatorSafetyAlarm = HandleSharedManipulatorSafetyAlarm;
+        _line2Engine.OnSharedManipulatorSafetyAlarm = HandleSharedManipulatorSafetyAlarm;
         _line1BalancingEngine.OnSafetyAlarm = message => HandleStandaloneSafetyAlarm("动平衡", message);
         _grindingEngine.OnSafetyAlarm = message => HandleStandaloneSafetyAlarm("研磨", message);
 
