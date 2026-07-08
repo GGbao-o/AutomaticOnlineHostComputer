@@ -115,14 +115,14 @@ public sealed class Line2FrontFlowEngine : IDisposable
     private volatile bool _skipBoringTriggered;
 
     // ═══════════════════════════════════════════════════════════════
-    //  四把信号量 — 固定锁顺序防死锁
-    //    前天车锁顺序: _craneFrontLock → SharedAreaLock → _transferRackLock。
-    //    机械手锁和货叉分派锁独立, 不和共享区/中转架锁嵌套。
+    //  信号量 — 固定锁顺序防死锁
+    //    前天车锁顺序: _craneFrontLock → ZoneMT → ZoneTS。
+    //    机械手锁和货叉分派锁独立, 不和Zone碰撞区锁嵌套。
     // ═══════════════════════════════════════════════════════════════
     private readonly SemaphoreSlim _manipulatorLock;                // 机械手1取料送叉(与1号线共享)
     private readonly SemaphoreSlim _forkDispatchLock = new(1, 1);  // 货叉分派(本线独立,不与机械手锁竞争)
     private readonly SemaphoreSlim _craneFrontLock = new(1, 1);    // 前天车流程
-    private readonly SemaphoreSlim _transferRackLock;               // 中转架操作 (与后端引擎共享)
+    private readonly SemaphoreSlim _transferRackLock;               // 兼容旧构造/诊断；正常中转架业务互斥已由ZoneMT+ZoneTS承担
     /// <summary>仅串行化人工前端应急；正常主循环不取得此锁。</summary>
     private readonly SemaphoreSlim _frontEmergencyLock = new(1, 1);
     private readonly SafetyFlags _safety;                      // 前后天车共享安全标志
@@ -364,7 +364,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         sb.AppendLine($"当前工件 _currentWp: {(wp?.IdentityText ?? "无")}");
         sb.AppendLine($"货叉阶段 _forkPhase: {_forkPhase}");
         sb.AppendLine($"门闩: 机械手已安全离叉={_manipulatorClearedFork} 握手执行中={_forkHandshakeInProgress} R6108已发送={_boringUnloadDoneSent} M912已发送={_m912Sent} 跳镗已触发={_skipBoringTriggered}");
-        sb.AppendLine($"锁: 机械手={LockText(_manipulatorLock)} 货叉分派={LockText(_forkDispatchLock)} 前天车={LockText(_craneFrontLock)} 中转架={LockText(_transferRackLock)}");
+        sb.AppendLine($"锁: 机械手={LockText(_manipulatorLock)} 货叉分派={LockText(_forkDispatchLock)} 前天车={LockText(_craneFrontLock)} ZoneMT={LockText(_safety.MarkerTransferCollisionLock)} ZoneTS={LockText(_safety.TransferSkew1CollisionLock)}");
         sb.AppendLine($"前天车队列: 数量={_craneQueue.Count} 队头={(_craneQueue.IsEmpty ? "无" : craneHead.IdentityText)}（丢弃当前工件不会清此队列）");
 
         try
@@ -1951,9 +1951,12 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 await _forkSvc.GoStandbyAsync(ct);
             }
 
-            // ③ 等中转架空位 → 获取共享区锁 → 获取中转架锁 → 打号机 → 放中转架
-            //    预检: 锁外先等中转架空位, 避免抢到锁后发现全满(后天车无法取料→死锁)。
-            //    安全: 共享区锁后立即拿中转架锁, 防止前天车打号期间后天车进入中转架4/5取料造成碰撞。
+            // ③ 等中转架空位 → ZoneMT打号机区 → ZoneTS中转架区 → 放中转架。
+            //    预检: 锁外先等中转架物理空位, 只做候选判断。
+            //    新碰撞区模型:
+            //      ZoneMT = 打号机↔中转架；ZoneTS = 中转架↔斜床1。
+            //      打号期间只持ZoneMT, 后天车仍可在ST606侧持ZoneTS工作。
+            //      真正进入中转架前再拿ZoneTS; 放料二次判断只看物理空位信号。
             Console.WriteLine("[Line2Front] [前天车] ③ 等中转架空位...");
             while (_rackSvc?.IsConnected == true)
             {
@@ -1966,29 +1969,34 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 catch { /* 读失败→等下轮 */ }
                 await Task.Delay(500, ct);
             }
-            Console.WriteLine("[Line2Front] [前天车] ③ 获取共享区锁...");
-            while (!await _safety.SharedAreaLock.WaitAsync(TimeSpan.FromSeconds(1), ct))
+            Console.WriteLine("[Line2Front] [前天车] ③ 获取ZoneMT(打号机↔中转架碰撞区)...");
+            while (!await _safety.MarkerTransferCollisionLock.WaitAsync(TimeSpan.FromSeconds(1), ct))
             {
                 if (_cycleCount % 10 == 1)
-                    Console.WriteLine("[Line2Front] [前天车] 等共享区锁...");
+                    Console.WriteLine("[Line2Front] [前天车] 等ZoneMT...");
             }
-            Console.WriteLine("[Line2Front] [前天车] 共享区锁已获取 ✓");
-            bool transferRackLocked = false;
+            Console.WriteLine("[Line2Front] [前天车] ZoneMT已获取 ✓");
+            bool zoneMtLocked = true;
+            bool zoneTsLocked = false;
             try
             {
-                Console.WriteLine("[Line2Front] [前天车] ③.5 获取中转架锁(打号前预占)...");
-                while (!transferRackLocked)
-                {
-                    transferRackLocked = await _transferRackLock.WaitAsync(500, ct);
-                    if (!transferRackLocked) Console.WriteLine("[Line2Front] [前天车] 等中转架锁(后端取料占用中)...");
-                }
-                Console.WriteLine("[Line2Front] [前天车] 中转架锁已获取 ✓");
-
                 await MarkingHandshakeAsync(crane, wp, safeZ, ct);
-                await PlaceOnTransferRackAsync(crane, wp, safeZ, ct, transferRackLockAlreadyHeld: true);
-                _transferRackLock.Release();
-                transferRackLocked = false;
-                Console.WriteLine($"[Line2Front] [前天车] 中转架放料完成, 中转架锁已释放 ✓ {wp.IdentityText}");
+
+                Console.WriteLine("[Line2Front] [前天车] ③.5 获取ZoneTS(中转架↔ST606碰撞区), 准备进入中转架...");
+                while (!await _safety.TransferSkew1CollisionLock.WaitAsync(TimeSpan.FromSeconds(1), ct))
+                {
+                    if (_cycleCount % 10 == 1)
+                        Console.WriteLine("[Line2Front] [前天车] 等ZoneTS...");
+                }
+                zoneTsLocked = true;
+                Console.WriteLine("[Line2Front] [前天车] ZoneTS已获取 ✓，当前持有ZoneMT+ZoneTS，可进入中转架");
+
+                await PlaceOnTransferRackAsync(crane, wp, safeZ, ct);
+                _safety.TransferSkew1CollisionLock.Release();
+                zoneTsLocked = false;
+                _safety.MarkerTransferCollisionLock.Release();
+                zoneMtLocked = false;
+                Console.WriteLine($"[Line2Front] [前天车] 中转架放料完成且Z已安全, ZoneTS+ZoneMT已释放 ✓ {wp.IdentityText}");
                 magnetOn = false; // 放料成功才清标志
 
                 int homeX = _cfg.GetCraneHomeX(CraneFront2No);
@@ -2001,13 +2009,16 @@ public sealed class Line2FrontFlowEngine : IDisposable
             }
             finally
             {
-                if (transferRackLocked)
+                if (zoneTsLocked)
                 {
-                    try { _transferRackLock.Release(); } catch (SemaphoreFullException) { }
-                    Console.WriteLine("[Line2Front] [前天车] 异常兜底: 中转架锁已释放");
+                    try { _safety.TransferSkew1CollisionLock.Release(); } catch (SemaphoreFullException) { }
+                    Console.WriteLine("[Line2Front] [前天车] 异常兜底: ZoneTS已释放");
                 }
-                _safety.SharedAreaLock.Release();
-                Console.WriteLine("[Line2Front] [前天车] 共享区锁已释放 ✓");
+                if (zoneMtLocked)
+                {
+                    try { _safety.MarkerTransferCollisionLock.Release(); } catch (SemaphoreFullException) { }
+                    Console.WriteLine("[Line2Front] [前天车] 异常兜底: ZoneMT已释放");
+                }
             }
         }
         catch (Exception ex)
@@ -2021,8 +2032,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 // 从WaitingMachine等有效阶段错误改成Idle，造成R6107=1也不写M913的永久卡停。
                 _paused = true;
                 Console.WriteLine($"[Line2Front] ⚠⚠⚠ 工件已在{rackEx.RackStation}, 但后端缓存未确认；不回队列，等待人工补缓存/确认现场");
-                Console.WriteLine($"[Line2Front] [前天车] 货叉—双头镗阶段保持={_forkPhase}，相关门闩未清除；中转架锁/共享区锁已按finally释放，前天车锁将在调度finally释放");
-                OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时，工件已放到{rackEx.RackStation}，但后端缓存未确认。引擎已暂停，货叉—双头镗阶段保持={_forkPhase}、相关门闩未清除。中转架锁和共享区锁已释放，前天车锁将在任务退出时释放。请人工补缓存，确认旧工件和前天车处于安全位置后再恢复。");
+                Console.WriteLine($"[Line2Front] [前天车] 货叉—双头镗阶段保持={_forkPhase}，相关门闩未清除；ZoneMT/ZoneTS已按finally释放，前天车锁将在调度finally释放");
+                OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时，工件已放到{rackEx.RackStation}，但后端缓存未确认。引擎已暂停，货叉—双头镗阶段保持={_forkPhase}、相关门闩未清除。ZoneMT/ZoneTS碰撞区锁已释放，前天车锁将在任务退出时释放。请人工补缓存，确认旧工件和前天车处于安全位置后再恢复。");
             }
             else if (magnetOn)
             {
@@ -2031,8 +2042,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 // 下一块工件的货叉/双头镗阶段和门闩，只暂停并交由人工确认现场。
                 _paused = true;
                 Console.WriteLine("[Line2Front] ⚠⚠⚠ 前天车在充磁后的流程区间中断！工件可能在天车、打号机或后续位置，引擎已暂停,需人工处理！");
-                Console.WriteLine($"[Line2Front] [前天车] 货叉—双头镗阶段保持={_forkPhase}，相关门闩未清除；中转架锁/共享区锁已按finally释放，前天车锁将在调度finally释放");
-                OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时流程中断，工件可能在天车、打号机或后续位置。引擎已暂停，货叉—双头镗阶段保持={_forkPhase}、相关门闩未清除。中转架锁和共享区锁已释放，前天车锁将在任务退出时释放。请人工退磁/处理旧工件并将前天车升到安全位置后再恢复。异常：{ex.Message}");
+                Console.WriteLine($"[Line2Front] [前天车] 货叉—双头镗阶段保持={_forkPhase}，相关门闩未清除；ZoneMT/ZoneTS已按finally释放，前天车锁将在调度finally释放");
+                OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时流程中断，工件可能在天车、打号机或后续位置。引擎已暂停，货叉—双头镗阶段保持={_forkPhase}、相关门闩未清除。ZoneMT/ZoneTS碰撞区锁已释放，前天车锁将在任务退出时释放。请人工退磁/处理旧工件并将前天车升到安全位置后再恢复。异常：{ex.Message}");
             }
             else
             {
@@ -2180,27 +2191,12 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
     /// <summary>
     /// 中转架放料:
-    ///   获取或使用外层已预占的 _transferRackLock → 读M814~M816 → 选第一个空位(ST016→ST017→ST018)
+    ///   已在外层持有ZoneMT+ZoneTS → 读M814~M816物理信号 → 选第一个空位(ST016→ST017→ST018)
     ///   → XY到中转架 → Z降(公式) → 退磁放下 → Z升安全
+    ///   注意：二次判断只看物理有板信号；软件缓存残留不能阻止放料，缓存异常由放料后的OnRackPlaced生命线处理。
     /// </summary>
     private async Task PlaceOnTransferRackAsync(CraneService crane, WorkpieceCache wp, int safeZ, CancellationToken ct, bool transferRackLockAlreadyHeld = false)
     {
-        bool gotTransferRack = transferRackLockAlreadyHeld;
-        if (transferRackLockAlreadyHeld)
-        {
-            Console.WriteLine("[Line2Front] [中转架] ⑤ 使用前天车打号前已持有的_transferRackLock");
-        }
-        else
-        {
-            Console.WriteLine("[Line2Front] [中转架] ⑤ 获取_transferRackLock...");
-            // ── 中转架锁: 后端取料优先, 前端放料非阻塞重试 ──
-            // WaitAsync(0) 先试一次 → 拿不到说明后端在取料 → 等500ms重试
-            while (!gotTransferRack)
-            {
-                gotTransferRack = await _transferRackLock.WaitAsync(500, ct);
-                if (!gotTransferRack) Console.WriteLine("[Line2Front] [中转架] 后端取料占用中, 等待...");
-            }
-        }
         bool placedOnRack = false;
         bool rackCacheNotified = false;
         string? notifiedRackStation = null;
@@ -2213,6 +2209,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 $"[Line2Front] [中转架] M814={status.Station4HasPlate} M815={status.Station5HasPlate} M816={status.Station6HasPlate}");
 
             // ── 按优先级选空位 (M814→ST016, M815→ST017, M816→ST018) ──
+            //    现场策略：前端放料的二次判断只看物理信号。即使软件缓存残留，只要物理信号无板就允许放；
+            //    放料后的OnRackPlaced必须成功，否则暂停弹窗要求人工补缓存。
             string? rackStation = null;
             if (!status.Station4HasPlate) rackStation = "ST016";
             else if (!status.Station5HasPlate) rackStation = "ST017";
@@ -2267,16 +2265,6 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 throw new TransferRackCacheException(notifiedRackStation ?? "(未知)", ex);
             }
             throw;
-        }
-        finally
-        {
-            // 只释放本方法确认拿到的中转架锁; 防止取消/异常路径误释放后端持有的锁。
-            if (gotTransferRack && !transferRackLockAlreadyHeld)
-            {
-                _transferRackLock.Release();
-                gotTransferRack = false;
-                Console.WriteLine("[Line2Front] [中转架] _transferRackLock 已释放");
-            }
         }
     }
 

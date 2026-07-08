@@ -349,7 +349,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     Console.WriteLine($"│   斜床: {codes[0]}={StCn(0)} {codes[1]}={StCn(1)} {codes[2]}={StCn(2)} {codes[3]}={StCn(3)} {codes[4]}={StCn(4)}");
                     Console.WriteLine($"│   中转架: T1(105)={(fds != null && !fds.TransferRack1Free ? "有版" : "空")} T2(101)={(fds != null && !fds.TransferRack2Free ? "有版" : "空")} T3(106)={(fds != null && !fds.TransferRack3Free ? "有版" : "空")}");
                     Console.WriteLine($"│   动平衡下料架 M817={(fds != null && fds.M817_HasPlate ? "有版" : "空")}  研磨上料架 M720=按需连接");
-                    Console.WriteLine($"│   锁: 后天车锁={_craneRearLock.CurrentCount} 中转架锁={_transferRackLock.CurrentCount}");
+                    Console.WriteLine($"│   锁: 后天车锁={_craneRearLock.CurrentCount} ZoneMT={_safety.MarkerTransferCollisionLock.CurrentCount} ZoneTS={_safety.TransferSkew1CollisionLock.CurrentCount}");
                     Console.WriteLine($"│   工件缓存: {CachedCount}个");
                 }
                 
@@ -461,7 +461,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                             }
                             b.St = SkewState.Unloading; anyUnloading = true;
                             Console.WriteLine($"│   ▶ {b.Code} 开始下料! {wp.IdentityText} 工件={wp.Diameter}mm L={wp.Length}mm");
-                            //1号线后天车进行下料   会释放共享区锁  
+                            //1号线后天车进行下料；ST108仅持有并释放ZoneTS
                             _ = DoUnload(b, ct);
                         }
                         else { Console.WriteLine($"│   {b.Code} 后天车被占用,下轮重试"); }
@@ -481,7 +481,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 //    条件: ①中转架之一有版+有缓存数据(前端OnRackPlaced写入)
                 //          ②斜床之一 空闲+已连接+请求数据
                 //          ③后天车锁空闲
-                //          ④中转架锁空闲
+                //          ④进入中转架时由DoLoad获取ZoneMT+ZoneTS
                 // ═══════════════════════════════════════════════════════════
                 if (_cycleCount % 10 == 1) Console.WriteLine("│ [步骤5] 上料检查...");
 
@@ -497,57 +497,35 @@ public sealed class Line1RearFlowEngine : IDisposable
                     Console.WriteLine($"│   ✓ 预选 源={previewPair.RackCode} L={previewPair.Wp.Length} → 目标={previewPair.Bed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(previewPair.Bed.Code)}), 抢后天车锁(当前={_craneRearLock.CurrentCount})...");
                     if (await _craneRearLock.WaitAsync(0, ct))
                     {
-                        // 在取得后天车锁后、取得中转架锁及改变斜床状态前检查，避免遗留任何锁或任务变更。
+                        // 在取得后天车锁后、改变斜床状态前检查，避免遗留任何锁或任务变更。
                         if (!await EnsureRearCranePositionReadyAsync("斜床上料任务派发前", ct))
                         {
                             _craneRearLock.Release();
                             continue;
                         }
-                        // ⑤c. 抢中转架锁 (非阻塞, 与前端互斥)
-                        Console.WriteLine("│   ✓ 后天车锁获取, 抢中转架锁...");
+                        // ⑤c. 新Zone模型下不再预抢_transferRackLock。
+                        //      DoLoad内部会按 ZoneMT→ZoneTS 进入中转架，并在锁内重新确认物理有板+软件缓存。
+                        Console.WriteLine("│   ✓ 后天车锁获取, 由DoLoad内部申请ZoneMT+ZoneTS并锁后复核...");
                         bool triggered = false;
-                        bool gotTransferRack = false;
-                        if (await _transferRackLock.WaitAsync(0, ct))
+                        try
                         {
-                            gotTransferRack = true;
-                            try
+                            // ⑤d. 拿到后天车锁后正式复核一次候选配对；最终物理/缓存确认仍在DoLoad持Zone锁后执行。
+                            var pair = FindLoadPair(logDetails: true);
+                            if (pair == null)
                             {
-                                // ⑤d. 锁后正式复核: 重新选择“中转架工件+斜床”配对。
-                                //     这里才决定 DoLoad 来源和目标; 不沿用锁前结果, 避免状态变化导致错配。
-                                var pair = FindLoadPair(logDetails: true);
-                                if (pair == null)
-                                {
-                                    Console.WriteLine("│   锁后无可用上料配对,释放中转架锁");
-                                    _transferRackLock.Release();
-                                    gotTransferRack = false;
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"│   ▶ 触发上料! 源={pair.RackCode} {pair.Wp.IdentityText} L={pair.Wp.Length} → 目标={pair.Bed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(pair.Bed.Code)})");
-                                    // ST108紧邻中转架区, 先释放中转架锁避免与SharedAreaLock反向持锁死锁。
-                                    // DoLoad内部会按 SharedAreaLock→_transferRackLock 顺序重新获取。
-                                    if (pair.Bed.Code == "ST108")
-                                    {
-                                        _transferRackLock.Release();
-                                        gotTransferRack = false;
-                                        Console.WriteLine("│   ST108: 释放中转架锁(DoLoad内部重新按顺序获取)");
-                                    }
-
-                                    pair.Bed.St = SkewState.Loading;
-                                    triggered = true;
-                                    gotTransferRack = false; // 锁所有权交给DoLoad; ST108会在DoLoad内重新获取
-                                    _ = DoLoad(pair.Bed, pair.RackCode, ct); // 异步执行, 不阻塞主循环
-                                }
+                                Console.WriteLine("│   复核无可用上料配对,释放后天车锁");
                             }
-                            catch
+                            else
                             {
-                                // 只释放本轮仍由主循环持有的中转架锁, 避免ST108已释放/已转交后误放别人的锁。
-                                if (gotTransferRack) _transferRackLock.Release();
+                                Console.WriteLine($"│   ▶ 触发上料! 源={pair.RackCode} {pair.Wp.IdentityText} L={pair.Wp.Length} → 目标={pair.Bed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(pair.Bed.Code)})");
+                                pair.Bed.St = SkewState.Loading;
+                                triggered = true;
+                                _ = DoLoad(pair.Bed, pair.RackCode, ct); // 异步执行, 不阻塞主循环
                             }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            Console.WriteLine("│   中转架锁被前端占用,下轮重试");
+                            Console.WriteLine($"│   上料派发复核异常: {ex.Message}");
                         }
 
                         // ⑤e. 未触发上料 → 释放后天车锁
@@ -617,6 +595,19 @@ public sealed class Line1RearFlowEngine : IDisposable
         lock (_wpLock) return _wps.TryGetValue(rackCode, out wp!);
     }
 
+    private bool RackHasPhysicalPlateSnapshot(string rackCode)
+    {
+        var fd = _frontDs;
+        if (fd == null || !fd.RackConnected) return false;
+        return rackCode switch
+        {
+            "ST105" => !fd.TransferRack1Free,
+            "ST101" => !fd.TransferRack2Free,
+            "ST106" => !fd.TransferRack3Free,
+            _ => false
+        };
+    }
+
     private long AssignRackArrivalSeqLocked(string rackCode)
     {
         var seq = ++_nextWpArrivalSeq;
@@ -655,9 +646,9 @@ public sealed class Line1RearFlowEngine : IDisposable
     private List<SkewCtx> GetReadyBedsByPriority()
     {
         var result = new List<SkewCtx>(5);
-        // ST108靠近前天车共享区。共享区忙时临时优先其它斜床,
-        // 减少后天车拿着后天车锁等待SharedAreaLock; 无其它选择时仍允许ST108兜底。
-        if (_safety.SharedAreaLock.CurrentCount == 0)
+        // ST108靠近中转架-斜床1碰撞区。ZoneTS忙时临时优先其它斜床,
+        // 减少后天车拿着后天车锁等待ZoneTS; 无其它选择时仍允许ST108兜底等待。
+        if (_safety.TransferSkew1CollisionLock.CurrentCount == 0)
         {
             for (int i = 1; i < _beds.Length; i++)
                 if (IsReadyForLoad(_beds[i]))
@@ -665,7 +656,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             if (IsReadyForLoad(_beds[0]))
             {
                 if (result.Count == 0)
-                    Console.WriteLine("│   共享区忙且无其它斜床可用, 仍允许ST108等待共享区");
+                    Console.WriteLine("│   ZoneTS忙且无其它斜床可用, 仍允许ST108等待ZoneTS");
                 result.Add(_beds[0]);
             }
             return result;
@@ -855,8 +846,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             $"当前工件: {FormatWorkpiece(bed.Wp)}",
             $"当前动作: {ActiveOperationText(bed)}",
             $"后天车锁: {LockText(_craneRearLock)}",
-            $"中转架锁: {LockText(_transferRackLock)}",
-            $"共享区锁: {LockText(_safety.SharedAreaLock)}",
+            $"ZoneMT(打号机-中转架): {LockText(_safety.MarkerTransferCollisionLock)}",
+            $"ZoneTS(中转架-ST108): {LockText(_safety.TransferSkew1CollisionLock)}",
             $"下料分流锁: M817={YN(bed.ActiveOperation?.IsHeld("M817") == true)} M720={YN(bed.ActiveOperation?.IsHeld("M720") == true)}",
             $"CNC信号: 请求数据={YN(bed.RqData)} 请求上料={YN(bed.RqLoad)} 夹紧={YN(bed.Clamped)} 请求下料={YN(bed.RqUnload)}",
             $"信号新鲜: {(bed.SignalFresh ? "是" : "否")}");
@@ -903,10 +894,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             // 必须先确认旧动作退出，再释放finally仍未能释放的残留锁。
             // 先释放会让其它引擎在旧SDK调用尚未返回时进入同一物理区域。
             logs.Add(ReleaseLeaseLock(operation, "RearCrane", _craneRearLock, "后天车锁"));
-            logs.Add(ReleaseLeaseLock(operation, "TransferRack", _transferRackLock, "中转架锁"));
-            logs.Add(bed.Code == "ST108"
-                ? ReleaseLeaseLock(operation, "SharedArea", _safety.SharedAreaLock, "共享区锁")
-                : "共享区锁=非共享区斜床, 未处理");
+            logs.Add(ReleaseLeaseLock(operation, "ZoneMT", _safety.MarkerTransferCollisionLock, "ZoneMT(打号机-中转架)"));
+            logs.Add(ReleaseLeaseLock(operation, "ZoneTS", _safety.TransferSkew1CollisionLock, "ZoneTS(中转架-ST108)"));
             logs.Add(ReleaseLeaseLock(operation, "M720", _lockM720, "M720分流锁"));
             logs.Add(ReleaseLeaseLock(operation, "M817", _lockM817, "M817分流锁"));
             if (ReferenceEquals(bed.ActiveOperation, operation)) bed.ActiveOperation = null;
@@ -996,7 +985,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     private static string ActiveOperationText(SkewCtx bed)
         => bed.ActiveOperation == null
             ? "无"
-            : $"{bed.ActiveOperation.Name} v{bed.ActiveOperation.Version}(后天车锁={YN(bed.ActiveOperation.IsHeld("RearCrane"))} 中转架锁={YN(bed.ActiveOperation.IsHeld("TransferRack"))} 共享区锁={YN(bed.ActiveOperation.IsHeld("SharedArea"))} 分流M817={YN(bed.ActiveOperation.IsHeld("M817"))} 分流M720={YN(bed.ActiveOperation.IsHeld("M720"))})";
+            : $"{bed.ActiveOperation.Name} v{bed.ActiveOperation.Version}(后天车锁={YN(bed.ActiveOperation.IsHeld("RearCrane"))} ZoneMT={YN(bed.ActiveOperation.IsHeld("ZoneMT"))} ZoneTS={YN(bed.ActiveOperation.IsHeld("ZoneTS"))} 分流M817={YN(bed.ActiveOperation.IsHeld("M817"))} 分流M720={YN(bed.ActiveOperation.IsHeld("M720"))})";
 
     private static EmergencyActionLease BeginSkewOperation(SkewCtx bed, string name, CancellationToken parent, bool holdsTransferRack)
     {
@@ -1096,18 +1085,13 @@ public sealed class Line1RearFlowEngine : IDisposable
     // ═══════════════════════════════════════════════════════════════════
     private async Task DoLoad(SkewCtx bed, string rs, CancellationToken ct)
     {
-        bool transferLocked = bed.Code != "ST108"; // 非ST108由主循环已持有; ST108会先拿共享区再重拿中转架锁
+        bool transferLocked = false; // 新Zone模型下不再使用_transferRackLock作为中转架业务互斥
         WorkpieceCache wp;
         long rackArrivalSeq;
         lock (_wpLock) 
         {
             if (!TryRemoveRackWorkpieceLocked(rs, out wp, out rackArrivalSeq))
             {
-                if (transferLocked)
-                {
-                    try { _transferRackLock.Release(); } catch (SemaphoreFullException) { }
-                    transferLocked = false;
-                }
                 _craneRearLock.Release(); 
                 bed.St = SkewState.Idle;
                 Console.WriteLine($"[上料] ❌ 失败: 中转架{rs}没有工件缓存数据"); 
@@ -1117,11 +1101,6 @@ public sealed class Line1RearFlowEngine : IDisposable
         if (!_cfg.SkewBed.CanProcessLength(bed.Code, wp.Length))
         {
             lock (_wpLock) RestoreRackWorkpieceLocked(rs, wp, rackArrivalSeq);
-            if (transferLocked)
-            {
-                try { _transferRackLock.Release(); } catch (SemaphoreFullException) { }
-                transferLocked = false;
-            }
             _craneRearLock.Release();
             bed.St = SkewState.Idle;
             Console.WriteLine($"[上料] ❌ 失败: {wp.IdentityText} L={wp.Length}mm 超出 {bed.Code} 最大加工长度 {_cfg.SkewBed.GetMaxWorkpieceLengthMm(bed.Code)}mm, 已退回中转架缓存");
@@ -1130,7 +1109,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         wp.ReportStage($"1号线 后端上斜床 {bed.Code}");
         bool mag = false;
         bool holdingWorkpiece = false; // 只有X11确认后才算工件已经离开中转架并由后天车持有
-        bool sharedLocked = false;
+        bool sharedLocked = false; // ST108上料取完中转架后继续持有ZoneTS, 直到斜床1交互后退避释放
         var loadState = new LoadHandshakeState();
         string? pendingSafetyAlarm = null; // 异常正文先保留，等finally完成退避和锁释放后只弹一次完整信息。
         CraneService? cr = null;
@@ -1141,22 +1120,20 @@ public sealed class Line1RearFlowEngine : IDisposable
         //此时已经获得工件的信息
         try
         {
-            // 仅ST108紧邻中转架区, 取料时需锁共享区防前车同时进入碰撞
-            if (bed.Code == "ST108")
-            {
-                // ST108: 按 SharedAreaLock→_transferRackLock 顺序获取(主循环已先行释放中转架锁)
-                //   避免与前台天车 SharedAreaLock→_transferRackLock 反向持锁导致死锁
-                Console.WriteLine("│ [上料] 获取共享区锁(ST108)...");
-                await operation.AcquireAsync("SharedArea", _safety.SharedAreaLock, ct);
-                sharedLocked = true;
-                Console.WriteLine("│ 共享区锁已获取(ST108) ✓");
-                // 重新获取中转架锁(前台天车被SharedAreaLock挡住,不会竞争)
-                Console.WriteLine("│ [上料] 重新获取中转架锁...");
-                //上中转架锁
-                await operation.AcquireAsync("TransferRack", _transferRackLock, ct);
-                transferLocked = true;
-                Console.WriteLine("│ 中转架锁已获取 ✓");
-            }
+            // 中转架位于打号机和斜床1中间，进入中转架取料必须同时持有ZoneMT+ZoneTS。
+            // 取料完成且Z轴升到安全高度后：
+            //   - 普通斜床：释放ZoneMT+ZoneTS；
+            //   - ST108：释放ZoneMT，继续持有ZoneTS到斜床1交互和X+1000退避结束。
+            Console.WriteLine("│ [上料] 获取ZoneMT(打号机↔中转架)...");
+            await operation.AcquireAsync("ZoneMT", _safety.MarkerTransferCollisionLock, ct);
+            Console.WriteLine("│ ZoneMT已获取 ✓");
+            Console.WriteLine("│ [上料] 获取ZoneTS(中转架↔ST108)...");
+            await operation.AcquireAsync("ZoneTS", _safety.TransferSkew1CollisionLock, ct);
+            sharedLocked = bed.Code == "ST108";
+            Console.WriteLine("│ ZoneTS已获取 ✓，当前可进入中转架取料");
+
+            if (!RackHasPhysicalPlateSnapshot(rs))
+                throw new InvalidOperationException($"中转架{rs}物理信号无板, 禁止后天车取料; 软件缓存将恢复等待人工/下轮确认");
             cr = _craneCache.GetOrCreateService(CraneRearNo);
             if (!cr.IsConnected)
             {
@@ -1247,12 +1224,20 @@ public sealed class Line1RearFlowEngine : IDisposable
                 Console.WriteLine($"│ [取料] ⚠ X11=0 未吸到, 准备下探5mm重试");
             }
             //天车这时候在安全位置
-            Console.WriteLine("│ [上料] 工件已取走,释放中转架锁 → 前端可放新工件");
+            Console.WriteLine("│ [上料] 工件已取走且Z已安全, 按现场策略释放中转架侧Zone锁");
             if (!TryCoords(bed.Code, out int bx, out int by, out int bz)) throw new Exception($"缺少斜床{bed.Code}坐标");
             Console.WriteLine($"│ [移动] 天车到斜床{bed.Code} XY=({bx + _ox},{by + _oy}) Z保持{sz}");
-            //中转架锁释放 此时已经z在安全位置
-            operation.TryRelease("TransferRack", _transferRackLock);
-            transferLocked = false;
+            if (bed.Code == "ST108")
+            {
+                operation.TryRelease("ZoneMT", _safety.MarkerTransferCollisionLock);
+                Console.WriteLine("│ [上料] ST108目标: Z已安全, 释放ZoneMT, 继续持有ZoneTS到斜床1退避完成");
+            }
+            else
+            {
+                operation.TryRelease("ZoneTS", _safety.TransferSkew1CollisionLock);
+                operation.TryRelease("ZoneMT", _safety.MarkerTransferCollisionLock);
+                Console.WriteLine("│ [上料] 普通斜床目标: Z已安全, ZoneTS+ZoneMT已释放");
+            }
             //后天车拿着料移动到斜床
             await cr.MoveAbsoluteAsync(bx + _ox, by + _oy, -1, ct: ct);
             var posAfter = await cr.ReadStatusAsync(ct);
@@ -1321,7 +1306,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             {
                 if (transferLocked)
                 {
-                    operation.TryRelease("TransferRack", _transferRackLock);
+                    // 兼容旧变量；新Zone模型下不再持有_transferRackLock。
                     transferLocked = false;
                 }
             } catch (SemaphoreFullException) { }
@@ -1332,11 +1317,11 @@ public sealed class Line1RearFlowEngine : IDisposable
             string sharedCleanupText = string.Empty;
             if (sharedLocked)
             {
-                if (!operation.IsHeld("SharedArea"))
+                if (!operation.IsHeld("ZoneTS"))
                 {
                     sharedLocked = false;
-                    sharedCleanupText = "共享区锁已由斜床应急提前释放";
-                    Console.WriteLine("│ [上料] 共享区锁已由应急释放, 跳过finally退避释放");
+                    sharedCleanupText = "ZoneTS已由斜床应急提前释放";
+                    Console.WriteLine("│ [上料] ZoneTS已由应急释放, 跳过finally退避释放");
                 }
                 else
                 {
@@ -1358,17 +1343,32 @@ public sealed class Line1RearFlowEngine : IDisposable
                     }
 
                     // 现场已确认的异常策略：无论退避成功、失败或因Z下降而跳过，
-                    // 都释放本次上料动作持有的共享区锁；红色弹窗会明确提示锁已释放并要求立即人工处理。
-                    releasedSharedInFinally = operation.TryRelease("SharedArea", _safety.SharedAreaLock);
+                    // 都释放本次上料动作持有的ZoneTS；红色弹窗会明确提示锁已释放并要求立即人工处理。
+                    releasedSharedInFinally = operation.TryRelease("ZoneTS", _safety.TransferSkew1CollisionLock);
                     sharedLocked = false;
-                    sharedCleanupText += "；共享区锁已释放";
+                    sharedCleanupText += "；ZoneTS已释放";
 
                     if (!retreatSucceeded && pendingSafetyAlarm == null)
                     {
                         _paused = true;
-                        pendingSafetyAlarm = $"1号线后天车在{bed.Code}上料异常收尾时未完成共享区X退避。引擎已暂停，请立即人工确认天车位置";
+                        pendingSafetyAlarm = $"1号线后天车在{bed.Code}上料异常收尾时未完成ZoneTS侧X退避。引擎已暂停，请立即人工确认天车位置";
                     }
                 }
+            }
+
+            if (operation.IsHeld("ZoneTS"))
+            {
+                operation.TryRelease("ZoneTS", _safety.TransferSkew1CollisionLock);
+                sharedCleanupText = string.IsNullOrWhiteSpace(sharedCleanupText)
+                    ? "ZoneTS已释放"
+                    : $"{sharedCleanupText}；ZoneTS兜底释放";
+            }
+            if (operation.IsHeld("ZoneMT"))
+            {
+                operation.TryRelease("ZoneMT", _safety.MarkerTransferCollisionLock);
+                sharedCleanupText = string.IsNullOrWhiteSpace(sharedCleanupText)
+                    ? "ZoneMT已释放"
+                    : $"{sharedCleanupText}；ZoneMT已释放";
             }
 
             bool releasedRearInFinally = operation.TryRelease("RearCrane", _craneRearLock);
@@ -1385,7 +1385,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             }
             
             _fastNextCycle = true; // 刚完成上料, 通知主循环快速检查下料任务
-            Console.WriteLine("│ [上料] 释放后天车锁" + (releasedSharedInFinally ? " + 共享区" : ""));
+            Console.WriteLine("│ [上料] 释放后天车锁" + (!string.IsNullOrWhiteSpace(sharedCleanupText) ? " + Zone锁收尾" : ""));
             Console.WriteLine("└── [上料] 结束 ──────────────────────────");
             EndSkewOperation(bed, operation);
         }
@@ -1485,7 +1485,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         bool holdingWorkpiece = false;       // X11确认有版后才算工件已经在后天车上, 不能只看是否发过充磁命令
         bool placedToDestination = false;    // 退磁放到目标位 + Z升安全 + 必要通知完成后, 才允许斜床Idle并清Wp
         bool sharedLocked = false;
-        bool sharedWasAcquired = false;       // 用于后续分流异常弹窗说明：共享区锁可能已在正常提前退避后释放
+        bool sharedWasAcquired = false;       // 用于后续分流异常弹窗说明：ZoneTS可能已在正常提前退避后释放
         bool zMayBeDown = false;              // 只用于异常收尾：Z下降命令发出后，到确认Z回安全高度前均为true
         bool sharedRetreatAttempted = false;  // 防止正常提前退避失败后，finally再次发送同一X运动
         bool sharedRetreatSucceeded = false;
@@ -1507,14 +1507,14 @@ public sealed class Line1RearFlowEngine : IDisposable
             if (await cr.ReadXBitAsync(63497, ct))
                 throw new InvalidOperationException("后天车X11=1(磁铁已有工件), 拒绝下料取料防止碰撞");
 
-            // 仅ST108紧邻中转架区, 下料取料时需锁共享区防前车同时进入碰撞
+            // 仅ST108紧邻中转架-斜床1碰撞区, 下料取料时只需持有ZoneTS。
             if (bed.Code == "ST108")
             {
-                Console.WriteLine("│ [下料] 获取共享区锁(ST108)...");
-                await operation.AcquireAsync("SharedArea", _safety.SharedAreaLock, ct);
+                Console.WriteLine("│ [下料] 获取ZoneTS(ST108↔中转架)...");
+                await operation.AcquireAsync("ZoneTS", _safety.TransferSkew1CollisionLock, ct);
                 sharedLocked = true;
                 sharedWasAcquired = true;
-                Console.WriteLine("│ [下料] 共享区锁已获取(ST108) ✓");
+                Console.WriteLine("│ [下料] ZoneTS已获取(ST108) ✓");
             }
 
             // 设置天车速度(与DoLoad一致, 防止PLC残留速度导致异常)
@@ -1650,7 +1650,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     if (recoveryErrors.Count > 0)
                     {
                         // 使旧动作失效并暂停。若Z回升失败，finally会依据zMayBeDown禁止X横移；
-                        // 按现场确认策略，异常收尾仍释放本动作的共享区锁和后天车锁，并在弹窗中写明。
+                        // 按现场确认策略，异常收尾仍释放本动作的ZoneTS和后天车锁，并在弹窗中写明。
                         operation.CancelAndInvalidate();
                         _paused = true;
                         string alarm = $"1号线后天车从{bed.Code}下料取料时，X11连续三次为0，且安全恢复失败：" +
@@ -1706,20 +1706,20 @@ public sealed class Line1RearFlowEngine : IDisposable
             if (sharedLocked)
             {
                 // ST108下料已完成: 尾座张开、Y回数据库坐标、Z已升安全、CNC已收到下料完成。
-                // Y/Z安全不等于X已离开共享碰撞区; 释放共享区锁前必须先按配置退避X。
+                // 下料仍按原策略先执行X+1000/配置退避，再释放ZoneTS。
                 sharedRetreatAttempted = true;
                 sharedRetreatSucceeded = await TryRetreatSharedAreaBeforeReleaseAsync(cr, bed.Code, "下料", ct);
                 if (sharedRetreatSucceeded)
                 {
-                    operation.TryRelease("SharedArea", _safety.SharedAreaLock);
+                    operation.TryRelease("ZoneTS", _safety.TransferSkew1CollisionLock);
                     sharedLocked = false;
-                    Console.WriteLine("│ [下料] ST108已退离共享区并写下料完成, 提前释放共享区锁");
+                    Console.WriteLine("│ [下料] ST108已完成ZoneTS侧退避并写下料完成, 提前释放ZoneTS");
                 }
                 else
                 {
                     _paused = true;
-                    Console.WriteLine("│ [下料] ⚠ ST108共享区退避失败; 引擎已暂停, finally仍会释放共享区锁和后天车锁");
-                    throw new InvalidOperationException("ST108下料完成后共享区退避失败；已暂停，finally将释放共享区锁和后天车锁");
+                    Console.WriteLine("│ [下料] ⚠ ST108 ZoneTS侧退避失败; 引擎已暂停, finally仍会释放ZoneTS和后天车锁");
+                    throw new InvalidOperationException("ST108下料完成后ZoneTS侧退避失败；已暂停，finally将释放ZoneTS和后天车锁");
                 }
             }
 
@@ -1910,19 +1910,18 @@ public sealed class Line1RearFlowEngine : IDisposable
                 Console.WriteLine("│ 工件仍在斜床→保持等待下料");
             }
 
-            // DoUnload不拥有_transferRackLock, 这里不能补Release。
-            // SemaphoreSlim不跟踪所有者, 误Release会把别人持有的中转架锁放开, 破坏互斥。
+            // DoUnload不进入中转架, 不处理_transferRackLock；ST108/ST606只按任务牌处理ZoneTS。
         }
         finally
         {
             string sharedCleanupText = string.Empty;
             if (sharedLocked)
             {
-                if (!operation.IsHeld("SharedArea"))
+                if (!operation.IsHeld("ZoneTS"))
                 {
                     sharedLocked = false;
-                    sharedCleanupText = "共享区锁已由斜床应急提前释放";
-                    Console.WriteLine("│ [下料] 共享区锁已由应急释放, 跳过finally退避释放");
+                    sharedCleanupText = "ZoneTS已由斜床应急提前释放";
+                    Console.WriteLine("│ [下料] ZoneTS已由应急释放, 跳过finally退避释放");
                 }
                 else
                 {
@@ -1948,23 +1947,23 @@ public sealed class Line1RearFlowEngine : IDisposable
                     }
 
                     // 与ST108上料保持一致：无论退避成功、失败或因低Z跳过，
-                    // 都释放本次下料动作持有的共享区锁；弹窗明确说明锁已释放并要求立即人工处理。
-                    operation.TryRelease("SharedArea", _safety.SharedAreaLock);
+                    // 都释放本次下料动作持有的ZoneTS；弹窗明确说明锁已释放并要求立即人工处理。
+                    operation.TryRelease("ZoneTS", _safety.TransferSkew1CollisionLock);
                     sharedLocked = false;
-                    sharedCleanupText += "；共享区锁已释放";
+                    sharedCleanupText += "；ZoneTS已释放";
 
                     if (!sharedRetreatSucceeded && pendingSafetyAlarm == null)
                     {
                         _paused = true;
-                        pendingSafetyAlarm = $"1号线后天车在{bed.Code}下料异常收尾时未完成共享区X退避。引擎已暂停，请立即人工确认天车位置";
+                        pendingSafetyAlarm = $"1号线后天车在{bed.Code}下料异常收尾时未完成ZoneTS侧X退避。引擎已暂停，请立即人工确认天车位置";
                     }
                 }
             }
 
-            // 情景：ST108已正常完成X退避并提前释放共享区锁，随后分流/目的位又发生异常。
-            // finally无需再次释放，但最终弹窗仍应明确告诉操作员共享区锁已经释放。
+            // 情景：ST108已正常完成X退避并提前释放ZoneTS，随后分流/目的位又发生异常。
+            // finally无需再次释放，但最终弹窗仍应明确告诉操作员ZoneTS已经释放。
             if (sharedWasAcquired && !sharedLocked && string.IsNullOrWhiteSpace(sharedCleanupText))
-                sharedCleanupText = "共享区锁已在正常提前退避后释放";
+                sharedCleanupText = "ZoneTS已在正常提前退避后释放";
 
             bool rearReleased = operation.TryRelease("RearCrane", _craneRearLock);
             string rearCleanupText = rearReleased ? "后天车锁已释放" : "后天车锁已由斜床应急提前释放";
@@ -1980,16 +1979,16 @@ public sealed class Line1RearFlowEngine : IDisposable
             }
             
             _fastNextCycle = true;
-            Console.WriteLine("│ [下料] 后天车锁收尾完成" + (!string.IsNullOrWhiteSpace(sharedCleanupText) ? " + 共享区锁收尾完成" : ""));
+            Console.WriteLine("│ [下料] 后天车锁收尾完成" + (!string.IsNullOrWhiteSpace(sharedCleanupText) ? " + ZoneTS收尾完成" : ""));
             Console.WriteLine("└── [下料] 结束 ──────────────────────────");
             EndSkewOperation(bed, operation);
         }
     }
 
     /// <summary>
-    /// 共享区锁兜底释放前的安全退避。
-    /// finally里仍持有SharedAreaLock, 说明流程没有走到正常提前释放点, 后天车可能停在ST108上方。
-    /// 这里直接读取天车当前X坐标并加配置退避距离后移动, 不套数据库偏移; 退避失败则不释放共享区锁。
+    /// ZoneTS锁兜底释放前的安全退避。
+    /// finally里仍持有ZoneTS, 说明流程没有走到正常提前释放点, 后天车可能停在ST108上方。
+    /// 这里直接读取天车当前X坐标并加配置退避距离后移动, 不套数据库偏移; 退避失败则由finally弹窗说明后释放ZoneTS。
     /// </summary>
     private async Task<bool> TryRetreatSharedAreaBeforeReleaseAsync(CraneService? cr, string stationCode, string flowName, CancellationToken ct)
     {
@@ -1997,33 +1996,33 @@ public sealed class Line1RearFlowEngine : IDisposable
         {
             if (cr == null)
             {
-                Console.WriteLine($"│ [{flowName}] ⚠ 共享区退避失败: 后天车服务未创建");
+                Console.WriteLine($"│ [{flowName}] ⚠ ZoneTS侧退避失败: 后天车服务未创建");
                 return false;
             }
 
             var status = await cr.ReadStatusAsync(ct);
             if (status == null)
             {
-                Console.WriteLine($"│ [{flowName}] ⚠ 共享区退避失败: 后天车当前位置读取失败");
+                Console.WriteLine($"│ [{flowName}] ⚠ ZoneTS侧退避失败: 后天车当前位置读取失败");
                 return false;
             }
 
             int retreatX = _cfg.SkewBed.GetSharedAreaRetreatX(stationCode);
             if (retreatX <= 0)
             {
-                Console.WriteLine($"│ [{flowName}] 共享区退避距离未配置或<=0: {stationCode}={retreatX}, 禁止释放共享区锁");
+                Console.WriteLine($"│ [{flowName}] ZoneTS侧退避距离未配置或<=0: {stationCode}={retreatX}");
                 return false;
             }
             //目标位置
             int targetX = status.XPos + retreatX;
-            Console.WriteLine($"│ [{flowName}] 共享区释放前退避: {stationCode} 当前X={status.XPos}, 目标X={targetX}(当前X+配置{retreatX}, 不加偏移)");
+            Console.WriteLine($"│ [{flowName}] ZoneTS释放前退避: {stationCode} 当前X={status.XPos}, 目标X={targetX}(当前X+配置{retreatX}, 不加偏移)");
             await cr.MoveAbsoluteAsync(targetX, -1, -1, ct: ct);
-            Console.WriteLine($"│ [{flowName}] ✓ 后天车已退离共享区, 允许释放共享区锁");
+            Console.WriteLine($"│ [{flowName}] ✓ 后天车已完成ZoneTS侧退避, 允许释放ZoneTS");
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"│ [{flowName}] ⚠ 共享区退避异常: {ex.Message}");
+            Console.WriteLine($"│ [{flowName}] ⚠ ZoneTS侧退避异常: {ex.Message}");
             return false;
         }
     }
