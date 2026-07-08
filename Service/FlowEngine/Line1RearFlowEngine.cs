@@ -16,11 +16,10 @@ namespace AutomaticOnlineHostComputer.Service;
 ///   步骤① 轮询斜床PLC信号(请求数据/上料/夹紧/下料/张开) → 同步引擎状态
 ///   步骤② 斜床断线重连(每20轮, 仅斜床不连MC65)
 ///   步骤③ 状态汇总(纯日志)
-///   步骤④ 下料检查(优先!) — 斜床加工完成+目的地空闲 → 后天车取料分流
-///   步骤⑤ 上料检查 — 中转架有版+斜床空闲请求 → 后天车取料上料
+///   步骤④/⑤ 动态调度 — 先生成上/下料候选，再按中转架压力、下料压力、长度匹配决定本轮动作
 ///
 /// 【锁安全】
-///   _craneRearLock(后天车) → _transferRackLock(中转架, 与前端共享)
+///   _craneRearLock(后天车) → ZoneMT(打号机-中转架) → ZoneTS(中转架-ST108)
 ///
 /// 【MC65策略】
 ///   Init不连 / 主循环不连 / 重连也不连
@@ -354,185 +353,31 @@ public sealed class Line1RearFlowEngine : IDisposable
                 }
                 
                 // ═══════════════════════════════════════════════════════════
-                //  步骤④ 下料检查 (优先级最高)
-                //    条件: ①斜床已连接
-                //          ②CNC请求下料=1
-                //          ③知道工件信息(b.Wp)
-                //          ④目的地空闲(长→M817, 短→MC65读M720)
-                //    ⚠ 平衡料架锁(_lockM817/_lockM720)在DoUnload内部分流阶段获取
-                //       此处只检查目的地信号空闲, 实际互斥由DoUnload持锁保证
+                //  步骤④/⑤ 动态调度：先收集候选，再决定上料还是下料
+                //    - 不改DoLoad/DoUnload正常业务步骤
+                //    - 中转架放板顺序仍按_wpArrivalSeqs
+                //    - 当前可用斜床加工不了的中转架板，在候选期允许跳过，看后面板是否可加工
                 // ═══════════════════════════════════════════════════════════
-                if (_cycleCount % 10 == 1) Console.WriteLine("│ [步骤4] 下料检查(优先级最高)...");
-                bool anyUnloading = false;
-                bool rearCraneZeroDetected = false;
-                foreach (var b in _beds)
-                {
-                    if (b == null || !b.Ok) continue;
-                    if (!b.SignalFresh)
-                    {
-                        Console.WriteLine($"│   {b.Code} 本轮信号未刷新成功, 禁止使用旧信号派发上/下料");
-                        continue;
-                    }
-                    // ── 4a. 加工中 → 检查是否完成 (复用步骤①PollBed已读的b.RqUnload, 无需额外IO)
-                    if (b.St == SkewState.Machining)
-                    {
-                        if (b.RqUnload)
-                            { b.St = SkewState.WaitingUnload; Console.WriteLine($"│   ✓ {b.Code} 加工完成→请求下料"); }
-                        else
-                            { if (_cycleCount % 10 == 1) Console.WriteLine($"│   {b.Code} 加工中...继续等待"); }
-                    }
-                    // ── 4b. 等待下料 → 检查目的地是否就绪 ──
-                    if (b.St == SkewState.WaitingUnload)
-                    {
-                        // 必须有工件数据 (引擎重启后可能丢失)
-                        if (b.Wp == null)
-                        {
-                            Console.WriteLine($"│   {b.Code} 等待下料但缺工件数据(b.Wp=null),跳过(需人工确认)");
-                            continue;
-                        }
-                        var wp = b.Wp.Value;
+                bool logDetails = _cycleCount % 10 == 1;
+                if (logDetails) Console.WriteLine("│ [步骤4/5] 后天车动态调度候选扫描...");
+                var unloadScan = await BuildUnloadCandidateScanAsync(fds, logDetails, ct);
+                var loadScan = BuildLoadCandidateScan(logDetails);
+                var decision = RearSkewDispatchPlanner.Decide(
+                    loadScan.Candidates.Count,
+                    unloadScan.Candidates.Count,
+                    loadScan.PhysicalRackPlateCount,
+                    loadScan.MatchableRackPlateCount,
+                    unloadScan.UsableBedCount);
 
-                        // 斜床加工完成记录必须在清bed.Wp之前写出。
-                        // 如果文件暂时被占用/不可写, 不暂停整线, 但本斜床本轮先不下料, 下轮继续补写, 防止完工数据丢失。
-                        if (!b.CompletionExported)
-                        {
-                            b.CompletionExported = await SkewCompletionExportHelper.TryAppendAsync(_cfg, b.Code, wp, ct);
-                            if (!b.CompletionExported)
-                            {
-                                Console.WriteLine($"│   {b.Code} {wp.IdentityText} 完工记录未写入job2, 本轮暂不下料, 下轮重试");
-                                continue;
-                            }
-                        }
+                Console.WriteLine($"│ [后调度] 决策={decision.Action} 原因={decision.Reason} " +
+                                  $"上料候选={loadScan.Candidates.Count} 下料候选={unloadScan.Candidates.Count} " +
+                                  $"中转架物理板={loadScan.PhysicalRackPlateCount} 可匹配板={loadScan.MatchableRackPlateCount} " +
+                                  $"有效斜床={unloadScan.UsableBedCount} 下料高压阈值={decision.HighUnloadThreshold}");
 
-                        bool destOk = false;
-                        string destErr = "";
-
-                        // 需要动平衡 → 动平衡下料架1 (ST019, M817)
-                        //   原规则: 版长≥800mm必须做动平衡。
-                        //   新规则: 任务勾选"是否做动平衡"时, 即使短板也强制走M817。
-                        bool needsBalancing = wp.Length >= 800 || wp.ForceBalancing;
-                        if (needsBalancing)
-                        {
-                            if (fds == null) destErr = "frontDs=null";
-                            else if (!fds.M817SnapshotValid) destErr = "M817状态本轮无效(禁止按旧空闲放料)";
-                            else if (fds.M817_HasPlate) destErr = "M817=有版(动平衡架未取走)";
-                            else destOk = true;
-                        }
-                        // 短工件(<800mm) → 研磨上料架1号位(ST010, M720) → 传送带→③→研磨天车取
-                        else
-                        {
-                            bool m720CanPlace = false; // 默认不可放, 连不上保守不下料
-                            try
-                            {
-                                using var mcts = new CancellationTokenSource(3000);
-                                using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, mcts.Token);
-                                //连接
-                                var mc65 = await _mcCache.GetOrCreateAsync("192.168.2.65", 9000, linked.Token);
-                                var r = await mc65.ReadMAlignedWordAsync(720, 1, linked.Token);
-                                //读取M720是否允许放板
-                                m720CanPlace = (r.IntValues[0] & 1) != 0;
-                                Console.WriteLine($"│   M720(研磨上料架1号位)={(m720CanPlace ? "可放料" : "不可放料")}");
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"│   M720按需连MC65失败: {ex.Message},下轮重试");
-                                destErr = "MC65(192.168.2.65)按需连接失败";
-                            }
-                            if (destErr == "" && !m720CanPlace) destErr = "M720=不可放料(研磨上料架1号位未允许)";
-                            else if (destErr == "") destOk = true;
-                        }
-                        
-                        if (!destOk)
-                        {
-                            Console.WriteLine($"│   {b.Code} 目的地不可用: {destErr},下轮重试");
-                            continue;
-                        }
-
-                        // ── 4c. 目的地就绪 → 抢后天车锁, 开始下料 ──
-                        Console.WriteLine($"│   {b.Code} 目的地空闲, 抢后天车锁(当前={_craneRearLock.CurrentCount})...");
-                        if (await _craneRearLock.WaitAsync(0, ct))
-                        {
-                            // 状态和工件身份尚未改变时检查坐标；全零则保留原任务等待人工处理。
-                            if (!await EnsureRearCranePositionReadyAsync("斜床下料任务派发前", ct))
-                            {
-                                _craneRearLock.Release();
-                                rearCraneZeroDetected = true;
-                                break;
-                            }
-                            b.St = SkewState.Unloading; anyUnloading = true;
-                            Console.WriteLine($"│   ▶ {b.Code} 开始下料! {wp.IdentityText} 工件={wp.Diameter}mm L={wp.Length}mm");
-                            //1号线后天车进行下料；ST108仅持有并释放ZoneTS
-                            _ = DoUnload(b, ct);
-                        }
-                        else { Console.WriteLine($"│   {b.Code} 后天车被占用,下轮重试"); }
-                    }
-
-                    // ── 4d. 正在下料中 ──
-                    if (b.St == SkewState.Unloading)
-                    {
-                        if (_cycleCount % 10 == 1) Console.WriteLine($"│   {b.Code} 正在下料中..."); anyUnloading = true;
-                    }
-                }
-                if (rearCraneZeroDetected) continue;
-                if (!anyUnloading && _cycleCount % 10 == 1) Console.WriteLine("│   (无下料任务)");
-
-                // ═══════════════════════════════════════════════════════════
-                //  步骤⑤ 上料检查
-                //    条件: ①中转架之一有版+有缓存数据(前端OnRackPlaced写入)
-                //          ②斜床之一 空闲+已连接+请求数据
-                //          ③后天车锁空闲
-                //          ④进入中转架时由DoLoad获取ZoneMT+ZoneTS
-                // ═══════════════════════════════════════════════════════════
-                if (_cycleCount % 10 == 1) Console.WriteLine("│ [步骤5] 上料检查...");
-
-                // ⑤a. 先做一次无锁配对预览: 中转架工件 + 可加工该长度的空闲斜床
-                var previewPair = FindLoadPair(logDetails: _cycleCount % 10 == 1);
-                if (previewPair == null)
-                {
-                    // 详细原因已由 FindLoadPair 按节流频率输出。
-                }
-                else
-                {
-                    // ⑤b. 抢后天车锁 (非阻塞)。预览只用于减少空转; 拿锁后仍要重新配对复核。
-                    Console.WriteLine($"│   ✓ 预选 源={previewPair.RackCode} L={previewPair.Wp.Length} → 目标={previewPair.Bed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(previewPair.Bed.Code)}), 抢后天车锁(当前={_craneRearLock.CurrentCount})...");
-                    if (await _craneRearLock.WaitAsync(0, ct))
-                    {
-                        // 在取得后天车锁后、改变斜床状态前检查，避免遗留任何锁或任务变更。
-                        if (!await EnsureRearCranePositionReadyAsync("斜床上料任务派发前", ct))
-                        {
-                            _craneRearLock.Release();
-                            continue;
-                        }
-                        // ⑤c. 新Zone模型下不再预抢_transferRackLock。
-                        //      DoLoad内部会按 ZoneMT→ZoneTS 进入中转架，并在锁内重新确认物理有板+软件缓存。
-                        Console.WriteLine("│   ✓ 后天车锁获取, 由DoLoad内部申请ZoneMT+ZoneTS并锁后复核...");
-                        bool triggered = false;
-                        try
-                        {
-                            // ⑤d. 拿到后天车锁后正式复核一次候选配对；最终物理/缓存确认仍在DoLoad持Zone锁后执行。
-                            var pair = FindLoadPair(logDetails: true);
-                            if (pair == null)
-                            {
-                                Console.WriteLine("│   复核无可用上料配对,释放后天车锁");
-                            }
-                            else
-                            {
-                                Console.WriteLine($"│   ▶ 触发上料! 源={pair.RackCode} {pair.Wp.IdentityText} L={pair.Wp.Length} → 目标={pair.Bed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(pair.Bed.Code)})");
-                                pair.Bed.St = SkewState.Loading;
-                                triggered = true;
-                                _ = DoLoad(pair.Bed, pair.RackCode, ct); // 异步执行, 不阻塞主循环
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"│   上料派发复核异常: {ex.Message}");
-                        }
-
-                        // ⑤e. 未触发上料 → 释放后天车锁
-                        if (!triggered) { _craneRearLock.Release(); Console.WriteLine("│   未触发上料,释放后天车锁"); }
-                    }
-                    else { Console.WriteLine("│   后天车被占用,下轮重试"); }
-                }
+                if (decision.Action == RearSkewDispatchAction.Load)
+                    await TryDispatchLoadAsync(ct);
+                else if (decision.Action == RearSkewDispatchAction.Unload)
+                    await TryDispatchUnloadAsync(fds, ct);
 
                 // ── 刷新后天车连接状态到UI ──
                 try { ds.CraneRearConnected = _craneCache.GetOrCreateService(CraneRearNo).IsConnected; } catch { }
@@ -567,6 +412,26 @@ public sealed class Line1RearFlowEngine : IDisposable
         public SkewCtx Bed = null!;
         public string RackCode = string.Empty;
         public WorkpieceCache Wp;
+    }
+
+    private sealed class UnloadCandidate
+    {
+        public SkewCtx Bed = null!;
+        public WorkpieceCache Wp;
+    }
+
+    private sealed class LoadCandidateScan
+    {
+        public List<LoadPair> Candidates { get; } = new();
+        public int PhysicalRackPlateCount { get; set; }
+        public int MatchableRackPlateCount { get; set; }
+    }
+
+    private sealed class UnloadCandidateScan
+    {
+        public List<UnloadCandidate> Candidates { get; } = new();
+        public int UsableBedCount { get; set; }
+        public bool HasActiveUnloading { get; set; }
     }
 
     private List<string> GetTransferRackCodesWithPlateSnapshot()
@@ -677,50 +542,268 @@ public sealed class Line1RearFlowEngine : IDisposable
         return string.Join(", ", parts);
     }
 
-    private LoadPair? FindLoadPair(bool logDetails)
+    /// <summary>
+    /// 生成上料候选。
+    /// 只做候选扫描，不抢后天车锁、不移除缓存、不启动DoLoad。
+    /// 中转架按前天车放板到达顺序扫描；如果某块板当前没有任何可用斜床能加工，则记录并跳过，
+    /// 继续看后面的板，避免一块超长/不匹配板把整条后端堵死。
+    /// </summary>
+    private LoadCandidateScan BuildLoadCandidateScan(bool logDetails)
     {
+        var scan = new LoadCandidateScan();
         var beds = GetReadyBedsByPriority();
+        var racks = GetTransferRackCodesWithPlateSnapshot();
+        scan.PhysicalRackPlateCount = racks.Count;
+
         if (beds.Count == 0)
         {
             if (logDetails)
             {
-                Console.WriteLine("│   无可用斜床(需同时满足:空闲+已连接+CNC请求数据)");
+                Console.WriteLine("│   [上料候选] 无可用斜床(需同时满足:空闲+已连接+CNC请求数据)");
                 for (int i = 0; i < 5; i++)
                 {
                     var b = _beds[i];
                     if (b == null) continue;
-                    Console.WriteLine($"│     {b.Code}: St={b.St} Ok={b.Ok} RqData={b.RqData} RqLoad={b.RqLoad} → {(b.Idle && (b.RqData || b.RqLoad) ? "可用" : "不可用")}");
+                    Console.WriteLine($"│     {b.Code}: St={b.St} Ok={b.Ok} Fresh={b.SignalFresh} RqData={b.RqData} RqLoad={b.RqLoad} → {(IsReadyForLoad(b) ? "可用" : "不可用")}");
                 }
             }
-            return null;
+            return scan;
         }
 
-        var racks = GetTransferRackCodesWithPlateSnapshot();
         if (racks.Count == 0)
         {
-            if (logDetails) Console.WriteLine("│   中转架无版(锁前/锁后快照),跳过后天车锁");
-            return null;
+            if (logDetails) Console.WriteLine("│   [上料候选] 中转架无物理板");
+            return scan;
         }
 
         foreach (var rackCode in racks)
         {
             if (!TryGetRackWorkpieceCache(rackCode, out var wp))
             {
-                if (logDetails) Console.WriteLine($"│   中转架{rackCode}有物理板但无工件缓存,等待缓存写入/人工确认");
+                if (logDetails) Console.WriteLine($"│   [上料候选] {rackCode}有物理板但无工件缓存,等待缓存写入/人工确认");
                 continue;
             }
 
+            SkewCtx? matchedBed = null;
             foreach (var bed in beds)
             {
                 if (_cfg.SkewBed.CanProcessLength(bed.Code, wp.Length))
-                    return new LoadPair { Bed = bed, RackCode = rackCode, Wp = wp };
+                {
+                    matchedBed = bed;
+                    break;
+                }
             }
 
+            if (matchedBed == null)
+            {
+                if (logDetails)
+                    Console.WriteLine($"│   [上料候选] 跳过{rackCode}: {wp.IdentityText} L={wp.Length}mm, 当前可用斜床无长度匹配({BuildReadyBedCapacityText(beds)})");
+                continue;
+            }
+
+            scan.MatchableRackPlateCount++;
+            scan.Candidates.Add(new LoadPair { Bed = matchedBed, RackCode = rackCode, Wp = wp });
             if (logDetails)
-                Console.WriteLine($"│   跳过{rackCode}: {wp.IdentityText} L={wp.Length}mm, 当前可用斜床无长度匹配({BuildReadyBedCapacityText(beds)})");
+                Console.WriteLine($"│   [上料候选] ✓ {rackCode} {wp.IdentityText} L={wp.Length} → {matchedBed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(matchedBed.Code)})");
         }
 
-        return null;
+        if (logDetails)
+            Console.WriteLine($"│   [上料候选] 物理板={scan.PhysicalRackPlateCount} 可匹配板={scan.MatchableRackPlateCount} 候选={scan.Candidates.Count}");
+        return scan;
+    }
+
+    /// <summary>
+    /// 生成下料候选。
+    /// 会保留原来的必要状态同步和完工记录写入，但不会抢后天车锁、不会启动DoUnload。
+    /// </summary>
+    private async Task<UnloadCandidateScan> BuildUnloadCandidateScanAsync(Line1FrontFlowEngine.Line1DeviceStatus? fds, bool logDetails, CancellationToken ct)
+    {
+        var scan = new UnloadCandidateScan();
+        foreach (var b in _beds)
+        {
+            if (b == null || !b.Ok) continue;
+            if (!b.SignalFresh)
+            {
+                Console.WriteLine($"│   {b.Code} 本轮信号未刷新成功, 禁止使用旧信号派发上/下料");
+                continue;
+            }
+
+            scan.UsableBedCount++;
+
+            if (b.St == SkewState.Machining)
+            {
+                if (b.RqUnload)
+                {
+                    b.St = SkewState.WaitingUnload;
+                    Console.WriteLine($"│   ✓ {b.Code} 加工完成→请求下料");
+                }
+                else if (logDetails)
+                {
+                    Console.WriteLine($"│   {b.Code} 加工中...继续等待");
+                }
+            }
+
+            if (b.St == SkewState.Unloading)
+            {
+                if (logDetails) Console.WriteLine($"│   {b.Code} 正在下料中...");
+                scan.HasActiveUnloading = true;
+                continue;
+            }
+
+            if (b.St != SkewState.WaitingUnload) continue;
+
+            if (b.Wp == null)
+            {
+                Console.WriteLine($"│   {b.Code} 等待下料但缺工件数据(b.Wp=null),跳过(需人工确认)");
+                continue;
+            }
+
+            var wp = b.Wp.Value;
+            if (!b.CompletionExported)
+            {
+                b.CompletionExported = await SkewCompletionExportHelper.TryAppendAsync(_cfg, b.Code, wp, ct);
+                if (!b.CompletionExported)
+                {
+                    Console.WriteLine($"│   {b.Code} {wp.IdentityText} 完工记录未写入job2, 本轮暂不下料, 下轮重试");
+                    continue;
+                }
+            }
+
+            if (!await CanUnloadDestinationAcceptAsync(fds, wp, ct))
+                continue;
+
+            scan.Candidates.Add(new UnloadCandidate { Bed = b, Wp = wp });
+            if (logDetails) Console.WriteLine($"│   [下料候选] ✓ {b.Code} {wp.IdentityText} L={wp.Length}mm");
+        }
+
+        if (logDetails)
+            Console.WriteLine($"│   [下料候选] 有效斜床={scan.UsableBedCount} 候选={scan.Candidates.Count} 正在下料={scan.HasActiveUnloading}");
+        return scan;
+    }
+
+    private async Task<bool> CanUnloadDestinationAcceptAsync(Line1FrontFlowEngine.Line1DeviceStatus? fds, WorkpieceCache wp, CancellationToken ct)
+    {
+        bool needsBalancing = wp.Length >= 800 || wp.ForceBalancing;
+        if (needsBalancing)
+        {
+            if (fds == null)
+            {
+                Console.WriteLine("│   目的地不可用: frontDs=null");
+                return false;
+            }
+            if (!fds.M817SnapshotValid)
+            {
+                Console.WriteLine("│   目的地不可用: M817状态本轮无效(禁止按旧空闲放料)");
+                return false;
+            }
+            if (fds.M817_HasPlate)
+            {
+                Console.WriteLine("│   目的地不可用: M817=有版(动平衡架未取走)");
+                return false;
+            }
+            return true;
+        }
+
+        try
+        {
+            using var mcts = new CancellationTokenSource(3000);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, mcts.Token);
+            var mc65 = await _mcCache.GetOrCreateAsync("192.168.2.65", 9000, linked.Token);
+            var r = await mc65.ReadMAlignedWordAsync(720, 1, linked.Token);
+            bool m720CanPlace = (r.IntValues[0] & 1) != 0;
+            Console.WriteLine($"│   M720(研磨上料架1号位)={(m720CanPlace ? "可放料" : "不可放料")}");
+            if (!m720CanPlace)
+            {
+                Console.WriteLine("│   目的地不可用: M720=不可放料(研磨上料架1号位未允许)");
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"│   M720按需连MC65失败: {ex.Message},下轮重试");
+            return false;
+        }
+    }
+
+    private async Task TryDispatchLoadAsync(CancellationToken ct)
+    {
+        Console.WriteLine($"│ [后调度] 尝试派发上料, 抢后天车锁(当前={_craneRearLock.CurrentCount})...");
+        if (!await _craneRearLock.WaitAsync(0, ct))
+        {
+            Console.WriteLine("│ [后调度] 后天车被占用, 本轮不改派下料");
+            return;
+        }
+
+        bool triggered = false;
+        try
+        {
+            if (!await EnsureRearCranePositionReadyAsync("斜床上料任务派发前", ct))
+                return;
+
+            var scan = BuildLoadCandidateScan(logDetails: true);
+            if (scan.Candidates.Count == 0)
+            {
+                Console.WriteLine("│ [后调度] 上料复核无候选, 释放后天车锁");
+                return;
+            }
+
+            var pair = scan.Candidates[0];
+            Console.WriteLine($"│   ▶ 触发上料! 源={pair.RackCode} {pair.Wp.IdentityText} L={pair.Wp.Length} → 目标={pair.Bed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(pair.Bed.Code)})");
+            pair.Bed.St = SkewState.Loading;
+            triggered = true;
+            _ = DoLoad(pair.Bed, pair.RackCode, ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"│ [后调度] 上料派发复核异常: {ex.Message}");
+        }
+        finally
+        {
+            if (!triggered)
+            {
+                _craneRearLock.Release();
+                Console.WriteLine("│ [后调度] 未触发上料, 后天车锁已释放");
+            }
+        }
+    }
+
+    private async Task TryDispatchUnloadAsync(Line1FrontFlowEngine.Line1DeviceStatus? fds, CancellationToken ct)
+    {
+        Console.WriteLine($"│ [后调度] 尝试派发下料, 抢后天车锁(当前={_craneRearLock.CurrentCount})...");
+        if (!await _craneRearLock.WaitAsync(0, ct))
+        {
+            Console.WriteLine("│ [后调度] 后天车被占用, 本轮不改派上料");
+            return;
+        }
+
+        bool triggered = false;
+        try
+        {
+            if (!await EnsureRearCranePositionReadyAsync("斜床下料任务派发前", ct))
+                return;
+
+            var scan = await BuildUnloadCandidateScanAsync(fds, logDetails: true, ct);
+            if (scan.Candidates.Count == 0)
+            {
+                Console.WriteLine("│ [后调度] 下料复核无候选, 释放后天车锁");
+                return;
+            }
+
+            var candidate = scan.Candidates[0];
+            candidate.Bed.St = SkewState.Unloading;
+            triggered = true;
+            Console.WriteLine($"│   ▶ {candidate.Bed.Code} 开始下料! {candidate.Wp.IdentityText} 工件={candidate.Wp.Diameter}mm L={candidate.Wp.Length}mm");
+            _ = DoUnload(candidate.Bed, ct);
+        }
+        finally
+        {
+            if (!triggered)
+            {
+                _craneRearLock.Release();
+                Console.WriteLine("│ [后调度] 未触发下料, 后天车锁已释放");
+            }
+        }
     }
 
     private static bool IsReadyForLoad(SkewCtx? b) => b != null && b.Idle && b.SignalFresh && b.RqData;
