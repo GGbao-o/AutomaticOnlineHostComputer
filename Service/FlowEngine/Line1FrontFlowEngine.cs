@@ -1846,10 +1846,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
             int safeZ = _cfg.Grinding.SafeZHeight;
             Console.WriteLine($"[Line1Front] [前天车] ═══ 天车流程开始 {wp.IdentityText} d={wp.Diameter} L={wp.Length} ═══");
 
-            // ① 等机械手1回安全位
-            Console.WriteLine($"[Line1Front] [前天车] ① 等机械手1进入任一安全位 Y={_cfg.SkewBed.Manipulator1Line1SafeY}/{_cfg.SkewBed.Manipulator1Line2SafeY}mm...");
-            await WaitForManipulatorSafeAsync(ct);
-            Console.WriteLine("[Line1Front] [前天车] ① 机械手1已在安全位 ✓");
+            // ① 当前现场确认机械手1只在ST711/ST712待机端工作, 前天车只进Pos3(ST713)取料,
+            //    两者物理区域不重叠; 前天车不再等待机械手1到安全Y端点, 避免机械手回位/通信阻塞Pos3取料。
+            Console.WriteLine("[Line1Front] [前天车] ① 跳过机械手1安全Y等待: ST711/ST712与Pos3(ST713)不重叠");
 
             // ①.5 安全: 检查天车磁铁上是否已有工件(断电重启后可能残留)
             // 用X11物理线圈(63497)而非D5029: PLC断电重启后D5029可能清零, X11不受影响
