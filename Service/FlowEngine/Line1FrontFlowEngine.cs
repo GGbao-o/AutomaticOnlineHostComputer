@@ -1931,18 +1931,19 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 Console.WriteLine($"[Line1Front] [前天车]   ⚠ X11=0 未吸到, 准备下探5mm重试");
             }
 
-            // ②.5 X11已经确认吸住: 先等前天车Z升到安全高度, 再通知货叉回待机位。
-            //      Z回升异常时不发M911, 仍由外层catch按"工件在天车上"处理。
-            Console.WriteLine("[Line1Front] [前天车] ②.5 先升Z安全高度, 再让货叉回待机");
-            Console.WriteLine("[Line1Front] [前天车]   Z升安全高度");
-            await crane.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
-
+            // ②.5 X11已经确认吸住: 现场确认Pos3低位持板时货叉回待机不会碰天车/工件。
+            //      Z升安全和M911回待机并行执行, 两边都完成后才继续去打号机; 任一失败仍按"工件在天车上"暂停。
+            Console.WriteLine("[Line1Front] [前天车] ②.5 Z升安全高度 与 M911货叉回待机 并行");
+            var zSafeTask = crane.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
+            Task forkStandbyTask = Task.CompletedTask;
             if (_forkSvc != null) // TcpClient.Connected不可靠, 不检查IsConnected
             {
-                Console.WriteLine("[Line1Front] [前天车]   通知货叉回待机位 M911=1");
+                Console.WriteLine("[Line1Front] [前天车]   并行通知货叉回待机位 M911=1");
                 // 清除2/3位置, 通知货叉去待机位置。
-                await _forkSvc.GoStandbyAsync(ct);
+                forkStandbyTask = _forkSvc.GoStandbyAsync(ct);
             }
+            await Task.WhenAll(zSafeTask, forkStandbyTask);
+            Console.WriteLine("[Line1Front] [前天车]   Z安全高度与货叉回待机命令均已完成");
 
             // ③ 等中转架空位 → ZoneMT打号机区 → ZoneTS中转架区 → 放中转架。
             //    预检: 锁外先等中转架物理空位, 只做候选判断。
