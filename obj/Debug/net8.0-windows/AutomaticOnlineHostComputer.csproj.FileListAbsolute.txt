@@ -292,3 +292,5 @@ D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\refint\Automat
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlineHostComputer.pdb
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\AutomaticOnlineHostComputer.genruntimeconfig.cache
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\ref\AutomaticOnlineHostComputer.dll
+D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\AttentionMonitor\AttentionMonitorView.baml
+D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\AttentionMonitor\AttentionMonitorView.g.cs

@@ -25,7 +25,7 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 350,
+        "speed": 450,
         "accel": 100,
         "decel": 80
       },
@@ -35,7 +35,7 @@
         "decel": 40
       },
       "z": {
-        "speed": 150,
+        "speed": 200,
         "accel": 80,
         "decel": 40
       }
@@ -45,7 +45,7 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 350,
+        "speed": 450,
         "accel": 100,
         "decel": 80
       },
@@ -55,7 +55,7 @@
         "decel": 40
       },
       "z": {
-        "speed": 150,
+        "speed": 200,
         "accel": 80,
         "decel": 40
       }
@@ -65,7 +65,7 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 350,
+        "speed": 450,
         "accel": 100,
         "decel": 80
       },
@@ -75,7 +75,7 @@
         "decel": 40
       },
       "z": {
-        "speed": 150,
+        "speed": 200,
         "accel": 80,
         "decel": 40
       }
@@ -85,7 +85,7 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 350,
+        "speed": 450,
         "accel": 100,
         "decel": 80
       },
@@ -95,7 +95,7 @@
         "decel": 40
       },
       "z": {
-        "speed": 150,
+        "speed": 200,
         "accel": 80,
         "decel": 40
       }
@@ -105,7 +105,7 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 350,
+        "speed": 450,
         "accel": 100,
         "decel": 80
       },
@@ -115,7 +115,7 @@
         "decel": 40
       },
       "z": {
-        "speed": 150,
+        "speed": 200,
         "accel": 80,
         "decel": 40
       }
@@ -137,9 +137,9 @@
         "decel": 100
       },
       "z": {
-        "speed": 80,
-        "accel": 40,
-        "decel": 40
+        "speed": 160,
+        "accel": 80,
+        "decel": 80
       }
     },
     "2": {
@@ -157,9 +157,9 @@
         "decel": 100
       },
       "z": {
-        "speed": 80,
-        "accel": 40,
-        "decel": 40
+        "speed": 160,
+        "accel": 80,
+        "decel": 80
       }
     },
     "3": {
@@ -177,9 +177,9 @@
         "decel": 100
       },
       "z": {
-        "speed": 80,
-        "accel": 40,
-        "decel": 40
+        "speed": 160,
+        "accel": 80,
+        "decel": 80
       }
     }
   },
@@ -250,11 +250,11 @@
         "ST106": -28412,
         "ST108": -26432,
         "ST109": -23703,
-        "ST111": -20947,
+        "ST111": -20967,
         "ST110": -18229,
         "ST112": -15142,
-        "ST019": -12752,
-        "ST010": -12150
+        "ST019": -12861,
+        "ST010": -12042
       },
       "3": {
         "ST714": -2143,
@@ -272,11 +272,11 @@
         "ST608": -6812,
         "ST609": -3710,
         "ST610": -436,
-        "ST020": 906,
-        "ST021": 1516
+        "ST020": 806,
+        "ST021": 1631
       },
       "5": {
-        "ST709": -10603,
+        "ST709": -10481,
         "ST701": -8924,
         "ST702": -5680,
         "ST703": -2656,
@@ -300,28 +300,28 @@
     "rearCraneSafeX": -3000,
     "armCoords": {
       "M817": {
-        "y": 15670,
-        "z": 494
+        "y": 15701,
+        "z": 472
       },
       "M818": {
         "y": 5012,
-        "z": 723
+        "z": 701
       },
       "M710": {
-        "y": 970,
-        "z": 667
+        "y": 1000,
+        "z": 647
       },
       "M700": {
-        "y": 3,
-        "z": 696
+        "y": 40,
+        "z": 685
       },
       "M821": {
         "y": 5952,
-        "z": 735
+        "z": 721
       },
       "M720": {
-        "y": 16795,
-        "z": 452
+        "y": 16755,
+        "z": 439
       }
     }
   },
@@ -374,9 +374,9 @@
     "largeBoreOffset": 122,
     "smallBoreOffset": 55,
     "manipulator1SafeY": 11500,
-    "manipulator1Line1SafeY": 11500,
-    "manipulator1Line2SafeY": 2000,
-    "manipulator1PickupStandbyY": 1000,
+    "manipulator1Line1SafeY": 10086,
+    "manipulator1Line2SafeY": 3004,
+    "manipulator1PickupStandbyY": 478,
     "manipulator2SafeY": 1000,
     "manipulator3SafeY": 1500,
     "largeDiameterLine1OnlyMm": 280,

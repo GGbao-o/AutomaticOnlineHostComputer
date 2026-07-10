@@ -545,7 +545,7 @@
                                     <ContentControl
                                         Content="{Binding StationCards[ST011]}"
                                         Style="{StaticResource NodeHostStyle}"
-                                        Tag="1号线货叉 ST011" />
+                                        Tag="1号线货叉 ST711" />
                                     <TextBlock Style="{StaticResource ArrowStyle}" />
                                     <ContentControl
                                         Content="{Binding StationCards[ST103]}"
