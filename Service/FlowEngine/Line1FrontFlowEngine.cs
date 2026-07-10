@@ -65,6 +65,12 @@ public sealed class Line1FrontFlowEngine : IDisposable
     private readonly List<WorkpieceCache> _cachedList = new();              // UI显示用
     private readonly object _cacheLock = new();                              // 保护 _cachedList
     public int CachedCount { get { lock (_cacheLock) return _cachedList.Count; } }
+
+    /// <summary>供状态页显示的只读缓存快照；不读取或修改FIFO队列。</summary>
+    public WorkpieceCache[] GetCachedWorkpiecesSnapshot()
+    {
+        lock (_cacheLock) return _cachedList.ToArray();
+    }
     public int DispatchPressure { get { lock (_wpLock) return CachedCount + (_currentWp != null ? 1 : 0); } }
 
     /// <summary>在途工件 — 机械手取出后到货叉Pos3为止, 入天车队列后立即清空。

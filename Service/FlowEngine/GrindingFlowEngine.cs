@@ -75,6 +75,12 @@ public sealed class GrindingFlowEngine : IDisposable
         get { lock (_cacheLock) return _cachedList.Count; }
     }
 
+    /// <summary>供状态页显示的只读缓存快照；不读取或修改FIFO队列。</summary>
+    public WorkpieceCache[] GetCachedWorkpiecesSnapshot()
+    {
+        lock (_cacheLock) return _cachedList.ToArray();
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  4台研磨机上下文 — 分别跟踪状态/信号/PendingWorkpiece
     //   连接: 通过GrinderPoll注入共享PlcGrinderService(不自建, 避免西门子双连接)

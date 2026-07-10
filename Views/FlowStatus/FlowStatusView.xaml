@@ -438,7 +438,7 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <Border Style="{StaticResource KpiStyle}">
+                    <Border Height="98" Style="{StaticResource KpiStyle}">
                         <StackPanel>
                             <TextBlock Foreground="{StaticResource MutedBrush}" Text="1号线缓存" />
                             <TextBlock
@@ -446,9 +446,15 @@
                                 FontWeight="Bold"
                                 Foreground="{StaticResource AccentBrush}"
                                 Text="{Binding Line1CachedCount, FallbackValue=0}" />
+                            <TextBlock
+                                Margin="0,3,0,0"
+                                FontSize="11"
+                                Foreground="{StaticResource MutedBrush}"
+                                Text="{Binding Line1CacheDetail, FallbackValue=无缓存}"
+                                TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
-                    <Border Style="{StaticResource KpiStyle}">
+                    <Border Height="98" Style="{StaticResource KpiStyle}">
                         <StackPanel>
                             <TextBlock Foreground="{StaticResource MutedBrush}" Text="2号线缓存" />
                             <TextBlock
@@ -456,9 +462,15 @@
                                 FontWeight="Bold"
                                 Foreground="#7C3AED"
                                 Text="{Binding Line2CachedCount, FallbackValue=0}" />
+                            <TextBlock
+                                Margin="0,3,0,0"
+                                FontSize="11"
+                                Foreground="{StaticResource MutedBrush}"
+                                Text="{Binding Line2CacheDetail, FallbackValue=无缓存}"
+                                TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
-                    <Border Style="{StaticResource KpiStyle}">
+                    <Border Height="98" Style="{StaticResource KpiStyle}">
                         <StackPanel>
                             <TextBlock Foreground="{StaticResource MutedBrush}" Text="研磨缓存" />
                             <TextBlock
@@ -466,6 +478,12 @@
                                 FontWeight="Bold"
                                 Foreground="{StaticResource WarnBrush}"
                                 Text="{Binding GrindingCachedCount, FallbackValue=0}" />
+                            <TextBlock
+                                Margin="0,3,0,0"
+                                FontSize="11"
+                                Foreground="{StaticResource MutedBrush}"
+                                Text="{Binding GrindingCacheDetail, FallbackValue=无缓存}"
+                                TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                 </StackPanel>

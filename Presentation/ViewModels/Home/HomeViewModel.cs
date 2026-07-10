@@ -385,6 +385,7 @@ public sealed class HomeViewModel : ObservableObject
 
     /// <summary>已缓存研磨工件数量</summary>
     public int GrindingCachedCount => _grindingEngine?.CachedCount ?? 0;
+    public string GrindingCacheDetail => FormatCacheDetail(_grindingEngine?.GetCachedWorkpiecesSnapshot());
 
     // ── 1号线流程引擎 ────────────────────────────────────────────────
     private Line1FrontFlowEngine? _line1Engine;
@@ -533,6 +534,9 @@ public sealed class HomeViewModel : ObservableObject
                 OnPropertyChanged(nameof(Line1CachedCount));
                 OnPropertyChanged(nameof(Line2CachedCount));
                 OnPropertyChanged(nameof(GrindingCachedCount));
+                OnPropertyChanged(nameof(Line1CacheDetail));
+                OnPropertyChanged(nameof(Line2CacheDetail));
+                OnPropertyChanged(nameof(GrindingCacheDetail));
             }
             catch (Exception ex)
             {
@@ -1070,6 +1074,7 @@ public sealed class HomeViewModel : ObservableObject
 
     /// <summary>1号线缓存工件数量</summary>
     public int Line1CachedCount => _line1Engine?.CachedCount ?? 0;
+    public string Line1CacheDetail => FormatCacheDetail(_line1Engine?.GetCachedWorkpiecesSnapshot());
 
     /// <summary>总上料架前的全局待派发队列数量。任务先进入这里, M800到位后再唯一派发到1/2号线。</summary>
     public int FrontDispatchCachedCount { get { lock (_frontDispatchLock) return _frontDispatchQueue.Count; } }
@@ -1079,6 +1084,17 @@ public sealed class HomeViewModel : ObservableObject
     public bool IsLine2Running { get => _isLine2Running; set { if (SetField(ref _isLine2Running, value)) OnPropertyChanged(nameof(Line2ToggleText)); } }
     public string Line2ToggleText => _isLine2Running ? "暂停2号线" : "启动2号线";
     public int Line2CachedCount => _line2Engine?.CachedCount ?? 0;
+    public string Line2CacheDetail => FormatCacheDetail(_line2Engine?.GetCachedWorkpiecesSnapshot());
+
+    private static string FormatCacheDetail(IEnumerable<WorkpieceCache>? workpieces)
+    {
+        var firstTwo = workpieces?.Take(2).ToArray() ?? Array.Empty<WorkpieceCache>();
+        if (firstTwo.Length == 0) return "无缓存";
+
+        return string.Join(Environment.NewLine, firstTwo.Select(wp => wp.Length > 0
+            ? $"D={wp.Diameter}mm  L={wp.Length}mm"
+            : $"D={wp.Diameter}mm"));
+    }
 
     // ── 动平衡引擎 ────────────────────────────────────────────────
     private bool _isBalancingRunning;
@@ -1546,6 +1562,7 @@ public sealed class HomeViewModel : ObservableObject
         // 超时或清零失败时引擎会保持暂停，主页面必须同步真实状态，不能仍显示“运行中”。
         IsGrindingRunning = _grindingEngine.IsRunning && !_grindingEngine.IsPaused;
         OnPropertyChanged(nameof(GrindingCachedCount));
+        OnPropertyChanged(nameof(GrindingCacheDetail));
         return result;
     }
 
@@ -1609,6 +1626,9 @@ public sealed class HomeViewModel : ObservableObject
         OnPropertyChanged(nameof(Line2CachedCount));
         OnPropertyChanged(nameof(FrontDispatchCachedCount));
         OnPropertyChanged(nameof(GrindingCachedCount));
+        OnPropertyChanged(nameof(Line1CacheDetail));
+        OnPropertyChanged(nameof(Line2CacheDetail));
+        OnPropertyChanged(nameof(GrindingCacheDetail));
         Console.WriteLine("[HomeViewModel] LoadAsync轻量刷新: 引擎已初始化, 保留现有引擎/锁/缓存, 不重新连接、不重建流程实例");
         if (_cfg.ErpTaskImport.EnabledOnStartup && !IsErpTaskImportRunning)
             StartErpTaskImport();
@@ -2649,6 +2669,8 @@ public sealed class HomeViewModel : ObservableObject
                 {
                     OnPropertyChanged(nameof(Line1CachedCount));
                     OnPropertyChanged(nameof(Line2CachedCount));
+                    OnPropertyChanged(nameof(Line1CacheDetail));
+                    OnPropertyChanged(nameof(Line2CacheDetail));
                     return true;
                 });
 
