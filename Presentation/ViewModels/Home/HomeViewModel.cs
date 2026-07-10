@@ -24,6 +24,7 @@ public sealed class HomeViewModel : ObservableObject
 {
     private readonly ManagementQueryService _queryService;
     private readonly PositionUpdateService _positionService;
+    private readonly AttentionEventCenter _attentionEvents;
     private readonly ProductionFlowEngine _flowEngine;
     private readonly CraneConnectionCache _craneCache;
     private readonly MotionConfig _cfg;
@@ -201,11 +202,13 @@ public sealed class HomeViewModel : ObservableObject
     public string ErpTaskImportToggleText => IsErpTaskImportRunning ? "停止检测ERP下发任务" : "开始检测ERP下发任务";
     public string ErpTaskImportStatus { get => _erpTaskImportStatus; private set => SetField(ref _erpTaskImportStatus, value); }
 
-    public HomeViewModel(ManagementQueryService queryService, PositionUpdateService positionService)
+    public HomeViewModel(ManagementQueryService queryService, PositionUpdateService positionService,
+        AttentionEventCenter attentionEvents)
     {
         Console.WriteLine("HomeViewModel页面启动");
         _queryService = queryService;
         _positionService = positionService;
+        _attentionEvents = attentionEvents;
         _craneCache = new CraneConnectionCache();
         _manipulatorCache = new ManipulatorConnectionCache();
         _cfg = MotionConfig.Load();  // 提前加载，引擎创建和UI同步都要用
@@ -1240,17 +1243,23 @@ public sealed class HomeViewModel : ObservableObject
             _grindingEngine?.PauseForCraneZeroPosition();
         }
 
+        string message =
+            $"{alarm.CraneName}连续两次读取到XYZ全为0，疑似天车断电后坐标丢失。\n\n" +
+            $"检查位置：{alarm.Context}\n" +
+            $"第一次：{alarm.First}\n第二次：{alarm.Second}\n\n" +
+            "对应引擎已暂停，当前任务和缓存未清除。请确认天车坐标恢复正常后，再点击启动继续。";
+        string scope = alarm.CraneNo is 1 or 2 ? "1号线"
+            : alarm.CraneNo is 3 or 4 ? "2号线"
+            : "研磨";
+        _attentionEvents.Record(AttentionEventKind.SafetyAlarm, scope,
+            $"{alarm.CraneName}坐标保护", message);
+
         void UpdateUiAndShowAlarm()
         {
             if (alarm.CraneNo is 1 or 2) IsLine1Running = false;
             else if (alarm.CraneNo is 3 or 4) IsLine2Running = false;
             else if (alarm.CraneNo == _cfg.Grinding.CraneNo) IsGrindingRunning = false;
 
-            string message =
-                $"{alarm.CraneName}连续两次读取到XYZ全为0，疑似天车断电后坐标丢失。\n\n" +
-                $"检查位置：{alarm.Context}\n" +
-                $"第一次：{alarm.First}\n第二次：{alarm.Second}\n\n" +
-                "对应引擎已暂停，当前任务和缓存未清除。请确认天车坐标恢复正常后，再点击启动继续。";
             Console.WriteLine($"[HomeViewModel] ⚠ {message.Replace(Environment.NewLine, " | ")}");
             MessageBox.Show(message, "天车坐标异常 - 引擎已暂停",
                 MessageBoxButton.OK, MessageBoxImage.Error);
@@ -1291,6 +1300,8 @@ public sealed class HomeViewModel : ObservableObject
             }
         }
 
+        _attentionEvents.Record(AttentionEventKind.SafetyAlarm, $"{line}号线", source, message);
+
         void UpdateUiAndShowAlarm()
         {
             if (line == 1) IsLine1Running = false;
@@ -1318,6 +1329,7 @@ public sealed class HomeViewModel : ObservableObject
         _line1RearEngine?.Pause();
         _line2Engine?.Pause();
         _line2RearEngine?.Pause();
+        _attentionEvents.Record(AttentionEventKind.SafetyAlarm, "全局", "共享机械手1安全异常", message);
 
         void UpdateUiAndShowAlarm()
         {
@@ -1334,8 +1346,10 @@ public sealed class HomeViewModel : ObservableObject
     }
 
     /// <summary>X11连续无板但已安全退磁回升：只提示一次，不改变引擎运行状态。</summary>
-    private static void HandleRearCraneWarning(int line, string message)
+    private void HandleRearCraneWarning(int line, string message)
     {
+        _attentionEvents.Record(AttentionEventKind.Warning, $"{line}号线", "后天车取料警告", message);
+
         void ShowWarning()
         {
             Console.WriteLine($"[HomeViewModel] ⚠ {line}号线后天车取料警告: {message}");
@@ -1367,6 +1381,8 @@ public sealed class HomeViewModel : ObservableObject
                 _grindingSafetyPopupShown = true;
             }
         }
+
+        _attentionEvents.Record(AttentionEventKind.SafetyAlarm, engine, $"{engine}流程安全异常", message);
 
         void ShowAlarm()
         {

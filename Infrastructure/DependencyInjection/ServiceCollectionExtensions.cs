@@ -95,6 +95,9 @@ services.AddSingleton<HomeViewModel>();
         // ── 3. 注册导航服务（页面缓存）────────────────────────────────────
         services.AddSingleton<CachedNavigationService>();
 
+        // ── 3.1 人工关注事件中心（仅当前程序生命周期内存）──────────────────
+        services.AddSingleton<AttentionEventCenter>();
+
         // ── 4. 注册工件跟踪/设备数据写库服务（天车实时坐标不再持久化）─────────
         services.AddSingleton<PositionUpdateService>(
             _ => new PositionUpdateService(connectionString));
@@ -105,6 +108,9 @@ services.AddSingleton<HomeViewModel>();
 
         // ── 6. 注册主页面 VM（Singleton）────────────────────────────────
         services.AddSingleton<HomeViewModel>();
+
+        // ── 6.1 异常监控页面 VM（Singleton）──────────────────────────────
+        services.AddSingleton<AttentionMonitorViewModel>();
 
         return services;
     }

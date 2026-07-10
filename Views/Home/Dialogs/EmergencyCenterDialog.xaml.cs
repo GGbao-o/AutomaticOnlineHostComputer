@@ -3,13 +3,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using Microsoft.Extensions.DependencyInjection;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
+using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Views.Home.Dialogs;
 
 public partial class EmergencyCenterDialog : Window
 {
     private readonly HomeViewModel _viewModel;
+    private readonly AttentionEventCenter _attentionEvents;
     private int _frontActionInProgress;
     private static readonly string[] Line1Beds = { "ST108", "ST109", "ST111", "ST110", "ST112" };
     private static readonly string[] Line2Beds = { "ST606", "ST607", "ST608", "ST609", "ST610" };
@@ -18,6 +21,7 @@ public partial class EmergencyCenterDialog : Window
     {
         InitializeComponent();
         _viewModel = viewModel;
+        _attentionEvents = App.Services.GetRequiredService<AttentionEventCenter>();
         ResetSkewBeds();
         RefreshAll();
         Loaded += async (_, _) => await RefreshFrontInfoAsync();
@@ -127,12 +131,14 @@ public partial class EmergencyCenterDialog : Window
         try
         {
             string result = await _viewModel.EmergencyContinueFrontPlateAsync(SelectedFrontLine);
+            RecordEmergency($"{SelectedFrontLine}号线", "前端在途继续", result);
             FrontInfoBox.Text = result;
             ShowEmergencyFailureIfNeeded("前端当前板继续失败", result);
             await AppendFrontInfoAsync();
         }
         catch (Exception ex)
         {
+            RecordEmergencyException($"{SelectedFrontLine}号线", "前端在途继续", ex);
             ShowEmergencyException("前端当前板继续异常", ex, text => FrontInfoBox.Text = text);
         }
         finally { EndFrontAction(); }
@@ -152,11 +158,13 @@ public partial class EmergencyCenterDialog : Window
         {
             string result = await _viewModel.EmergencyDiscardFrontCurrentAsync(
                 SelectedFrontLine, skipDeviceClear: false);
+            RecordEmergency($"{SelectedFrontLine}号线", "前端当前工件丢弃", result);
             FrontInfoBox.Text = result;
             if (await HandleDeviceClearFailureAsync(result,
                     () => _viewModel.EmergencyDiscardFrontCurrentAsync(
                         SelectedFrontLine, skipDeviceClear: true),
-                    text => FrontInfoBox.Text = text))
+                    text => FrontInfoBox.Text = text,
+                    $"{SelectedFrontLine}号线", "前端当前工件丢弃"))
             {
                 await AppendFrontInfoAsync();
                 return;
@@ -167,6 +175,7 @@ public partial class EmergencyCenterDialog : Window
         }
         catch (Exception ex)
         {
+            RecordEmergencyException($"{SelectedFrontLine}号线", "前端当前工件丢弃", ex);
             ShowEmergencyException("前端当前工件丢弃异常", ex, text => FrontInfoBox.Text = text);
         }
         finally { EndFrontAction(); }
@@ -203,7 +212,11 @@ public partial class EmergencyCenterDialog : Window
         try
         {
             var result = await _viewModel.EmergencyClearSkewBedAsync(SelectedSkewLine, SelectedSkewBed, skipDeviceClear: false);
-            if (await HandleDeviceClearFailureAsync(result, () => _viewModel.EmergencyClearSkewBedAsync(SelectedSkewLine, SelectedSkewBed, skipDeviceClear: true), text => SkewInfoBox.Text = text))
+            RecordEmergency($"{SelectedSkewLine}号线", $"{SelectedSkewBed}斜床应急", result);
+            if (await HandleDeviceClearFailureAsync(result,
+                    () => _viewModel.EmergencyClearSkewBedAsync(SelectedSkewLine, SelectedSkewBed, skipDeviceClear: true),
+                    text => SkewInfoBox.Text = text,
+                    $"{SelectedSkewLine}号线", $"{SelectedSkewBed}斜床应急"))
                 return;
 
             SkewInfoBox.Text = result;
@@ -211,6 +224,7 @@ public partial class EmergencyCenterDialog : Window
         }
         catch (Exception ex)
         {
+            RecordEmergencyException($"{SelectedSkewLine}号线", $"{SelectedSkewBed}斜床应急", ex);
             ShowEmergencyException("斜床应急异常", ex, text => SkewInfoBox.Text = text);
         }
     }
@@ -225,11 +239,13 @@ public partial class EmergencyCenterDialog : Window
         try
         {
             var result = await _viewModel.EmergencyClearBalancingPositionAsync(SelectedBalancePosition);
+            RecordEmergency("动平衡", $"{SelectedBalancePosition}动平衡应急", result);
             BalanceInfoBox.Text = result;
             ShowEmergencyFailureIfNeeded("动平衡应急失败", result);
         }
         catch (Exception ex)
         {
+            RecordEmergencyException("动平衡", $"{SelectedBalancePosition}动平衡应急", ex);
             ShowEmergencyException("动平衡应急异常", ex, text => BalanceInfoBox.Text = text);
         }
     }
@@ -248,10 +264,12 @@ public partial class EmergencyCenterDialog : Window
         {
             var result = await _viewModel.EmergencyClearGrindingAsync(
                 SelectedGrindingTarget, skipDeviceClear: false, resumeAfterClear);
+            RecordEmergency("研磨", $"{SelectedGrindingTarget}研磨应急", result);
             if (await HandleDeviceClearFailureAsync(result,
                     () => _viewModel.EmergencyClearGrindingAsync(
                         SelectedGrindingTarget, skipDeviceClear: true, resumeAfterClear),
-                    text => GrindingInfoBox.Text = text))
+                    text => GrindingInfoBox.Text = text,
+                    "研磨", $"{SelectedGrindingTarget}研磨应急"))
                 return;
 
             GrindingInfoBox.Text = result;
@@ -259,11 +277,13 @@ public partial class EmergencyCenterDialog : Window
         }
         catch (Exception ex)
         {
+            RecordEmergencyException("研磨", $"{SelectedGrindingTarget}研磨应急", ex);
             ShowEmergencyException("研磨应急异常", ex, text => GrindingInfoBox.Text = text);
         }
     }
 
-    private async Task<bool> HandleDeviceClearFailureAsync(string result, Func<Task<string>> softwareOnlyAction, Action<string> setText)
+    private async Task<bool> HandleDeviceClearFailureAsync(string result, Func<Task<string>> softwareOnlyAction,
+        Action<string> setText, string scope, string source)
     {
         if (!result.StartsWith("设备侧清零失败:", StringComparison.Ordinal))
             return false;
@@ -280,6 +300,7 @@ public partial class EmergencyCenterDialog : Window
         }
 
         var softwareOnlyResult = await softwareOnlyAction();
+        RecordEmergency(scope, source, softwareOnlyResult, softwareOnly: true);
         Console.WriteLine($"[EmergencyCenter] 用户确认仅清软件: {softwareOnlyResult.Replace(Environment.NewLine, " ")}");
         setText(softwareOnlyResult);
         ShowEmergencyFailureIfNeeded("仅清软件应急失败", softwareOnlyResult);
@@ -290,14 +311,7 @@ public partial class EmergencyCenterDialog : Window
     {
         // 应急接口目前返回可读文本而不是结构化结果；统一兜底常见失败关键词，
         // 防止新增异常分支只显示在信息框、现场没有醒目的弹窗提示。
-        bool failed = result.Contains("失败", StringComparison.Ordinal)
-                      || result.Contains("拒绝", StringComparison.Ordinal)
-                      || result.Contains("禁止", StringComparison.Ordinal)
-                      || result.Contains("未找到", StringComparison.Ordinal)
-                      || result.Contains("超时", StringComparison.Ordinal)
-                      || result.Contains("旧动作6秒内未退出", StringComparison.Ordinal)
-                      || result.StartsWith("未知", StringComparison.Ordinal)
-                      || result.StartsWith("无效", StringComparison.Ordinal);
+        bool failed = IsEmergencyFailure(result);
         if (!failed) return;
 
         Console.WriteLine($"[EmergencyCenter] {title}: {result.Replace(Environment.NewLine, " ")}");
@@ -311,4 +325,27 @@ public partial class EmergencyCenterDialog : Window
         setText(message);
         MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
     }
+
+    private static bool IsEmergencyFailure(string result)
+        => result.Contains("失败", StringComparison.Ordinal)
+           || result.Contains("拒绝", StringComparison.Ordinal)
+           || result.Contains("禁止", StringComparison.Ordinal)
+           || result.Contains("未找到", StringComparison.Ordinal)
+           || result.Contains("超时", StringComparison.Ordinal)
+           || result.Contains("旧动作6秒内未退出", StringComparison.Ordinal)
+           || result.StartsWith("未知", StringComparison.Ordinal)
+           || result.StartsWith("无效", StringComparison.Ordinal);
+
+    private void RecordEmergency(string scope, string source, string message, bool softwareOnly = false)
+    {
+        bool failed = IsEmergencyFailure(message);
+        string result = softwareOnly
+            ? failed ? "仅清软件失败" : "仅清软件"
+            : failed ? "失败" : "成功";
+        _attentionEvents.Record(AttentionEventKind.Emergency, scope, source, message, result);
+    }
+
+    private void RecordEmergencyException(string scope, string source, Exception ex)
+        => _attentionEvents.Record(AttentionEventKind.Emergency, scope, source,
+            $"{ex.GetType().Name} - {ex.Message}", "失败");
 }

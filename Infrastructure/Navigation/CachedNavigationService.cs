@@ -1,6 +1,7 @@
 using AutomaticOnlineHostComputer.Views.Controller;
 using AutomaticOnlineHostComputer.Views.Crane;
 using AutomaticOnlineHostComputer.Views.FlowStatus;
+using AutomaticOnlineHostComputer.Views.AttentionMonitor;
 using AutomaticOnlineHostComputer.Views.Home;
 using AutomaticOnlineHostComputer.Views.Machine;
 using AutomaticOnlineHostComputer.Views.Motion;
@@ -65,6 +66,7 @@ public sealed class CachedNavigationService
             "motion" => new MotionSettingsView(),
             "overview" => new EquipmentOverviewView(),
             "flowStatus" => new FlowStatusView(),
+            "attentionMonitor" => new AttentionMonitorView(),
             _ => new HomeView()
         };
 

@@ -49,6 +49,10 @@
                 Click="MenuItem_Click"
                 Header="全流程状态"
                 Tag="flowStatus" />
+            <MenuItem
+                Click="MenuItem_Click"
+                Header="异常监控"
+                Tag="attentionMonitor" />
         </Menu>
 
         <ContentControl
