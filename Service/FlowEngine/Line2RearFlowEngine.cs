@@ -1054,6 +1054,8 @@ public sealed class Line2RearFlowEngine : IDisposable
             Interlocked.Increment(ref bed.PollVersion);
         }
 
+        // 仅应急软件状态已成功清空后才清展示任务；超时/失败路径会在此前return，保留旧身份供人工确认。
+        ClearRearCraneTask();
         MarkSkewManualCleared(bed);
         logs.Add(deviceClearLog);
         if (resumeAfterClear && IsRunning) _paused = false;
