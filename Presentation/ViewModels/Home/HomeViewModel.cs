@@ -631,8 +631,6 @@ public sealed class HomeViewModel : ObservableObject
                     MarkCardsNotStarted(cards, "ST904", "ST606", "ST607", "ST608", "ST609", "ST610");
                 }
 
-                RefreshFlowStatusHoverDetails();
-
             }
             catch (Exception ex)
             {

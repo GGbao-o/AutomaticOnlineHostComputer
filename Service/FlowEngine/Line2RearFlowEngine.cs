@@ -42,6 +42,7 @@ public sealed class Line2RearFlowEngine : IDisposable
     private volatile bool _paused;
     private volatile bool _fastNextCycle; // DoLoad/DoUnload完成后设true, 主循环缩短延迟
     private int _cycleCount;
+    private readonly RearSkewDispatchLogGate _dispatchLogGate = new();
 
     // ── 后天车 ──
     private readonly SemaphoreSlim _craneRearLock = new(1, 1); // 串行化后天车操作
@@ -407,10 +408,15 @@ public sealed class Line2RearFlowEngine : IDisposable
                     loadScan.MatchableRackPlateCount,
                     unloadScan.UsableBedCount);
 
-                Console.WriteLine($"│ [后调度] 决策={decision.Action} 原因={decision.Reason} " +
-                                  $"上料候选={loadScan.Candidates.Count} 下料候选={unloadScan.Candidates.Count} " +
-                                  $"中转架物理板={loadScan.PhysicalRackPlateCount} 可匹配板={loadScan.MatchableRackPlateCount} " +
-                                  $"有效斜床={unloadScan.UsableBedCount} 下料高压阈值={decision.HighUnloadThreshold}");
+                if (_dispatchLogGate.ShouldLog(decision,
+                    loadScan.Candidates.Count, unloadScan.Candidates.Count,
+                    loadScan.PhysicalRackPlateCount, loadScan.MatchableRackPlateCount, unloadScan.UsableBedCount))
+                {
+                    Console.WriteLine($"│ [后调度] 决策={decision.Action} 原因={decision.Reason} " +
+                                      $"上料候选={loadScan.Candidates.Count} 下料候选={unloadScan.Candidates.Count} " +
+                                      $"中转架物理板={loadScan.PhysicalRackPlateCount} 可匹配板={loadScan.MatchableRackPlateCount} " +
+                                      $"有效斜床={unloadScan.UsableBedCount} 下料高压阈值={decision.HighUnloadThreshold}");
+                }
 
                 if (decision.Action == RearSkewDispatchAction.Load)
                     await TryDispatchLoadAsync(ct);
