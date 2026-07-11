@@ -84,6 +84,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
     /// 只用于全局分线选择更空闲的线路；不参与锁控制，也不改变前天车动作。
     /// </summary>
     private int _frontCraneActive;
+    private readonly object _frontCraneTaskLock = new();
+    private CraneTaskSnapshot _frontCraneTask = CraneTaskSnapshot.Idle(3, "2号线前天车");
 
     /// <summary>货叉-双头镗交互状态机 — 完整 clear-before-set 握手。</summary>
     private enum ForkBoringPhase
@@ -176,6 +178,22 @@ public sealed class Line2FrontFlowEngine : IDisposable
     //  DeviceStatus — 引擎持续更新，SyncLine2StatusToCardsAsync 1.5s刷到UI
     // ═══════════════════════════════════════════════════════════════
     public Line2DeviceStatus DeviceStatus { get; } = new();
+
+    public CraneTaskSnapshot GetCraneTaskSnapshot()
+    {
+        lock (_frontCraneTaskLock) return _frontCraneTask;
+    }
+
+    private void SetFrontCraneTask(WorkpieceCache wp, string stage, string source, string target, bool manual = false, string manualText = "")
+    {
+        lock (_frontCraneTaskLock)
+            _frontCraneTask = new CraneTaskSnapshot(true, CraneFront2No, "2号线前天车", WorkpieceDisplaySnapshot.From(wp), stage, source, target, manual, manualText, DateTime.UtcNow);
+    }
+
+    private void ClearFrontCraneTask()
+    {
+        lock (_frontCraneTaskLock) _frontCraneTask = CraneTaskSnapshot.Idle(CraneFront2No, "2号线前天车");
+    }
 
     /// <summary>1号线设备在线状态快照（只读缓存，UI绑定不另建TCP连接）</summary>
     public sealed class Line2DeviceStatus
@@ -1416,6 +1434,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                     break;
 
                                 Console.WriteLine($"[Line2Front] [天车调度] ▶ 出队 {craneWp.IdentityText} d={craneWp.Diameter} L={craneWp.Length} 队列剩余={_craneQueue.Count}");
+                                SetFrontCraneTask(craneWp, "前往货叉 Pos3 取料", "ST714", "ST502");
                                 Interlocked.Exchange(ref _frontCraneActive, 1);
                                 try
                                 {
@@ -1850,6 +1869,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         try
         {
             wp.ReportStage("2号线 前天车/打号机");
+            SetFrontCraneTask(wp, "前天车取料并经过打号机", "ST714", "中转架");
             var crane = _craneCache.GetOrCreateService(CraneFront2No);
             if (!crane.IsConnected)
             {
@@ -2010,6 +2030,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 var xTask = crane.MoveAbsoluteAsync(homeX + _craneOffsetX, f2y, -1, ct: ct);
                 var zTask = crane.HomeZAsync(ct);
                 await Task.WhenAll(xTask, zTask);
+                ClearFrontCraneTask();
                 Console.WriteLine($"[Line2Front] [前天车] ═══ 天车流程完成 {wp.IdentityText} ═══");
             }
             finally
@@ -2036,6 +2057,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 // 禁止在前天车异常中复位_forkPhase或清握手门闩，否则会把下一块工件
                 // 从WaitingMachine等有效阶段错误改成Idle，造成R6107=1也不写M913的永久卡停。
                 _paused = true;
+                SetFrontCraneTask(wp, "中转架缓存未确认", "ST502", rackEx.RackStation, true, "工件已放到中转架，请人工补缓存并确认现场");
                 Console.WriteLine($"[Line2Front] ⚠⚠⚠ 工件已在{rackEx.RackStation}, 但后端缓存未确认；不回队列，等待人工补缓存/确认现场");
                 Console.WriteLine($"[Line2Front] [前天车] 货叉—双头镗阶段保持={_forkPhase}，相关门闩未清除；ZoneMT/ZoneTS已按finally释放，前天车锁将在调度finally释放");
                 OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时，工件已放到{rackEx.RackStation}，但后端缓存未确认。引擎已暂停，货叉—双头镗阶段保持={_forkPhase}、相关门闩未清除。ZoneMT/ZoneTS碰撞区锁已释放，前天车锁将在任务退出时释放。请人工补缓存，确认旧工件和前天车处于安全位置后再恢复。");
@@ -2046,6 +2068,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 // 工件可能已经在ST107退磁放下。无论旧工件实际在哪，都不能改动可能属于
                 // 下一块工件的货叉/双头镗阶段和门闩，只暂停并交由人工确认现场。
                 _paused = true;
+                SetFrontCraneTask(wp, "工件位置待人工确认", "流程中", "未知", true, "充磁后异常，工件可能在天车、打号机或中转架");
                 Console.WriteLine("[Line2Front] ⚠⚠⚠ 前天车在充磁后的流程区间中断！工件可能在天车、打号机或后续位置，引擎已暂停,需人工处理！");
                 Console.WriteLine($"[Line2Front] [前天车] 货叉—双头镗阶段保持={_forkPhase}，相关门闩未清除；ZoneMT/ZoneTS已按finally释放，前天车锁将在调度finally释放");
                 OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时流程中断，工件可能在天车、打号机或后续位置。引擎已暂停，货叉—双头镗阶段保持={_forkPhase}、相关门闩未清除。ZoneMT/ZoneTS碰撞区锁已释放，前天车锁将在任务退出时释放。请人工退磁/处理旧工件并将前天车升到安全位置后再恢复。异常：{ex.Message}");
@@ -2057,6 +2080,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 //   R6108若已发送则不重发，天车重试只负责把Pos3工件取走
                 //   天车重试时从Pos3正常取走工件, 通知货叉回待机, 状态自动恢复
                 _craneQueue.Enqueue(wp);
+                ClearFrontCraneTask();
                 Console.WriteLine($"[Line2Front] [前天车] 未充磁,工件仍在叉Pos3 → 放回天车队列等待重试(队列={_craneQueue.Count})");
             }
         }

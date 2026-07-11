@@ -137,6 +137,37 @@ public sealed class GrindingFlowEngine : IDisposable
     /// <summary>引擎是否正在运行</summary>
     public bool IsRunning => _engineTask != null && !_engineTask.IsCompleted;
     public bool IsPaused => _paused;
+
+    /// <summary>研磨天车当前动作的只读展示快照；仅复制内存状态，不读取设备。</summary>
+    public CraneTaskSnapshot GetCraneTaskSnapshot()
+    {
+        lock (_emergencyLock)
+        {
+            var target = _grinders.FirstOrDefault(g => string.Equals(g.StationCode, _craneLockStation, StringComparison.OrdinalIgnoreCase));
+            var workpiece = target == null ? null : WorkpieceDisplaySnapshot.From(target.PendingWorkpiece);
+            bool active = _craneLockHeldByFlow;
+            return new CraneTaskSnapshot(active, _cfg.Grinding.CraneNo, $"研磨天车#{_cfg.Grinding.CraneNo}", workpiece,
+                active ? (_craneLockAction + "中") : "空闲",
+                active && _craneLockAction == "上料" ? "ST709" : _craneLockStation,
+                active && _craneLockAction == "下料" ? "研磨下料架" : _craneLockStation,
+                active && _paused, active && _paused ? "研磨流程已暂停，请人工确认现场" : string.Empty, DateTime.UtcNow);
+        }
+    }
+
+    /// <summary>四台研磨机的只读展示快照；不读取PLC。</summary>
+    public ProcessStationSnapshot[] GetGrinderStationSnapshots()
+        => _grinders.Select(g => new ProcessStationSnapshot(g.StationCode, GrinderStateText(g.State),
+            WorkpieceDisplaySnapshot.From(g.PendingWorkpiece), g.StateChangedAt, g.WpRecoveryNeeded)).ToArray();
+
+    private static string GrinderStateText(GrinderState state) => state switch
+    {
+        GrinderState.Idle => "空闲",
+        GrinderState.Loading => "上料中",
+        GrinderState.Machining => "加工中",
+        GrinderState.WaitingForUnload => "等待下料",
+        GrinderState.Unloading => "下料中",
+        _ => state.ToString()
+    };
     /// <summary>研磨天车连续两次读到XYZ全零时通知主页面更新状态并弹窗。</summary>
     public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
     /// <summary>研磨流程进入人工确认暂停时通知主页面。</summary>

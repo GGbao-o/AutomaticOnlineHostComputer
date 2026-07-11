@@ -47,6 +47,8 @@ public sealed class Line2RearFlowEngine : IDisposable
     private readonly SemaphoreSlim _craneRearLock = new(1, 1); // 串行化后天车操作
     private const int CraneRearNo = 4;                           // 后天车编号(对应192.168.2.82)
     private int _ox, _oy, _oz;                                   // 后天车数据库偏移量(mm)
+    private readonly object _rearCraneTaskLock = new();
+    private CraneTaskSnapshot _rearCraneTask = CraneTaskSnapshot.Idle(CraneRearNo, "2号线后天车");
 
     // ── 5台斜床上下文 ──
     private readonly SkewCtx[] _beds = new SkewCtx[5];
@@ -85,7 +87,13 @@ public sealed class Line2RearFlowEngine : IDisposable
     private sealed class SkewCtx
     {
         public string Code = "";                         // 站号 ST606~ST610 (2号线全FANUC斜床)
-        public SkewState St;                              // 当前引擎状态
+        private SkewState _st;                             // 当前引擎状态
+        public SkewState St
+        {
+            get => _st;
+            set { if (_st != value) { _st = value; StateChangedAtUtc = DateTime.UtcNow; } }
+        }
+        public DateTime StateChangedAtUtc { get; private set; } = DateTime.UtcNow;
         // 2号线全FANUC, 无Modbus — 仅保留FANUC服务
         public FanucSkewBedService? F;                    // FANUC服务 (5台全FANUC)
         public WorkpieceCache? Wp;                        // 正在加工的工件数据(上料时从_wps取出绑定)
@@ -130,6 +138,50 @@ public sealed class Line2RearFlowEngine : IDisposable
     public bool IsPaused => _paused;
     public Line2RearDeviceStatus DeviceStatus => DS;
     public Line2RearDeviceStatus DS { get; } = new();
+
+    public CraneTaskSnapshot GetCraneTaskSnapshot()
+    {
+        lock (_rearCraneTaskLock) return _rearCraneTask;
+    }
+
+    public ProcessStationSnapshot[] GetSkewStationSnapshots()
+    {
+        var result = new List<ProcessStationSnapshot>(_beds.Length);
+        foreach (var bed in _beds)
+        {
+            if (bed == null) continue;
+            result.Add(new ProcessStationSnapshot(bed.Code, StateText(bed.St),
+                WorkpieceDisplaySnapshot.From(bed.Wp), bed.StateChangedAtUtc, bed.WpRecoveryNeeded));
+        }
+        return result.ToArray();
+    }
+
+    public TransferRackSnapshot[] GetTransferRackSnapshots()
+    {
+        Dictionary<string, WorkpieceCache> cached;
+        lock (_wpLock) cached = new Dictionary<string, WorkpieceCache>(_wps);
+        bool signalAvailable = _frontDs?.RackConnected == true;
+        return new[]
+        {
+            CreateRackSnapshot("ST016"), CreateRackSnapshot("ST017"), CreateRackSnapshot("ST018")
+        };
+
+        TransferRackSnapshot CreateRackSnapshot(string code) => new(code, signalAvailable,
+            signalAvailable && RackHasPhysicalPlateSnapshot(code),
+            cached.TryGetValue(code, out var wp) ? WorkpieceDisplaySnapshot.From(wp) : null);
+    }
+
+    private void SetRearCraneTask(WorkpieceCache wp, string stage, string source, string target, bool manual = false, string manualText = "")
+    {
+        lock (_rearCraneTaskLock)
+            _rearCraneTask = new CraneTaskSnapshot(true, CraneRearNo, "2号线后天车", WorkpieceDisplaySnapshot.From(wp),
+                stage, source, target, manual, manualText, DateTime.UtcNow);
+    }
+
+    private void ClearRearCraneTask()
+    {
+        lock (_rearCraneTaskLock) _rearCraneTask = CraneTaskSnapshot.Idle(CraneRearNo, "2号线后天车");
+    }
 
     public sealed class Line2RearDeviceStatus
     {
@@ -737,6 +789,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             var pair = scan.Candidates[0];
             Console.WriteLine($"│   ▶ 触发上料! 源={pair.RackCode} {pair.Wp.IdentityText} L={pair.Wp.Length} → 目标={pair.Bed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(pair.Bed.Code)})");
             pair.Bed.St = SkewState.Loading;
+            SetRearCraneTask(pair.Wp, "准备从中转架取料", pair.RackCode, pair.Bed.Code);
             triggered = true;
             _ = DoLoad(pair.Bed, pair.RackCode, ct);
         }
@@ -780,6 +833,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             candidate.Bed.St = SkewState.Unloading;
             triggered = true;
             Console.WriteLine($"│   ▶ {candidate.Bed.Code} 开始下料! {candidate.Wp.IdentityText} 工件={candidate.Wp.Diameter}mm L={candidate.Wp.Length}mm");
+            SetRearCraneTask(candidate.Wp, "准备从斜床下料", candidate.Bed.Code, "分流目的地待确认");
             _ = DoUnload(candidate.Bed, ct);
         }
         finally
@@ -1309,6 +1363,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             // 到这里才绑定斜床工件: X11已确认吸住、Z已升安全、后天车已到目标斜床上方。
             // 在此之前异常按“工件仍在中转架/后天车”处理, 避免Idle斜床残留旧Wp。
             bed.Wp = wp;
+            SetRearCraneTask(wp, "斜床上料握手中", rs, bed.Code);
             bed.CompletionExported = false; // 新工件开始加工前清除job2导出标志, 完工时只追加一次。
             Console.WriteLine("│ [握手] 天车到位,开始与CNC通讯");
             //开始握手流程
@@ -1317,6 +1372,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             await cr.MoveAbsoluteAsync(-1, -1, 0, ct: ct);
             bed.St = SkewState.Machining;
             wp.ReportStage($"2号线 斜床加工中 {bed.Code}");
+            ClearRearCraneTask();
             Console.WriteLine($"│ [上料] ✓ 完成 {wp.IdentityText} {bed.Code}→加工中");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1343,6 +1399,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             {
                 _paused = true;
                 bed.St = SkewState.Loading;
+                SetRearCraneTask(wp, "已持件，尚未放入斜床", rs, bed.Code, true, "X11已确认持件，请人工确认天车和工件位置");
                 Console.WriteLine("│ [上料] ⚠ X11已确认工件在后天车上但未放到斜床; 引擎已暂停, 需人工确认后天车和工件位置");
                 pendingSafetyAlarm = $"2号线后天车给{bed.Code}上料时发生异常，X11已确认工件{wp.IdentityText}在天车上但尚未放入斜床。引擎已暂停，请人工确认位置。异常：{ex.Message}";
             }
@@ -1353,6 +1410,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                     try { await cr.MagnetOffAsync(ct); mag = false; } catch (Exception offEx) { Console.WriteLine($"│ [上料] ⚠ X11未确认有版,退磁失败: {offEx.Message}"); }
                 }
                 bed.St = SkewState.Idle;
+                ClearRearCraneTask();
                 bed.Wp = null;
                 // X11未确认吸住, 工件按仍在中转架处理 → 恢复_wps缓存供下轮重试
                 lock (_wpLock) { RestoreRackWorkpieceLocked(rs, wp, rackArrivalSeq); }
@@ -1892,6 +1950,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             await Task.WhenAll(xTask, zTask);
             bed.St = SkewState.Idle;
             bed.Wp = null;
+            ClearRearCraneTask();
             Console.WriteLine($"│ [下料] ✓ 完成 {wp.IdentityText} {bed.Code}→Idle");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1907,6 +1966,8 @@ public sealed class Line2RearFlowEngine : IDisposable
             {
                 _paused = true;
                 bed.St = SkewState.Unloading;
+                if (bed.Wp is { } heldWp)
+                    SetRearCraneTask(heldWp, "已持件，目标位未完成放料", bed.Code, "分流目的地", true, "X11已确认持件，请人工确认天车和工件位置");
                 Console.WriteLine("│ ⚠ X11已确认工件离开斜床但未完成目标位放料/通知, 引擎已暂停, 请人工确认后天车和工件位置");
                 pendingSafetyAlarm = $"2号线后天车从{bed.Code}下料时发生异常，X11已确认工件在天车上，但目标位放料或通知尚未完成。引擎已暂停，请人工确认天车和工件位置。异常：{ex.Message}";
             }
@@ -1919,11 +1980,13 @@ public sealed class Line2RearFlowEngine : IDisposable
             {
                 bed.St = SkewState.Idle;
                 bed.Wp = null;
+                ClearRearCraneTask();
                 Console.WriteLine("│ 工件已完成目标位放料确认→斜床可复位Idle");
             }
             else
             {
                 bed.St = SkewState.WaitingUnload;
+                ClearRearCraneTask();
                 Console.WriteLine("│ 工件仍在斜床→保持等待下料");
             }
 

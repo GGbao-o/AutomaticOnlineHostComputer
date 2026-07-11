@@ -73,6 +73,10 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
     private string _line5 = "—";
     public string Line5 { get => _line5; private set => SetField(ref _line5, value); }
 
+    /// <summary>流程引擎提供的只读当前任务详情；不触发本卡片的PLC轮询。</summary>
+    private string _flowTaskTooltipText = string.Empty;
+    public string FlowTaskTooltipText { get => _flowTaskTooltipText; set => SetField(ref _flowTaskTooltipText, value); }
+
     /// <summary>连接指示灯颜色：灰=未连接, 绿=正常, 红=故障</summary>
     private Brush _connectedBrush = Brushes.Gray;
     public Brush ConnectedBrush { get => _connectedBrush; private set => SetField(ref _connectedBrush, value); }

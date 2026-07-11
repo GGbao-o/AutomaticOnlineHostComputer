@@ -537,6 +537,7 @@ public sealed class HomeViewModel : ObservableObject
                 OnPropertyChanged(nameof(Line1CacheDetail));
                 OnPropertyChanged(nameof(Line2CacheDetail));
                 OnPropertyChanged(nameof(GrindingCacheDetail));
+                RefreshFlowStatusHoverDetails();
             }
             catch (Exception ex)
             {
@@ -629,6 +630,8 @@ public sealed class HomeViewModel : ObservableObject
                 {
                     MarkCardsNotStarted(cards, "ST904", "ST606", "ST607", "ST608", "ST609", "ST610");
                 }
+
+                RefreshFlowStatusHoverDetails();
 
             }
             catch (Exception ex)
@@ -829,6 +832,100 @@ public sealed class HomeViewModel : ObservableObject
         card.Status1 = connected ? displayState : (displayState == "--" ? "读失败" : displayState);
         card.Status1Brush = connected ? GetSignalStateBrush(displayState) : Brushes.Red;
         card.Status2 = connected ? displaySignals : ShortStatusText(displaySignals);
+    }
+
+    private string _line1TransferRackTooltip = string.Empty;
+    public string Line1TransferRackTooltip { get => _line1TransferRackTooltip; private set => SetField(ref _line1TransferRackTooltip, value); }
+    private string _line2TransferRackTooltip = string.Empty;
+    public string Line2TransferRackTooltip { get => _line2TransferRackTooltip; private set => SetField(ref _line2TransferRackTooltip, value); }
+    private string _line1SkewTooltip = string.Empty;
+    public string Line1SkewTooltip { get => _line1SkewTooltip; private set => SetField(ref _line1SkewTooltip, value); }
+    private string _line2SkewTooltip = string.Empty;
+    public string Line2SkewTooltip { get => _line2SkewTooltip; private set => SetField(ref _line2SkewTooltip, value); }
+    private string _grindingTooltip = string.Empty;
+    public string GrindingTooltip { get => _grindingTooltip; private set => SetField(ref _grindingTooltip, value); }
+
+    /// <summary>把引擎只读快照映射为全流程页Tooltip；不创建连接、不读写设备。</summary>
+    private void RefreshFlowStatusHoverDetails()
+    {
+        var line1Skews = _line1RearEngine?.GetSkewStationSnapshots();
+        var line2Skews = _line2RearEngine?.GetSkewStationSnapshots();
+        ApplyProcessTooltips(line1Skews);
+        ApplyProcessTooltips(line2Skews);
+        var grinders = _grindingEngine?.GetGrinderStationSnapshots();
+        ApplyProcessTooltips(grinders);
+
+        Line1SkewTooltip = FormatProcessGroupTooltip(line1Skews, "1号线斜床");
+        Line2SkewTooltip = FormatProcessGroupTooltip(line2Skews, "2号线斜床");
+        GrindingTooltip = FormatProcessGroupTooltip(grinders, "研磨机");
+
+        Line1TransferRackTooltip = FormatTransferRackTooltip(_line1RearEngine?.GetTransferRackSnapshots());
+        Line2TransferRackTooltip = FormatTransferRackTooltip(_line2RearEngine?.GetTransferRackSnapshots());
+
+        Crane1F.FlowTaskTooltipText = FormatCraneTooltip(_line1Engine?.GetCraneTaskSnapshot());
+        Crane1R.FlowTaskTooltipText = FormatCraneTooltip(_line1RearEngine?.GetCraneTaskSnapshot());
+        Crane2F.FlowTaskTooltipText = FormatCraneTooltip(_line2Engine?.GetCraneTaskSnapshot());
+        Crane2R.FlowTaskTooltipText = FormatCraneTooltip(_line2RearEngine?.GetCraneTaskSnapshot());
+        CraneGL.FlowTaskTooltipText = FormatCraneTooltip(_grindingEngine?.GetCraneTaskSnapshot());
+    }
+
+    private void ApplyProcessTooltips(IEnumerable<ProcessStationSnapshot>? snapshots)
+    {
+        if (snapshots == null) return;
+        foreach (var snapshot in snapshots)
+            if (StationCards.TryGetValue(snapshot.StationCode, out var card))
+                card.TooltipText = FormatProcessTooltip(snapshot);
+    }
+
+    private static string FormatProcessTooltip(ProcessStationSnapshot snapshot)
+    {
+        if (snapshot.Workpiece == null)
+            return snapshot.NeedsManualWorkpiece
+                ? $"{snapshot.StationCode} — {snapshot.State}\n需人工补录工件信息"
+                : $"{snapshot.StationCode} — {snapshot.State}\n当前无工件";
+
+        var wp = snapshot.Workpiece;
+        var length = wp.Length > 0 ? $"长度：{wp.Length}mm" : "长度：未记录";
+        var process = string.IsNullOrWhiteSpace(wp.Process) ? "工艺：未记录" : $"工艺：{wp.Process}";
+        return $"{snapshot.StationCode} — {snapshot.State}\n工件：{wp.IdentityText}\n直径：{wp.Diameter}mm    {length}\n{process}\n开始时间：{snapshot.StateChangedAtUtc.ToLocalTime():HH:mm:ss}\n当前状态持续：{FormatDuration(snapshot.StateChangedAtUtc)}";
+    }
+
+    private static string FormatTransferRackTooltip(IEnumerable<TransferRackSnapshot>? snapshots)
+    {
+        if (snapshots == null) return "中转架数据暂不可用";
+        return string.Join(Environment.NewLine + Environment.NewLine, snapshots.Select(snapshot =>
+        {
+            if (!snapshot.PhysicalSignalAvailable) return $"{snapshot.StationCode}：物理信号不可用";
+            if (snapshot.Workpiece == null)
+                return snapshot.PhysicalHasPlate ? $"{snapshot.StationCode}：物理有板，但软件身份缺失" : $"{snapshot.StationCode}：物理无板";
+            var wp = snapshot.Workpiece;
+            var prefix = snapshot.HasIdentityMismatch ? "物理/软件状态不一致" : (snapshot.PhysicalHasPlate ? "物理有板" : "软件缓存存在");
+            return $"{snapshot.StationCode}：{prefix}\n工件：{wp.IdentityText}\nD={wp.Diameter}mm  L={wp.Length}mm";
+        }));
+    }
+
+    private static string FormatProcessGroupTooltip(IEnumerable<ProcessStationSnapshot>? snapshots, string title)
+    {
+        if (snapshots == null) return $"{title}数据暂不可用";
+        return string.Join(Environment.NewLine + Environment.NewLine, snapshots.Select(FormatProcessTooltip));
+    }
+
+    private static string FormatCraneTooltip(CraneTaskSnapshot? snapshot)
+    {
+        if (snapshot == null) return "流程任务数据暂不可用";
+        if (!snapshot.IsActive) return $"{snapshot.CraneName} — 空闲\n当前无流程任务";
+        var wp = snapshot.Workpiece == null ? "工件：需人工确认" : $"工件：{snapshot.Workpiece.IdentityText}\n直径：{snapshot.Workpiece.Diameter}mm  长度：{snapshot.Workpiece.Length}mm";
+        var manual = snapshot.NeedsManualConfirmation ? $"\n等待人工确认：{snapshot.ManualConfirmationText}" : string.Empty;
+        return $"{snapshot.CraneName} — 执行中\n{wp}\n阶段：{snapshot.Stage}\n来源：{snapshot.SourceStation}    目标：{snapshot.TargetStation}{manual}";
+    }
+
+    private static string FormatDuration(DateTime changedAtUtc)
+    {
+        var elapsed = DateTime.UtcNow - changedAtUtc;
+        if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+        return elapsed.TotalHours >= 1
+            ? $"{(int)elapsed.TotalHours}时{elapsed.Minutes}分{elapsed.Seconds}秒"
+            : $"{elapsed.Minutes}分{elapsed.Seconds}秒";
     }
 
     private static string ShortStatusText(string text)

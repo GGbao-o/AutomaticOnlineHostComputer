@@ -52,6 +52,10 @@ public sealed class StationCardViewModel : ObservableObject, IDisposable
     private string _status2 = "—";
     public string Status2 { get => _status2; set => SetField(ref _status2, value); }
 
+    /// <summary>全流程状态页悬停详情；只由内存快照写入，不参与设备控制。</summary>
+    private string _tooltipText = string.Empty;
+    public string TooltipText { get => _tooltipText; set => SetField(ref _tooltipText, value); }
+
     private string _ipText = "未配置IP";
     public string IpText { get => _ipText; set => SetField(ref _ipText, value); }
 
