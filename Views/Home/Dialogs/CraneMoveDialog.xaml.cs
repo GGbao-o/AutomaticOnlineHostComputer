@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,9 @@ public partial class CraneMoveDialog : Window
     private readonly MotionConfig _cfg;
     private readonly Dictionary<string, MachineManagementRowVm> _stationCoords;
     private int _currentX, _currentY, _currentZ;
+    private const int BatchSafeZTolerance = 5;
+    private static readonly int[] BatchCraneNos = { 1, 2, 3, 4 };
+    private bool _isBatchReturning;
 
     /// <param name="craneCache">天车连接缓存(已注入)</param>
     /// <param name="cfg">运动参数配置(含速度/Z公式等)</param>
@@ -277,4 +281,130 @@ public partial class CraneMoveDialog : Window
     }
 
     private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>
+    /// 一键回位：先统一检查1~4号天车Z均在0±5mm，全部通过后才按固定顺序仅移动X轴。
+    /// 此入口是人工手动操作，不读取或修改自动引擎、任务、缓存、X11或碰撞区锁。
+    /// </summary>
+    private async void BtnReturnSafePositions_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isBatchReturning) return;
+
+        var precheckFailures = new List<string>();
+        var readyCranes = new List<(int CraneNo, string Name, CraneService Service)>();
+        var completed = new List<string>();
+        string currentName = "未开始";
+        int currentTargetX = 0;
+
+        SetBatchOperationUi(true);
+        try
+        {
+            TxtBatchStatus.Text = "正在检查1~4号天车 Z 轴是否在0±5mm…";
+
+            // 预检必须全部完成；任何一台不满足时，绝不向任何天车下发设速或移动命令。
+            foreach (int craneNo in BatchCraneNos)
+            {
+                string name = GetCraneName(craneNo);
+                try
+                {
+                    var crane = _craneCache.GetOrCreateService(craneNo);
+                    if (!crane.IsConnected) await crane.ConnectAsync();
+
+                    using var checkCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    var status = await crane.ReadStatusAsync(checkCts.Token);
+                    if (status == null)
+                    {
+                        precheckFailures.Add($"{name}：读取当前位置失败");
+                        continue;
+                    }
+
+                    if (Math.Abs(status.ZPos) > BatchSafeZTolerance)
+                    {
+                        precheckFailures.Add(
+                            $"{name}：当前 Z={status.ZPos}mm，请先回原点（0±{BatchSafeZTolerance}mm）");
+                        continue;
+                    }
+
+                    readyCranes.Add((craneNo, name, crane));
+                }
+                catch (Exception ex)
+                {
+                    precheckFailures.Add($"{name}：读取失败：{ex.Message}");
+                }
+            }
+
+            if (precheckFailures.Count > 0)
+            {
+                TxtBatchStatus.Text = "批量回位未执行：存在Z轴或通信预检不通过的天车";
+                MessageBox.Show(
+                    "以下天车未通过回安全位置预检，未执行任何移动：\n\n- " +
+                    string.Join("\n- ", precheckFailures),
+                    "回安全位置预检未通过", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            // 最长4台×4分钟；仍保留每台MoveAbsoluteAsync自身的到位和超时保护。
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
+            foreach (var (craneNo, name, crane) in readyCranes)
+            {
+                currentName = name;
+                currentTargetX = _cfg.GetCraneHomeX(craneNo);
+                TxtBatchStatus.Text = $"正在回位：{name} → X={currentTargetX}";
+
+                if (!crane.IsConnected) await crane.ConnectAsync();
+                var speed = _cfg.GetCraneSpeed(craneNo);
+                await crane.SetAbsSpeedAsync(
+                    speed.X.Speed, speed.X.Accel, speed.X.Decel,
+                    speed.Y.Speed, speed.Y.Accel, speed.Y.Decel,
+                    speed.Z.Speed, speed.Z.Accel, speed.Z.Decel,
+                    cts.Token);
+
+                // 只移动X；Y/Z传-1，绝不自动执行Z回零。
+                await crane.MoveAbsoluteAsync(currentTargetX, -1, -1, ct: cts.Token);
+                completed.Add($"{name}(X={currentTargetX})");
+                TxtBatchStatus.Text = $"已完成：{string.Join("、", completed)}";
+            }
+
+            TxtBatchStatus.Text = "4台天车已回配置安全位置";
+            MessageBox.Show("1~4号天车已按配置依次回到安全位置。", "回安全位置完成",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            string completedText = completed.Count == 0 ? "无" : string.Join("、", completed);
+            TxtBatchStatus.Text = $"回位中断：{currentName}";
+            MessageBox.Show(
+                $"回安全位置中断。\n\n已完成：{completedText}\n失败天车：{currentName}（目标X={currentTargetX}）\n原因：{ex.Message}\n\n后续天车未执行，请人工确认现场后重试。",
+                "回安全位置失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBatchOperationUi(false);
+        }
+    }
+
+    private static string GetCraneName(int craneNo)
+        => CraneList.FirstOrDefault(c => c.No == craneNo)?.Name ?? $"{craneNo}号天车";
+
+    private void SetBatchOperationUi(bool running)
+    {
+        _isBatchReturning = running;
+        CmbCrane.IsEnabled = !running;
+        CmbStation.IsEnabled = !running;
+        BtnRefresh.IsEnabled = !running;
+        BtnMove.IsEnabled = !running;
+        BtnReturnSafePositions.IsEnabled = !running;
+        BtnClose.IsEnabled = !running;
+
+        if (!running) UpdateTargetInfo();
+    }
+
+    private void Window_Closing(object? sender, CancelEventArgs e)
+    {
+        if (!_isBatchReturning) return;
+
+        e.Cancel = true;
+        MessageBox.Show("四台天车正在回安全位置，请等待本次操作结束。",
+            "操作进行中", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
 }
