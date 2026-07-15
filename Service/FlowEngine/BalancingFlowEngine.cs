@@ -110,6 +110,13 @@ public sealed class BalancingFlowEngine : IDisposable
     private TaskCompletionSource<bool>? _m2ActionCompletion, _m3ActionCompletion;
     private int _m2ActionVersion, _m3ActionVersion;
 
+    // ── 页面展示上下文（严格旁路）────────────────────────────────────────
+    // 这些字段只补足M2/M3从_balWps移除后“动作局部变量外不可见”的身份缺口。
+    // 禁止在派发、运动、握手、锁、暂停或应急判断中读取；只能由下方Set/Clear和只读快照访问。
+    private WorkpieceCache? _m2DisplayWorkpiece, _m3DisplayWorkpiece;
+    private string _m2DisplayStage = string.Empty, _m3DisplayStage = string.Empty;
+    private int _m2DisplayVersion, _m3DisplayVersion;
+
     // ── 工件缓存(后天车DoUnload→OnBalancingRackPlaced→SetBalancingWp写入) ──
     //   M817缓存: Line1Rear后天车放料到动平衡下料架1(长工件≥800mm)
     //   M818缓存: Line2Rear后天车放料到动平衡下料架1(长工件≥800mm)
@@ -182,6 +189,58 @@ public sealed class BalancingFlowEngine : IDisposable
     public bool M710CanPlace => _m710;
     public bool M700HasPlate => _m700;
     public bool M720CanPlace => _m720;
+
+    /// <summary>
+    /// 动平衡缓存及M2/M3当前动作的只读工件快照。
+    /// 两把锁分别短暂复制且绝不嵌套；不读取PLC、不改变缓存、不参与任何控制判断。
+    /// </summary>
+    public InProcessWorkpieceSnapshot[] GetInProcessWorkpieceSnapshots()
+    {
+        var nowUtc = DateTime.UtcNow;
+        KeyValuePair<string, WorkpieceCache>[] cached;
+        lock (_balWpsLock) cached = _balWps.ToArray();
+
+        WorkpieceCache? m2Workpiece;
+        WorkpieceCache? m3Workpiece;
+        string m2Stage;
+        string m3Stage;
+        lock (_emergencyLock)
+        {
+            m2Workpiece = _m2DisplayWorkpiece;
+            m3Workpiece = _m3DisplayWorkpiece;
+            m2Stage = _m2DisplayStage;
+            m3Stage = _m3DisplayStage;
+        }
+
+        var result = new List<InProcessWorkpieceSnapshot>(cached.Length + 2);
+        foreach (var pair in cached)
+        {
+            result.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.BalancingCache,
+                "动平衡", "动平衡", pair.Key, "等待机械手2/3处理",
+                WorkpieceDisplaySnapshot.From(pair.Value), "动平衡软件缓存",
+                InProcessWorkpieceStatus.Normal, "仅为软件缓存身份，不额外读取PLC", nowUtc));
+        }
+
+        if (m2Workpiece.HasValue)
+        {
+            result.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.BalancingInTransit,
+                "动平衡", "动平衡", "机械手2", TextOrNone(m2Stage),
+                WorkpieceDisplaySnapshot.From(m2Workpiece.Value), "M2动作展示上下文",
+                _paused ? InProcessWorkpieceStatus.ManualConfirmation : InProcessWorkpieceStatus.Normal,
+                "只随当前动作记录身份；业务流程不会读取此展示字段", nowUtc));
+        }
+
+        if (m3Workpiece.HasValue)
+        {
+            result.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.BalancingInTransit,
+                "动平衡", "动平衡", "机械手3", TextOrNone(m3Stage),
+                WorkpieceDisplaySnapshot.From(m3Workpiece.Value), "M3动作展示上下文",
+                _paused ? InProcessWorkpieceStatus.ManualConfirmation : InProcessWorkpieceStatus.Normal,
+                "M700来源可能只有直径、没有版号；业务流程不会读取此展示字段", nowUtc));
+        }
+
+        return result.ToArray();
+    }
 
     // 仅供状态页面区分“连接在线”与“本轮读到完整快照”；业务派发仍使用主循环局部变量。
     private volatile bool _mc63SnapshotValid;
@@ -460,6 +519,54 @@ public sealed class BalancingFlowEngine : IDisposable
             if (version == _m3ActionVersion) _m3ActionCts = null;
         }
         completion.TrySetResult(true);
+    }
+
+    /// <summary>设置M2展示身份；只允许当前动作版本写入，不改变任何业务字段。</summary>
+    private void SetM2Display(int version, WorkpieceCache workpiece, string stage)
+    {
+        lock (_emergencyLock)
+        {
+            if (version != _m2ActionVersion) return;
+            _m2DisplayVersion = version;
+            _m2DisplayWorkpiece = workpiece;
+            _m2DisplayStage = stage;
+        }
+    }
+
+    /// <summary>设置M3展示身份；只允许当前动作版本写入，不改变任何业务字段。</summary>
+    private void SetM3Display(int version, WorkpieceCache workpiece, string stage)
+    {
+        lock (_emergencyLock)
+        {
+            if (version != _m3ActionVersion) return;
+            _m3DisplayVersion = version;
+            _m3DisplayWorkpiece = workpiece;
+            _m3DisplayStage = stage;
+        }
+    }
+
+    /// <summary>仅清理同一M2动作版本留下的展示信息，防止旧finally清掉新动作。</summary>
+    private void ClearM2Display(int version)
+    {
+        lock (_emergencyLock)
+        {
+            if (_m2DisplayVersion != version) return;
+            _m2DisplayWorkpiece = null;
+            _m2DisplayStage = string.Empty;
+            _m2DisplayVersion = 0;
+        }
+    }
+
+    /// <summary>仅清理同一M3动作版本留下的展示信息，防止旧finally清掉新动作。</summary>
+    private void ClearM3Display(int version)
+    {
+        lock (_emergencyLock)
+        {
+            if (_m3DisplayVersion != version) return;
+            _m3DisplayWorkpiece = null;
+            _m3DisplayStage = string.Empty;
+            _m3DisplayVersion = 0;
+        }
     }
 
     private void CancelM2ActionNoLock(List<string> logs)
@@ -923,6 +1030,8 @@ public sealed class BalancingFlowEngine : IDisposable
                 throw new InvalidOperationException($"M2检测到{pickReg}=有板但工件缓存缺失, 当前Keys=[{CacheKeysText}], 已暂停, 禁止默认160mm取料");
             }
             var trackedWorkpiece = trackedWp.Value;
+            // 仅记录页面展示身份；不参与后续直径、坐标、X11或任何放行判断。
+            SetM2Display(actionVersion, trackedWorkpiece, $"准备从{pickReg}取料");
             Console.WriteLine($"[平衡引擎] [M2] ① 取料 {trackedWorkpiece.IdentityText} 工件直径d={d}");
             // 取料YZ: GetArmCoord自动判断配置→数据库
             //   pickReg = "M817"或"M818", pickCode = "ST019"或"ST020"
@@ -989,6 +1098,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 {
                     Console.WriteLine($"[平衡引擎] [M2] ✓ X11=1 已吸到(保持在取料位Z={curZ})");
                     holdingWorkpiece = true;
+                    SetM2Display(actionVersion, trackedWorkpiece, $"已从{pickReg}吸住，前往ST008/M710");
                     break;
                 }
 
@@ -1031,6 +1141,7 @@ public sealed class BalancingFlowEngine : IDisposable
             await _m2.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
             placedOnM710 = true; // 工件已物理放到ST008, 后续M711失败必须暂停人工确认
             holdingWorkpiece = false;
+            SetM2Display(actionVersion, trackedWorkpiece, "已放到ST008/M710，等待M711确认");
             // ── 放料成功, 清理缓存 (工件已安全放到ST008, 不怕异常) ──
             lock (_balWpsLock)
             {
@@ -1046,6 +1157,7 @@ public sealed class BalancingFlowEngine : IDisposable
                     await _mc65.WriteMBitInWordAsync(700, 11, true, ct);
                     m711Notified = true;
                     trackedWorkpiece.ReportStage("动平衡加工中 ST008/M710");
+                    SetM2Display(actionVersion, trackedWorkpiece, "M711已确认，机械手2返回安全位");
                     Console.WriteLine($"[平衡引擎] [M2] M711=1 送工件完成 ✓ {trackedWorkpiece.IdentityText}");
                 }
                 catch (Exception ex)
@@ -1108,6 +1220,7 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 Console.WriteLine("[平衡引擎] [M2] 旧动作finally: 不清新动作忙标志/上下文");
             }
+            ClearM2Display(actionVersion);
             FinishM2Action(actionVersion, actionCompletion);
         }
     }
@@ -1223,6 +1336,14 @@ public sealed class BalancingFlowEngine : IDisposable
             }
 
             string sourceIdentity = useM700 ? "版号=未知(M700人工动平衡后)" : (m821TrackedWp?.IdentityText ?? "版号=未知");
+            // M700人工动平衡后无法可靠恢复版号，只保留已读到的直径；M821则保留完整缓存身份。
+            var m3DisplayWorkpiece = m821TrackedWp ?? new WorkpieceCache
+            {
+                Diameter = d,
+                BoreType = 1,
+                Length = 0
+            };
+            SetM3Display(actionVersion, m3DisplayWorkpiece, $"准备从{pickReg}取料");
             
             // 取料YZ: GetArmCoord自动判断配置→ 一般不从数据库读取 从配置文件 数据库的不适用机械手
             var (pickY, pickZ) = GetArmCoord(pickReg, pickCode, _m3OffsetY, _m3OffsetZ);
@@ -1287,6 +1408,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 {
                     Console.WriteLine($"[平衡引擎] [M3] ✓ X11=1 已吸到(保持在取料位Z={curZ})");
                     holdingWorkpiece = true;
+                    SetM3Display(actionVersion, m3DisplayWorkpiece, $"已从{pickReg}吸住，前往ST010/M720");
                     break;
                 }
 
@@ -1348,6 +1470,7 @@ public sealed class BalancingFlowEngine : IDisposable
             await _m3.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
             placedOnM720 = true; // 工件已物理放到研磨上料位并且Z已离开, 后续信号失败需人工补确认
             holdingWorkpiece = false;
+            SetM3Display(actionVersion, m3DisplayWorkpiece, "已放到ST010/M720，等待M721及研磨缓存确认");
 
             // ── 写M721=1: 通知PLC放料到研磨上料架1号位完成 → 传送带启动 ──
             if (_mc65?.IsConnected == true)
@@ -1391,6 +1514,7 @@ public sealed class BalancingFlowEngine : IDisposable
             OnGrindingRackPlaced.Invoke(grindingWp);
             grindingCacheNotified = true;
             grindingWp.ReportStage("研磨上料架 ST010/M720");
+            SetM3Display(actionVersion, grindingWp, "已写入研磨缓存，机械手3返回安全位");
             Console.WriteLine($"[平衡引擎] [M3] 通知研磨引擎入缓存 {grindingWp.IdentityText} d={grindingWp.Diameter} L={grindingWp.Length}");
 
             // ── 放料成功, 清理M821来源的缓存 (工件已安全放到ST010) ──
@@ -1458,6 +1582,7 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 Console.WriteLine("[平衡引擎] [M3] 旧动作finally: 不清新动作忙标志/上下文");
             }
+            ClearM3Display(actionVersion);
             FinishM3Action(actionVersion, actionCompletion);
         }
     }

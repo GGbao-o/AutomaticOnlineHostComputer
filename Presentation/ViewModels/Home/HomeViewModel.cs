@@ -1116,6 +1116,178 @@ public sealed class HomeViewModel : ObservableObject
         return $"{workpiece.IdentityText}，直径={workpiece.Diameter}mm，{length}";
     }
 
+    /// <summary>
+    /// 生成“在制工件”页面使用的只读内存快照。
+    ///
+    /// 安全边界：这里只复制各流程已经维护的工件身份和状态，不读取设备、不重连、
+    /// 不写寄存器、不访问数据库，也不把页面判断反馈给任何业务流程。
+    /// </summary>
+    public InProcessWorkpieceOverviewSnapshot GetInProcessWorkpieceOverviewSnapshot()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var items = new List<InProcessWorkpieceSnapshot>(64);
+
+        Collect("全局FIFO", "全局", () =>
+        {
+            WorkpieceCache[] queued;
+            lock (_frontDispatchLock)
+                queued = _frontDispatchQueue.Select(x => x.Workpiece).ToArray();
+
+            foreach (var wp in queued)
+            {
+                items.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.GlobalQueue,
+                    "全局", "总上料架", "全局FIFO", "等待M800及线路准入",
+                    WorkpieceDisplaySnapshot.From(wp), "全局软件任务队列",
+                    InProcessWorkpieceStatus.Normal, "尚未写入1/2号线前端缓存", nowUtc));
+            }
+        });
+
+        // 前端引擎内部自己以短锁复制缓存、在途和天车队列；页面不持有这些锁。
+        if (_line1Engine != null)
+            Collect("1号线前端", "1号线", () => items.AddRange(_line1Engine.GetInProcessWorkpieceSnapshots()));
+        if (_line2Engine != null)
+            Collect("2号线前端", "2号线", () => items.AddRange(_line2Engine.GetInProcessWorkpieceSnapshots()));
+
+        if (_line1RearEngine != null)
+        {
+            Collect("1号线中转架", "1号线", () => AddRackWorkpieces(items, "1号线", "1号线后端",
+                _line1RearEngine.GetTransferRackSnapshots(), nowUtc));
+            Collect("1号线斜床", "1号线", () => AddProcessWorkpieces(items, "1号线", "1号线后端",
+                "斜床软件上下文", _line1RearEngine.GetSkewStationSnapshots(), nowUtc));
+            Collect("1号线后天车", "1号线", () => AddCraneWorkpiece(items, "1号线", "1号线后端",
+                _line1RearEngine.GetCraneTaskSnapshot(), nowUtc));
+        }
+
+        if (_line2RearEngine != null)
+        {
+            Collect("2号线中转架", "2号线", () => AddRackWorkpieces(items, "2号线", "2号线后端",
+                _line2RearEngine.GetTransferRackSnapshots(), nowUtc));
+            Collect("2号线斜床", "2号线", () => AddProcessWorkpieces(items, "2号线", "2号线后端",
+                "斜床软件上下文", _line2RearEngine.GetSkewStationSnapshots(), nowUtc));
+            Collect("2号线后天车", "2号线", () => AddCraneWorkpiece(items, "2号线", "2号线后端",
+                _line2RearEngine.GetCraneTaskSnapshot(), nowUtc));
+        }
+
+        if (_line1BalancingEngine != null)
+            Collect("动平衡", "动平衡", () => items.AddRange(_line1BalancingEngine.GetInProcessWorkpieceSnapshots()));
+
+        if (_grindingEngine != null)
+        {
+            Collect("研磨缓存", "研磨", () =>
+            {
+                foreach (var wp in _grindingEngine.GetCachedWorkpiecesSnapshot())
+                {
+                    items.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.GrindingCache,
+                        "研磨", "研磨", "ST709缓存", "等待分配研磨机",
+                        WorkpieceDisplaySnapshot.From(wp), "研磨软件FIFO",
+                        InProcessWorkpieceStatus.Normal, "只复制现有研磨缓存", nowUtc));
+                }
+            });
+            Collect("研磨机", "研磨", () => AddProcessWorkpieces(items, "研磨", "研磨",
+                "研磨机软件上下文", _grindingEngine.GetGrinderStationSnapshots(), nowUtc));
+            Collect("研磨天车", "研磨", () => AddCraneWorkpiece(items, "研磨", "研磨",
+                _grindingEngine.GetCraneTaskSnapshot(), nowUtc));
+        }
+
+        // 同一已知身份在交接瞬间可能同时存在于上下游两条软件记录中。
+        // 页面只用黄色提示核对，绝不能据此自动删除、合并或判定业务异常。
+        var repeatedCounts = items.Where(x => x.HasKnownIdentity)
+            .GroupBy(x => x.IdentityKey, StringComparer.Ordinal)
+            .Where(x => x.Count() > 1)
+            .ToDictionary(x => x.Key, x => x.Count(), StringComparer.Ordinal);
+        for (int i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            if (!item.HasKnownIdentity || !repeatedCounts.TryGetValue(item.IdentityKey, out int count)
+                || item.Status != InProcessWorkpieceStatus.Normal)
+                continue;
+
+            items[i] = item with
+            {
+                Status = InProcessWorkpieceStatus.Handoff,
+                Detail = $"{item.Detail}；同一身份当前有{count}条软件记录，可能处于正常交接，请结合位置核对"
+            };
+        }
+
+        return new InProcessWorkpieceOverviewSnapshot(items.ToArray(), nowUtc);
+
+        // 单个来源失败只降级该来源。页面按秒刷新，故意不写Console，避免形成日志风暴。
+        void Collect(string location, string scope, Action collect)
+        {
+            try { collect(); }
+            catch
+            {
+                items.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.SourceFailure,
+                    scope, scope, location, "快照暂不可用", null, "现有内存快照",
+                    InProcessWorkpieceStatus.EvidenceUnavailable,
+                    "复制该来源的内存状态时发生异常；未触发设备重读、重连或流程控制", nowUtc));
+            }
+        }
+    }
+
+    private static void AddRackWorkpieces(ICollection<InProcessWorkpieceSnapshot> items,
+        string filterScope, string flowScope, IEnumerable<TransferRackSnapshot> racks, DateTime nowUtc)
+    {
+        foreach (var rack in racks)
+        {
+            // 物理无板且软件也无身份时不是在制工件，不占页面行。
+            if (rack.Workpiece == null && (!rack.PhysicalSignalAvailable || !rack.PhysicalHasPlate))
+                continue;
+
+            var status = !rack.PhysicalSignalAvailable
+                ? InProcessWorkpieceStatus.EvidenceUnavailable
+                : rack.HasIdentityMismatch
+                    ? InProcessWorkpieceStatus.SignalMismatch
+                    : InProcessWorkpieceStatus.Normal;
+            string physical = !rack.PhysicalSignalAvailable
+                ? "物理信号不可用"
+                : rack.PhysicalHasPlate ? "物理有板" : "物理无板";
+            string detail = rack.HasIdentityMismatch
+                ? $"{physical}，软件身份={(rack.Workpiece?.IdentityText ?? "缺失")}；请人工核对，页面不会清理缓存"
+                : $"{physical}，软件身份={(rack.Workpiece?.IdentityText ?? "缺失")}";
+
+            items.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.TransferRack,
+                filterScope, flowScope, rack.StationCode, "等待后天车/斜床",
+                rack.Workpiece, "物理有板内存信号 + 软件身份缓存", status, detail, nowUtc));
+        }
+    }
+
+    private static void AddProcessWorkpieces(ICollection<InProcessWorkpieceSnapshot> items,
+        string filterScope, string flowScope, string evidence,
+        IEnumerable<ProcessStationSnapshot> stations, DateTime nowUtc)
+    {
+        foreach (var station in stations)
+        {
+            if (station.Workpiece == null && !station.NeedsManualWorkpiece) continue;
+            items.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.ProcessStation,
+                filterScope, flowScope, station.StationCode, station.State,
+                station.Workpiece, evidence,
+                station.NeedsManualWorkpiece
+                    ? InProcessWorkpieceStatus.ManualConfirmation
+                    : InProcessWorkpieceStatus.Normal,
+                station.NeedsManualWorkpiece
+                    ? "设备状态表明存在工件，但软件身份缺失，需要人工确认"
+                    : $"状态开始时间={station.StateChangedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}", nowUtc));
+        }
+    }
+
+    private static void AddCraneWorkpiece(ICollection<InProcessWorkpieceSnapshot> items,
+        string filterScope, string flowScope, CraneTaskSnapshot crane, DateTime nowUtc)
+    {
+        if (!crane.IsActive && !crane.NeedsManualConfirmation) return;
+        string route = string.IsNullOrWhiteSpace(crane.SourceStation) && string.IsNullOrWhiteSpace(crane.TargetStation)
+            ? "未记录路线"
+            : $"{crane.SourceStation} → {crane.TargetStation}";
+        bool manual = crane.NeedsManualConfirmation || crane.Workpiece == null;
+        items.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.CraneTask,
+            filterScope, flowScope, crane.CraneName, crane.Stage,
+            crane.Workpiece, "天车当前动作展示快照",
+            manual ? InProcessWorkpieceStatus.ManualConfirmation : InProcessWorkpieceStatus.Normal,
+            manual && !string.IsNullOrWhiteSpace(crane.ManualConfirmationText)
+                ? $"{route}；{crane.ManualConfirmationText}"
+                : route, nowUtc));
+    }
+
     private void ApplyProcessTooltips(IEnumerable<ProcessStationSnapshot>? snapshots)
     {
         if (snapshots == null) return;

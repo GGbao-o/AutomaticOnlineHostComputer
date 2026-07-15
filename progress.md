@@ -23,3 +23,7 @@
 - 诊断聚合只调用现有 `GetFrontDispatchReadiness`、天车/工位/中转架展示快照和 `DeviceStatus` 内存字段；没有新增PLC/CNC/MC/Modbus/FANUC读取、数据库调用或流程控制按钮。页面隐藏/卸载后停止定时器。
 - 已同步更新 `Docs/整线技术手册.md` 与 `Docs/日志审查与故障定位手册.md`，明确“等待不等于故障”、页面只读边界和推荐排查顺序。
 - 最终完整构建：`dotnet build AutomaticOnlineHostComputer.csproj --no-restore --nologo --consoleloggerparameters:"ErrorsOnly;Summary"` 成功，0错误、660个项目既有警告；未提交Git。
+- 用户确认第二步实现“在制工件”页面。已新增不可变在制快照、1/2号线前端只读复制、Home聚合、筛选/KPI页面和缓存导航；导航顺序为“全流程状态→运行诊断→在制工件→异常监控”。
+- 动平衡M2/M3只增加带动作版本的显示专用身份，分别在动作里程碑更新、在`finally`按版本清理；静态引用确认这些字段不进入派发、运动、握手、锁、缓存或异常恢复判断。
+- 页面仅在可见时每1秒复制内存，内容不变时不重建DataGrid行，隐藏/卸载立即停止；未新增设备通信、数据库、后台Task或控制按钮。
+- 已更新 `Docs/整线技术手册.md`、`Docs/日志审查与故障定位手册.md` 和 `Docs/03-设备交互流程/整线引擎流程总览_按代码.md`，补充位置来源、异常前记录步骤及只读边界。

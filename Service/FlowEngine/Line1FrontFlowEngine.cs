@@ -184,6 +184,77 @@ public sealed class Line1FrontFlowEngine : IDisposable
         lock (_frontCraneTaskLock) return _frontCraneTask;
     }
 
+    /// <summary>
+    /// 供“在制工件”页面使用的只读快照。
+    /// 仅分别复制缓存、当前工件、天车队列和天车展示任务；不读取设备、不改变队列、不嵌套持锁。
+    /// </summary>
+    public InProcessWorkpieceSnapshot[] GetInProcessWorkpieceSnapshots()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var result = new List<InProcessWorkpieceSnapshot>();
+
+        WorkpieceCache[] cached;
+        lock (_cacheLock) cached = _cachedList.ToArray();
+        foreach (var wp in cached)
+            result.Add(CreateInProcessSnapshot(InProcessWorkpieceKind.FrontCache, "前端缓存",
+                "等待总上料架物理板和取料条件", wp, "软件FIFO缓存", InProcessWorkpieceStatus.Normal, nowUtc));
+
+        WorkpieceCache? current;
+        lock (_wpLock) current = _currentWp;
+        if (current.HasValue)
+            result.Add(CreateInProcessSnapshot(InProcessWorkpieceKind.FrontCurrent, "前端_currentWp",
+                GetCurrentFrontWorkpieceStage(), current.Value, "前端活动工件上下文",
+                InProcessWorkpieceStatus.Normal, nowUtc));
+
+        foreach (var wp in _craneQueue.ToArray())
+            result.Add(CreateInProcessSnapshot(InProcessWorkpieceKind.FrontCraneQueue, "前天车队列",
+                "等待前天车取件", wp, "线程安全天车队列", InProcessWorkpieceStatus.Normal, nowUtc));
+
+        var craneTask = GetCraneTaskSnapshot();
+        if (craneTask.IsActive && craneTask.Workpiece != null)
+            result.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.CraneTask, "1号线", "1号线前端",
+                craneTask.CraneName, craneTask.Stage, craneTask.Workpiece, "前天车活动任务",
+                craneTask.NeedsManualConfirmation ? InProcessWorkpieceStatus.ManualConfirmation : InProcessWorkpieceStatus.Normal,
+                FormatCraneTaskDetail(craneTask), nowUtc));
+
+        return result.ToArray();
+    }
+
+    private static InProcessWorkpieceSnapshot CreateInProcessSnapshot(InProcessWorkpieceKind kind,
+        string location, string stage, WorkpieceCache workpiece, string evidence,
+        InProcessWorkpieceStatus status, DateTime nowUtc)
+        => new(kind, "1号线", "1号线前端", location, stage, WorkpieceDisplaySnapshot.From(workpiece),
+            evidence, status, "仅为软件内存位置，不代表额外读取到现场信号", nowUtc);
+
+    /// <summary>把现有货叉状态机阶段翻译成页面文字；纯读取，不参与状态迁移。</summary>
+    private string GetCurrentFrontWorkpieceStage()
+    {
+        if (!_manipulatorClearedFork) return "机械手取料/送叉中";
+        return _forkPhase switch
+        {
+            ForkBoringPhase.Idle => "货叉待分派",
+            ForkBoringPhase.Load_WriteParams => "等待双头镗参数下发",
+            ForkBoringPhase.WaitingRequestLoad => "等待双头镗请求上料",
+            ForkBoringPhase.GoingToBoring => "货叉向双头镗送料",
+            ForkBoringPhase.Load_WriteDone => "确认双头镗上料完成",
+            ForkBoringPhase.WaitingMachine => "双头镗加工中",
+            ForkBoringPhase.Unload_GoPos3 => "货叉取回Pos3中",
+            ForkBoringPhase.WaitingForkReturnFromBoring => "等待货叉从双头镗返回",
+            ForkBoringPhase.SkipBoring_GoPos3 => "跳过双头镗，货叉去Pos3",
+            ForkBoringPhase.WaitingForkReturnFromSkip => "等待跳过工艺货叉返回",
+            _ => _forkPhase.ToString()
+        };
+    }
+
+    private static string FormatCraneTaskDetail(CraneTaskSnapshot task)
+    {
+        string route = string.IsNullOrWhiteSpace(task.SourceStation) && string.IsNullOrWhiteSpace(task.TargetStation)
+            ? ""
+            : $"；{task.SourceStation}→{task.TargetStation}";
+        string manual = string.IsNullOrWhiteSpace(task.ManualConfirmationText) ? "" : $"；{task.ManualConfirmationText}";
+        return $"活动任务{route}{manual}";
+    }
+
     private void SetFrontCraneTask(WorkpieceCache wp, string stage, string source, string target, bool manual = false, string manualText = "")
     {
         lock (_frontCraneTaskLock)

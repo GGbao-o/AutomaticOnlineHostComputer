@@ -296,3 +296,5 @@ D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\Attentio
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\AttentionMonitor\AttentionMonitorView.g.cs
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\RuntimeDiagnostics\RuntimeDiagnosticsView.baml
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\RuntimeDiagnostics\RuntimeDiagnosticsView.g.cs
+D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\InProcessWorkpieces\InProcessWorkpieceOverviewView.baml
+D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\InProcessWorkpieces\InProcessWorkpieceOverviewView.g.cs

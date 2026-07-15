@@ -116,6 +116,10 @@ services.AddSingleton<HomeViewModel>();
         // 该VM只消费HomeViewModel提供的内存快照，不持有设备连接，也不创建后台轮询。
         services.AddSingleton<RuntimeDiagnosticsViewModel>();
 
+        // ── 6.3 在制工件页面 VM（Singleton）──────────────────────────────
+        // 该VM只聚合当前内存中的不可变展示快照，绝不拥有设备连接或业务控制入口。
+        services.AddSingleton<InProcessWorkpieceOverviewViewModel>();
+
         return services;
     }
 }

@@ -55,6 +55,10 @@
                 Tag="runtimeDiagnostics" />
             <MenuItem
                 Click="MenuItem_Click"
+                Header="在制工件"
+                Tag="inProcessWorkpieces" />
+            <MenuItem
+                Click="MenuItem_Click"
                 Header="异常监控"
                 Tag="attentionMonitor" />
         </Menu>
