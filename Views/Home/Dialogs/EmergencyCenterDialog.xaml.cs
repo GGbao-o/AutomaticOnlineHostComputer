@@ -13,7 +13,9 @@ public partial class EmergencyCenterDialog : Window
 {
     private readonly HomeViewModel _viewModel;
     private readonly AttentionEventCenter _attentionEvents;
-    private int _frontActionInProgress;
+    // 页面级统一操作门：任一应急执行期间，其他应急按钮都不得再次进入底层。
+    // 该门闩只防UI重复调用，不改变各引擎自己的应急、锁和超时规则。
+    private int _emergencyActionInProgress;
     private static readonly string[] Line1Beds = { "ST108", "ST109", "ST111", "ST110", "ST112" };
     private static readonly string[] Line2Beds = { "ST606", "ST607", "ST608", "ST609", "ST610" };
 
@@ -76,11 +78,11 @@ public partial class EmergencyCenterDialog : Window
         }
     }
 
-    private async Task AppendFrontInfoAsync()
+    private async Task AppendFrontInfoAsync(int line)
     {
         try
         {
-            FrontInfoBox.Text += "\n\n" + await _viewModel.GetFrontEmergencyInfoAsync(SelectedFrontLine);
+            FrontInfoBox.Text += "\n\n" + await _viewModel.GetFrontEmergencyInfoAsync(line);
             FrontInfoBox.ScrollToEnd();
         }
         catch (Exception ex)
@@ -117,106 +119,123 @@ public partial class EmergencyCenterDialog : Window
     private async void RefreshFront_Click(object sender, RoutedEventArgs e) => await RefreshFrontInfoAsync();
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
+    private bool TryBeginEmergencyAction()
+    {
+        if (Interlocked.CompareExchange(ref _emergencyActionInProgress, 1, 0) != 0)
+        {
+            MessageBox.Show(this, "另一项应急操作正在执行，请等待当前操作完成。", "操作进行中",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return false;
+        }
+
+        SetEmergencyControlsEnabled(false);
+        return true;
+    }
+
+    private void EndEmergencyAction()
+    {
+        SetEmergencyControlsEnabled(true);
+        Interlocked.Exchange(ref _emergencyActionInProgress, 0);
+    }
+
+    private void SetEmergencyControlsEnabled(bool enabled)
+    {
+        ContinueFrontButton.IsEnabled = enabled;
+        DiscardFrontButton.IsEnabled = enabled;
+        ClearSkewButton.IsEnabled = enabled;
+        ClearBalanceButton.IsEnabled = enabled;
+        ClearGrindingButton.IsEnabled = enabled;
+        FrontLineBox.IsEnabled = enabled;
+        SkewLineBox.IsEnabled = enabled;
+        SkewBedBox.IsEnabled = enabled;
+        BalancePositionBox.IsEnabled = enabled;
+        GrindingTargetBox.IsEnabled = enabled;
+    }
+
     private async void ContinueFront_Click(object sender, RoutedEventArgs e)
     {
+        int line = SelectedFrontLine;
         if (MessageBox.Show(this,
-                $"确认允许{SelectedFrontLine}号线货叉继续当前板？\n\n" +
+                $"确认允许{line}号线货叉继续当前板？\n\n" +
                 "仅适用于：板已经稳定放在货叉待机位，但机械手安全退出或M801异常导致门闩未打开。\n\n" +
                 "请人工确认：\n1. 板稳定在货叉，机械手不持件；\n2. 机械手Z已回0并在本线安全Y；\n3. 货叉、机械手、前天车均未运动，现场无人处于危险区。\n\n" +
                 "系统还会实时复核M900/M901/M902、机械手Y/Z/持件状态并补发M801。不会自动移动设备，也不会自动恢复线体。",
                 "确认前端当前板继续", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        if (!TryBeginFrontAction()) return;
+        if (!TryBeginEmergencyAction()) return;
         try
         {
-            string result = await _viewModel.EmergencyContinueFrontPlateAsync(SelectedFrontLine);
-            RecordEmergency($"{SelectedFrontLine}号线", "前端在途继续", result);
+            string result = await _viewModel.EmergencyContinueFrontPlateAsync(line);
+            RecordEmergency($"{line}号线", "前端在途继续", result);
             FrontInfoBox.Text = result;
             ShowEmergencyFailureIfNeeded("前端当前板继续失败", result);
-            await AppendFrontInfoAsync();
+            await AppendFrontInfoAsync(line);
         }
         catch (Exception ex)
         {
-            RecordEmergencyException($"{SelectedFrontLine}号线", "前端在途继续", ex);
+            RecordEmergencyException($"{line}号线", "前端在途继续", ex);
             ShowEmergencyException("前端当前板继续异常", ex, text => FrontInfoBox.Text = text);
         }
-        finally { EndFrontAction(); }
+        finally { EndEmergencyAction(); }
     }
 
     private async void DiscardFront_Click(object sender, RoutedEventArgs e)
     {
+        int line = SelectedFrontLine;
         if (MessageBox.Show(this,
-                $"确认丢弃{SelectedFrontLine}号线前端当前工件并回Idle？\n\n" +
+                $"确认丢弃{line}号线前端当前工件并回Idle？\n\n" +
                 "请先人工确认工件已经移走或确定报废，机械手/货叉/双头镗/前天车均停止，磁铁和现场人员安全。\n\n" +
                 "系统会先清货叉M911~M914和双头镗R6108/R6104/R6102，全部成功后才清_currentWp、阶段和门闩。不会清缓存FIFO或前天车队列，也不会自动恢复线体。",
                 "确认丢弃前端当前工件", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        if (!TryBeginFrontAction()) return;
+        if (!TryBeginEmergencyAction()) return;
         try
         {
             string result = await _viewModel.EmergencyDiscardFrontCurrentAsync(
-                SelectedFrontLine, skipDeviceClear: false);
-            RecordEmergency($"{SelectedFrontLine}号线", "前端当前工件丢弃", result);
+                line, skipDeviceClear: false);
+            RecordEmergency($"{line}号线", "前端当前工件丢弃", result);
             FrontInfoBox.Text = result;
             if (await HandleDeviceClearFailureAsync(result,
                     () => _viewModel.EmergencyDiscardFrontCurrentAsync(
-                        SelectedFrontLine, skipDeviceClear: true),
+                        line, skipDeviceClear: true),
                     text => FrontInfoBox.Text = text,
-                    $"{SelectedFrontLine}号线", "前端当前工件丢弃"))
+                    $"{line}号线", "前端当前工件丢弃"))
             {
-                await AppendFrontInfoAsync();
+                await AppendFrontInfoAsync(line);
                 return;
             }
 
             ShowEmergencyFailureIfNeeded("前端当前工件丢弃失败", result);
-            await AppendFrontInfoAsync();
+            await AppendFrontInfoAsync(line);
         }
         catch (Exception ex)
         {
-            RecordEmergencyException($"{SelectedFrontLine}号线", "前端当前工件丢弃", ex);
+            RecordEmergencyException($"{line}号线", "前端当前工件丢弃", ex);
             ShowEmergencyException("前端当前工件丢弃异常", ex, text => FrontInfoBox.Text = text);
         }
-        finally { EndFrontAction(); }
-    }
-
-    private bool TryBeginFrontAction()
-    {
-        if (Interlocked.CompareExchange(ref _frontActionInProgress, 1, 0) != 0)
-        {
-            MessageBox.Show(this, "前端应急操作正在执行，请勿重复点击。", "操作进行中",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            return false;
-        }
-
-        ContinueFrontButton.IsEnabled = false;
-        DiscardFrontButton.IsEnabled = false;
-        return true;
-    }
-
-    private void EndFrontAction()
-    {
-        ContinueFrontButton.IsEnabled = true;
-        DiscardFrontButton.IsEnabled = true;
-        Interlocked.Exchange(ref _frontActionInProgress, 0);
+        finally { EndEmergencyAction(); }
     }
 
     private async void ClearSkew_Click(object sender, RoutedEventArgs e)
     {
+        int line = SelectedSkewLine;
+        string bed = SelectedSkewBed;
         if (MessageBox.Show(this,
-                $"确认执行斜床应急？\n\n线体: {SelectedSkewLine}号线\n斜床: {SelectedSkewBed}\n\n请确认已人工处理磁铁、工件、天车安全位置。系统会先取消并等待旧动作退出，最多6秒；超时不会释放锁或清缓存。",
+                $"确认执行斜床应急？\n\n线体: {line}号线\n斜床: {bed}\n\n请确认已人工处理磁铁、工件、天车安全位置。系统会先取消并等待旧动作退出，最多6秒；超时不会释放锁或清缓存。",
                 "确认斜床应急", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
+        if (!TryBeginEmergencyAction()) return;
         try
         {
-            var result = await _viewModel.EmergencyClearSkewBedAsync(SelectedSkewLine, SelectedSkewBed, skipDeviceClear: false);
-            RecordEmergency($"{SelectedSkewLine}号线", $"{SelectedSkewBed}斜床应急", result);
+            var result = await _viewModel.EmergencyClearSkewBedAsync(line, bed, skipDeviceClear: false);
+            RecordEmergency($"{line}号线", $"{bed}斜床应急", result);
             if (await HandleDeviceClearFailureAsync(result,
-                    () => _viewModel.EmergencyClearSkewBedAsync(SelectedSkewLine, SelectedSkewBed, skipDeviceClear: true),
+                    () => _viewModel.EmergencyClearSkewBedAsync(line, bed, skipDeviceClear: true),
                     text => SkewInfoBox.Text = text,
-                    $"{SelectedSkewLine}号线", $"{SelectedSkewBed}斜床应急"))
+                    $"{line}号线", $"{bed}斜床应急"))
                 return;
 
             SkewInfoBox.Text = result;
@@ -224,52 +243,58 @@ public partial class EmergencyCenterDialog : Window
         }
         catch (Exception ex)
         {
-            RecordEmergencyException($"{SelectedSkewLine}号线", $"{SelectedSkewBed}斜床应急", ex);
+            RecordEmergencyException($"{line}号线", $"{bed}斜床应急", ex);
             ShowEmergencyException("斜床应急异常", ex, text => SkewInfoBox.Text = text);
         }
+        finally { EndEmergencyAction(); }
     }
 
     private async void ClearBalance_Click(object sender, RoutedEventArgs e)
     {
+        string position = SelectedBalancePosition;
         if (MessageBox.Show(this,
-                $"确认执行动平衡应急？\n\n位置: {SelectedBalancePosition}\n\n系统会先取消并等待旧动作退出，最多6秒；退出后才释放残留锁并清实际来源缓存。不会写PLC信号，也不会控制机械手/磁铁。",
+                $"确认执行动平衡应急？\n\n位置: {position}\n\n系统会先取消并等待旧动作退出，最多6秒；退出后才释放残留锁并清实际来源缓存。不会写PLC信号，也不会控制机械手/磁铁。",
                 "确认动平衡应急", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
+        if (!TryBeginEmergencyAction()) return;
         try
         {
-            var result = await _viewModel.EmergencyClearBalancingPositionAsync(SelectedBalancePosition);
-            RecordEmergency("动平衡", $"{SelectedBalancePosition}动平衡应急", result);
+            var result = await _viewModel.EmergencyClearBalancingPositionAsync(position);
+            RecordEmergency("动平衡", $"{position}动平衡应急", result);
             BalanceInfoBox.Text = result;
             ShowEmergencyFailureIfNeeded("动平衡应急失败", result);
         }
         catch (Exception ex)
         {
-            RecordEmergencyException("动平衡", $"{SelectedBalancePosition}动平衡应急", ex);
+            RecordEmergencyException("动平衡", $"{position}动平衡应急", ex);
             ShowEmergencyException("动平衡应急异常", ex, text => BalanceInfoBox.Text = text);
         }
+        finally { EndEmergencyAction(); }
     }
 
     private async void ClearGrinding_Click(object sender, RoutedEventArgs e)
     {
+        string target = SelectedGrindingTarget;
         if (MessageBox.Show(this,
-                $"确认执行研磨应急？\n\n目标: {SelectedGrindingTarget}\n\nST701~ST704会先暂停新派发并取消目标旧动作，最多等待6秒确认退出；超时不会清状态或释放锁。随后尝试清PLC输出/参数，成功后再清Pending/状态。ST709只清上位机FIFO队头。",
+                $"确认执行研磨应急？\n\n目标: {target}\n\nST701~ST704会先暂停新派发并取消目标旧动作，最多等待6秒确认退出；超时不会清状态或释放锁。随后尝试清PLC输出/参数，成功后再清Pending/状态。ST709只清上位机FIFO队头。",
                 "确认研磨应急", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
         // 保存点击应急前的运行状态。第一次设备清零失败后引擎会保持暂停，
         // 二次“仅清软件”仍使用这个原始状态，成功后才能按原状态恢复派发。
         bool resumeAfterClear = _viewModel.IsGrindingRunning;
+        if (!TryBeginEmergencyAction()) return;
         try
         {
             var result = await _viewModel.EmergencyClearGrindingAsync(
-                SelectedGrindingTarget, skipDeviceClear: false, resumeAfterClear);
-            RecordEmergency("研磨", $"{SelectedGrindingTarget}研磨应急", result);
+                target, skipDeviceClear: false, resumeAfterClear);
+            RecordEmergency("研磨", $"{target}研磨应急", result);
             if (await HandleDeviceClearFailureAsync(result,
                     () => _viewModel.EmergencyClearGrindingAsync(
-                        SelectedGrindingTarget, skipDeviceClear: true, resumeAfterClear),
+                        target, skipDeviceClear: true, resumeAfterClear),
                     text => GrindingInfoBox.Text = text,
-                    "研磨", $"{SelectedGrindingTarget}研磨应急"))
+                    "研磨", $"{target}研磨应急"))
                 return;
 
             GrindingInfoBox.Text = result;
@@ -277,9 +302,10 @@ public partial class EmergencyCenterDialog : Window
         }
         catch (Exception ex)
         {
-            RecordEmergencyException("研磨", $"{SelectedGrindingTarget}研磨应急", ex);
+            RecordEmergencyException("研磨", $"{target}研磨应急", ex);
             ShowEmergencyException("研磨应急异常", ex, text => GrindingInfoBox.Text = text);
         }
+        finally { EndEmergencyAction(); }
     }
 
     private async Task<bool> HandleDeviceClearFailureAsync(string result, Func<Task<string>> softwareOnlyAction,

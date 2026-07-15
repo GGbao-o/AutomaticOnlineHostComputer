@@ -16,27 +16,30 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Menu Grid.Row="0" Background="#26323F" Foreground="White">
+        <Menu
+            Grid.Row="0"
+            Background="#26323F"
+            Foreground="White">
             <MenuItem
                 Click="MenuItem_Click"
                 Header="主界面"
                 Tag="main" />
-            <MenuItem
+            <!--<MenuItem
                 Click="MenuItem_Click"
                 Header="天车管理"
-                Tag="crane" />
+                Tag="crane" />-->
             <MenuItem
                 Click="MenuItem_Click"
                 Header="机器管理"
                 Tag="machine" />
-            <MenuItem
+            <!--<MenuItem
                 Click="MenuItem_Click"
                 Header="控制器管理"
                 Tag="controller" />
             <MenuItem
                 Click="MenuItem_Click"
                 Header="工艺管理"
-                Tag="process" />
+                Tag="process" />-->
             <MenuItem
                 Click="MenuItem_Click"
                 Header="运动参数设置"

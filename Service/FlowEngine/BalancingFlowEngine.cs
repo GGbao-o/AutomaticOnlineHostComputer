@@ -284,9 +284,15 @@ public sealed class BalancingFlowEngine : IDisposable
         bool releasedM3 = false;
         string m2Source = string.Empty;
         string m3Source = string.Empty;
+        int m2DisplayVersionToClear = 0;
+        int m3DisplayVersionToClear = 0;
 
         lock (_emergencyLock)
         {
+            // 只记住当前展示版本。应急超时会在下方提前返回并保留证据；
+            // 只有软件清理真正完成后才按版本清理对应Tooltip/在制显示。
+            if (position is "M817" or "M818" or "M710") m2DisplayVersionToClear = _m2DisplayVersion;
+            if (position is "M700" or "M821" or "M720") m3DisplayVersionToClear = _m3DisplayVersion;
             touchesM2 =
                 (_m2EmergencySource == "M817" && position is "M817" or "M818" or "M710") ||
                 (_m2EmergencySource == "M818" && position is "M818" or "M710");
@@ -357,6 +363,10 @@ public sealed class BalancingFlowEngine : IDisposable
             if (touchesM2) { ClearM2Busy(); _m2EmergencySource = string.Empty; logs.Add("M2忙标志=已清"); }
             if (touchesM3) { ClearM3Busy(); _m3EmergencySource = string.Empty; logs.Add("M3忙标志=已清"); }
         }
+
+        // 仅清展示字段，不改设备、缓存、锁或动作版本。版本校验防止旧应急清掉新任务。
+        if (m2DisplayVersionToClear != 0) { ClearM2Display(m2DisplayVersionToClear); logs.Add("M2页面显示=已清"); }
+        if (m3DisplayVersionToClear != 0) { ClearM3Display(m3DisplayVersionToClear); logs.Add("M3页面显示=已清"); }
 
         if (!releasedM2 && !releasedM3)
             logs.Add("应急残留锁=无(已由旧动作finally释放或原本未持有)");
@@ -958,6 +968,8 @@ public sealed class BalancingFlowEngine : IDisposable
         bool holdingWorkpiece = false; // X11确认吸住后才算工件真的在机械手2上
         bool placedOnM710 = false;
         bool m711Notified = false;
+        bool keepDisplayForManualConfirmation = false; // 只控制页面证据清理，不参与任何动作判断
+        WorkpieceCache? displayWorkpiece = null;
         void ReleaseM2RackLocks(string reason)
         {
             // M2可能同时拿M817+M818: M817是来源架, M818是M817→M710路径保护锁。
@@ -1030,6 +1042,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 throw new InvalidOperationException($"M2检测到{pickReg}=有板但工件缓存缺失, 当前Keys=[{CacheKeysText}], 已暂停, 禁止默认160mm取料");
             }
             var trackedWorkpiece = trackedWp.Value;
+            displayWorkpiece = trackedWorkpiece;
             // 仅记录页面展示身份；不参与后续直径、坐标、X11或任何放行判断。
             SetM2Display(actionVersion, trackedWorkpiece, $"准备从{pickReg}取料");
             Console.WriteLine($"[平衡引擎] [M2] ① 取料 {trackedWorkpiece.IdentityText} 工件直径d={d}");
@@ -1188,18 +1201,27 @@ public sealed class BalancingFlowEngine : IDisposable
             }
             else if (holdingWorkpiece && !placedOnM710)
             {
+                keepDisplayForManualConfirmation = true;
+                if (displayWorkpiece.HasValue)
+                    SetM2Display(actionVersion, displayWorkpiece.Value, "机械手2已持件，尚未放到ST008/M710，需人工确认");
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M2已吸住工件但未放到ST008/M710, 引擎已暂停, 请人工确认机械手2/工件位置");
                 OnSafetyAlarm?.Invoke($"动平衡机械手2已吸住工件但未放到ST008/M710。引擎已暂停，请人工确认机械手和工件位置。异常：{ex.Message}");
             }
             else if (mag && !placedOnM710)
             {
+                keepDisplayForManualConfirmation = true;
+                if (displayWorkpiece.HasValue)
+                    SetM2Display(actionVersion, displayWorkpiece.Value, "机械手2磁铁状态异常，工件位置需人工确认");
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M2磁铁处于打开/异常状态且未完成放料, 引擎已暂停, 请人工确认");
                 OnSafetyAlarm?.Invoke($"动平衡机械手2磁铁处于打开或异常状态，且未完成放料。引擎已暂停，请人工确认。异常：{ex.Message}");
             }
             if (placedOnM710 && !m711Notified)
             {
+                keepDisplayForManualConfirmation = true;
+                if (displayWorkpiece.HasValue)
+                    SetM2Display(actionVersion, displayWorkpiece.Value, "实物可能已在ST008/M710，M711未闭环，需人工确认");
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M2已把工件放到ST008/M710但M711未确认, 引擎已暂停, 请人工确认PLC信号");
                 OnSafetyAlarm?.Invoke($"动平衡机械手2已把工件放到ST008/M710，但M711未确认。引擎已暂停，请人工确认PLC信号。异常：{ex.Message}");
@@ -1220,7 +1242,10 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 Console.WriteLine("[平衡引擎] [M2] 旧动作finally: 不清新动作忙标志/上下文");
             }
-            ClearM2Display(actionVersion);
+            if (keepDisplayForManualConfirmation && IsM2ActionCurrent(actionVersion))
+                Console.WriteLine($"[平衡引擎] [M2] 保留页面工件身份: 动作版本={actionVersion}，等待人工确认/应急成功清理");
+            else
+                ClearM2Display(actionVersion);
             FinishM2Action(actionVersion, actionCompletion);
         }
     }
@@ -1250,6 +1275,8 @@ public sealed class BalancingFlowEngine : IDisposable
         bool placedOnM720 = false;
         bool m721Notified = false;
         bool grindingCacheNotified = false; // M720物理放料后, 研磨FIFO缓存必须写入成功
+        bool keepDisplayForManualConfirmation = false; // 只控制页面证据清理，不参与任何动作判断
+        WorkpieceCache? displayWorkpiece = null;
         try
         {
             if (_lockM821 != null)
@@ -1343,6 +1370,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 BoreType = 1,
                 Length = 0
             };
+            displayWorkpiece = m3DisplayWorkpiece;
             SetM3Display(actionVersion, m3DisplayWorkpiece, $"准备从{pickReg}取料");
             
             // 取料YZ: GetArmCoord自动判断配置→ 一般不从数据库读取 从配置文件 数据库的不适用机械手
@@ -1543,24 +1571,36 @@ public sealed class BalancingFlowEngine : IDisposable
             }
             else if (holdingWorkpiece && !placedOnM720)
             {
+                keepDisplayForManualConfirmation = true;
+                if (displayWorkpiece.HasValue)
+                    SetM3Display(actionVersion, displayWorkpiece.Value, "机械手3已持件，尚未放到ST010/M720，需人工确认");
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M3已吸住工件但未放到M720/ST010, 引擎已暂停, 请人工确认机械手3/工件位置");
                 OnSafetyAlarm?.Invoke($"动平衡机械手3已吸住工件但未放到M720/ST010。引擎已暂停，请人工确认机械手和工件位置。异常：{ex.Message}");
             }
             else if (mag && !placedOnM720)
             {
+                keepDisplayForManualConfirmation = true;
+                if (displayWorkpiece.HasValue)
+                    SetM3Display(actionVersion, displayWorkpiece.Value, "机械手3磁铁状态异常，工件位置需人工确认");
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M3磁铁处于打开/异常状态且未完成放料, 引擎已暂停, 请人工确认");
                 OnSafetyAlarm?.Invoke($"动平衡机械手3磁铁处于打开或异常状态，且未完成放料。引擎已暂停，请人工确认。异常：{ex.Message}");
             }
             if (placedOnM720 && !m721Notified)
             {
+                keepDisplayForManualConfirmation = true;
+                if (displayWorkpiece.HasValue)
+                    SetM3Display(actionVersion, displayWorkpiece.Value, "实物可能已在ST010/M720，M721未闭环，需人工确认");
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M3已把工件放到M720/ST010但M721未确认, 引擎已暂停, 请人工确认PLC信号/研磨缓存");
                 OnSafetyAlarm?.Invoke($"动平衡机械手3已把工件放到M720/ST010，但M721未确认。引擎已暂停，请确认PLC信号和研磨缓存。异常：{ex.Message}");
             }
             if (placedOnM720 && m721Notified && !grindingCacheNotified)
             {
+                keepDisplayForManualConfirmation = true;
+                if (displayWorkpiece.HasValue)
+                    SetM3Display(actionVersion, displayWorkpiece.Value, "M721已确认但研磨缓存未写入，需人工补录");
                 _paused = true;
                 Console.WriteLine("[平衡引擎] ⚠ M3已把工件放到M720/ST010且M721已通知, 但研磨缓存未写入, 引擎已暂停, 请人工确认/补录缓存");
                 OnSafetyAlarm?.Invoke($"动平衡机械手3已把工件放到M720/ST010且M721已通知，但研磨缓存未写入。引擎已暂停，请人工补录缓存。异常：{ex.Message}");
@@ -1582,7 +1622,10 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 Console.WriteLine("[平衡引擎] [M3] 旧动作finally: 不清新动作忙标志/上下文");
             }
-            ClearM3Display(actionVersion);
+            if (keepDisplayForManualConfirmation && IsM3ActionCurrent(actionVersion))
+                Console.WriteLine($"[平衡引擎] [M3] 保留页面工件身份: 动作版本={actionVersion}，等待人工确认/应急成功清理");
+            else
+                ClearM3Display(actionVersion);
             FinishM3Action(actionVersion, actionCompletion);
         }
     }

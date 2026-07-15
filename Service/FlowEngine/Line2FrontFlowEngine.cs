@@ -269,6 +269,10 @@ public sealed class Line2FrontFlowEngine : IDisposable
     /// <summary>1号线设备在线状态快照（只读缓存，UI绑定不另建TCP连接）</summary>
     public sealed class Line2DeviceStatus
     {
+        /// <summary>最近一次完成整轮页面状态维护的时间；仅供UI判断数据是否过期。</summary>
+        public DateTime SnapshotAtUtc { get; set; }
+        /// <summary>前端暂停时立即标记最后已知值；仅供后端快照/UI显示，不参与控制。</summary>
+        public bool DisplaySnapshotPaused { get; set; }
         public bool Manipulator1Connected { get; set; }
         public int Manipulator1Y { get; set; }
         public bool Manipulator1Safe { get; set; }
@@ -396,6 +400,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
             Console.WriteLine("[Line2Front] 引擎已在运行"); return;
         }
         _paused = false;
+        DeviceStatus.DisplaySnapshotPaused = false;
+        DeviceStatus.SnapshotAtUtc = default;
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("  [Line2Front] 2号线前端流程引擎启动");
         Console.WriteLine($"  机械手1安全Y: 本线={_cfg.SkewBed.GetManipulator1SafeYForLine(2)}mm, 另一安全点={_cfg.SkewBed.GetManipulator1SafeYForLine(1)}mm  安全高度={_cfg.Grinding.SafeZHeight}mm");
@@ -409,10 +415,10 @@ public sealed class Line2FrontFlowEngine : IDisposable
     public void Stop() { Console.WriteLine("[Line2Front] ▶ 停止..."); _engineCts.Cancel(); }
 
     /// <summary>暂停 — 主循环跳过一次循环(可恢复)。</summary>
-    public void Pause() { _paused = true; Console.WriteLine("[Line2Front] ⏸ 暂停"); }
+    public void Pause() { _paused = true; DeviceStatus.DisplaySnapshotPaused = true; Console.WriteLine("[Line2Front] ⏸ 暂停"); }
 
     /// <summary>恢复 — 清除暂停标志，主循环继续执行。</summary>
-    public void Resume() { _paused = false; Console.WriteLine("[Line2Front] ▶ 恢复"); }
+    public void Resume() { DeviceStatus.SnapshotAtUtc = default; DeviceStatus.DisplaySnapshotPaused = false; _paused = false; Console.WriteLine("[Line2Front] ▶ 恢复"); }
 
     // ═══════════════════════════════════════════════════════════════════
     //  前端在途应急（仅由人工应急中心调用；正常主循环不调用）
@@ -1616,6 +1622,11 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 ds.MarkerStatusText = ds.MarkerConnected
                     ? MarkerSharePath
                     : markerSnapshot.Error ?? "共享目录不可访问";
+
+                // 只记录本轮页面状态已经维护完成；不触发额外设备读取，也不参与流程放行。
+                // 若Pause恰好发生在本轮收尾，保留暂停标记，不能把旧物理信号重新标成当前证据。
+                ds.DisplaySnapshotPaused = _paused;
+                ds.SnapshotAtUtc = DateTime.UtcNow;
 
                 // ── 等待下一轮 ──
                 LogSlowCycleIfNeeded(System.Diagnostics.Stopwatch.GetElapsedTime(cycleIoStarted));

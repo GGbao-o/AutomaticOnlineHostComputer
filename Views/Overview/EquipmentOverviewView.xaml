@@ -415,10 +415,12 @@
                     <UniformGrid Margin="6,0,6,10" Columns="4">
                         <controls:OverviewDeviceCard
                             Title="{Binding Grinder1.Title}"
-                            Btn1="急停"
+                            Btn1="急停(未配置)"
                             Btn1Command="{Binding Grinder1.EStopCommand}"
-                            Btn2="清除报警"
+                            Btn1Tip="当前点位表未定义写入地址，请使用现场设备操作面板"
+                            Btn2="清报警(只读)"
                             Btn2Command="{Binding Grinder1.ClearAlarmCommand}"
+                            Btn2Tip="当前报警位只读，请使用现场设备操作面板"
                             Btn3="读状态"
                             Btn3Command="{Binding Grinder1.ReadStatusCommand}"
                             Btn4="数据完成"
@@ -441,10 +443,12 @@
                             Line5="{Binding Grinder1.Line5}" />
                         <controls:OverviewDeviceCard
                             Title="{Binding Grinder2.Title}"
-                            Btn1="急停"
+                            Btn1="急停(未配置)"
                             Btn1Command="{Binding Grinder2.EStopCommand}"
-                            Btn2="清除报警"
+                            Btn1Tip="当前点位表未定义写入地址，请使用现场设备操作面板"
+                            Btn2="清报警(只读)"
                             Btn2Command="{Binding Grinder2.ClearAlarmCommand}"
+                            Btn2Tip="当前报警位只读，请使用现场设备操作面板"
                             Btn3="读状态"
                             Btn3Command="{Binding Grinder2.ReadStatusCommand}"
                             Btn4="数据完成"
@@ -467,10 +471,12 @@
                             Line5="{Binding Grinder2.Line5}" />
                         <controls:OverviewDeviceCard
                             Title="{Binding Grinder3.Title}"
-                            Btn1="急停"
+                            Btn1="急停(未配置)"
                             Btn1Command="{Binding Grinder3.EStopCommand}"
-                            Btn2="清除报警"
+                            Btn1Tip="当前点位表未定义写入地址，请使用现场设备操作面板"
+                            Btn2="清报警(只读)"
                             Btn2Command="{Binding Grinder3.ClearAlarmCommand}"
+                            Btn2Tip="当前报警位只读，请使用现场设备操作面板"
                             Btn3="读状态"
                             Btn3Command="{Binding Grinder3.ReadStatusCommand}"
                             Btn4="数据完成"
@@ -493,10 +499,12 @@
                             Line5="{Binding Grinder3.Line5}" />
                         <controls:OverviewDeviceCard
                             Title="{Binding Grinder4.Title}"
-                            Btn1="急停"
+                            Btn1="急停(未配置)"
                             Btn1Command="{Binding Grinder4.EStopCommand}"
-                            Btn2="清除报警"
+                            Btn1Tip="当前点位表未定义写入地址，请使用现场设备操作面板"
+                            Btn2="清报警(只读)"
                             Btn2Command="{Binding Grinder4.ClearAlarmCommand}"
+                            Btn2Tip="当前报警位只读，请使用现场设备操作面板"
                             Btn3="读状态"
                             Btn3Command="{Binding Grinder4.ReadStatusCommand}"
                             Btn4="数据完成"

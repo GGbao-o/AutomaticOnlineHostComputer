@@ -167,7 +167,11 @@ public sealed class Line1RearFlowEngine : IDisposable
     {
         Dictionary<string, WorkpieceCache> cached;
         lock (_wpLock) cached = new Dictionary<string, WorkpieceCache>(_wps);
-        bool signalAvailable = _frontDs?.RackConnected == true;
+        var front = _frontDs;
+        bool sourcePaused = front?.DisplaySnapshotPaused == true;
+        bool signalAvailable = front?.RackConnected == true
+                               && !sourcePaused
+                               && DisplaySnapshotFreshness.IsFresh(front.SnapshotAtUtc, DateTime.UtcNow);
         return new[]
         {
             CreateRackSnapshot("ST105"), CreateRackSnapshot("ST101"), CreateRackSnapshot("ST106")
@@ -175,7 +179,8 @@ public sealed class Line1RearFlowEngine : IDisposable
 
         TransferRackSnapshot CreateRackSnapshot(string code) => new(code, signalAvailable,
             signalAvailable && RackHasPhysicalPlateSnapshot(code),
-            cached.TryGetValue(code, out var wp) ? WorkpieceDisplaySnapshot.From(wp) : null);
+            cached.TryGetValue(code, out var wp) ? WorkpieceDisplaySnapshot.From(wp) : null,
+            front?.SnapshotAtUtc ?? default, sourcePaused);
     }
 
     private void SetRearCraneTask(WorkpieceCache wp, string stage, string source, string target, bool manual = false, string manualText = "")
@@ -192,6 +197,8 @@ public sealed class Line1RearFlowEngine : IDisposable
 
     public sealed class Line1RearDeviceStatus
     {
+        /// <summary>最近一次完成整轮后端页面状态维护的时间；仅供UI判断数据是否过期。</summary>
+        public DateTime SnapshotAtUtc { get; set; }
         public bool CraneRearConnected { get; set; }
         public int CycleCount { get; set; }
         public bool Skew1Connected, Skew2Connected, Skew3Connected, Skew4Connected, Skew5Connected;
@@ -439,6 +446,8 @@ public sealed class Line1RearFlowEngine : IDisposable
 
                 // ── 刷新后天车连接状态到UI ──
                 try { ds.CraneRearConnected = _craneCache.GetOrCreateService(CraneRearNo).IsConnected; } catch { }
+                // 展示时间戳不参与调度、锁、握手或设备动作。
+                ds.SnapshotAtUtc = DateTime.UtcNow;
                 if (_cycleCount % 50 == 1) Console.WriteLine($"└────── [后引擎] 第 {_cycleCount} 轮结束 ──────");
                 // DoLoad/DoUnload刚完成→缩短延迟, 快速响应新任务; 否则正常500ms
                 int delay = _fastNextCycle ? 50 : _cfg.Grinding.PollIntervalMs;

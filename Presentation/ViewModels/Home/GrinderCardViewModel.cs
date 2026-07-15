@@ -10,7 +10,7 @@ namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 /// 研磨机卡片 ViewModel（主页面黄台总览区）。
 /// <para>不自行创建 Modbus 连接，由 GrinderPoll 注入共享 PlcGrinderService，
 /// 避免同一 IP 被卡片和 GrinderPoll 双重连接。</para>
-/// <para>8 个按钮：急停/清除报警（占位）+ 读状态 + 5 个流程握手信号（手动调试用）。</para>
+/// <para>急停/清报警地址尚未定义，因此对应命令明确禁用；其余按钮为读状态和流程握手调试。</para>
 /// </summary>
 public sealed class GrinderCardViewModel : ObservableObject, IDisposable
 {
@@ -27,9 +27,10 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
         _type = type;
         Title = name;
 
-        // 按钮1~3：急停 / 清除报警 / 读状态
-        EStopCommand        = new AsyncRelayCommand(EStopAsync,        nameof(EStopCommand));
-        ClearAlarmCommand   = new AsyncRelayCommand(ClearAlarmAsync,   nameof(ClearAlarmCommand));
+        // 点位表没有定义研磨机急停/清报警写地址。用明确禁用的命令避免操作员
+        // 把原来的占位日志误认为设备已经执行，且绝不虚构或试写任何寄存器。
+        EStopCommand        = DisabledCommand.Instance;
+        ClearAlarmCommand   = DisabledCommand.Instance;
         ReadStatusCommand   = new AsyncRelayCommand(ReadStatusOnceAsync, nameof(ReadStatusCommand));
 
         // 按钮4~8：5 个流程握手信号（手动调试用，3 秒长信号）
@@ -166,36 +167,6 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  按钮 1 — 急停（占位）
-    // ═══════════════════════════════════════════════════════════════
-
-    private async Task EStopAsync()
-    {
-        Console.WriteLine($"[GrinderCardVM] [{_name}] ▶ 急停按钮（占位：研磨机点位表无独立急停寄存器）");
-        if (_svc == null || !_svc.IsConnected)
-        {
-            Console.WriteLine($"[GrinderCardVM] [{_name}] ✘ 未连接，急停无效");
-            return;
-        }
-        await Task.CompletedTask;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  按钮 2 — 清除报警（占位）
-    // ═══════════════════════════════════════════════════════════════
-
-    private async Task ClearAlarmAsync()
-    {
-        Console.WriteLine($"[GrinderCardVM] [{_name}] ▶ 清除报警按钮（占位：报警位只读）");
-        if (_svc == null || !_svc.IsConnected)
-        {
-            Console.WriteLine($"[GrinderCardVM] [{_name}] ✘ 未连接，清除无效");
-            return;
-        }
-        await Task.CompletedTask;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
     //  按钮 3 — 手动读状态
     // ═══════════════════════════════════════════════════════════════
 
@@ -279,5 +250,17 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
         if (_disposed) return;
         _disposed = true;
         Console.WriteLine($"[GrinderCardVM] [{_name}] 已释放");
+    }
+
+    /// <summary>
+    /// 永久不可执行命令。专用于尚无协议地址的只读占位能力，
+    /// 不持有服务、回调或设备资源。
+    /// </summary>
+    private sealed class DisabledCommand : ICommand
+    {
+        public static DisabledCommand Instance { get; } = new();
+        public event EventHandler? CanExecuteChanged { add { } remove { } }
+        public bool CanExecute(object? parameter) => false;
+        public void Execute(object? parameter) { }
     }
 }

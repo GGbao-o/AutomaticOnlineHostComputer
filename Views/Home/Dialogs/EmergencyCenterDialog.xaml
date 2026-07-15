@@ -96,6 +96,7 @@
                         VerticalScrollBarVisibility="Auto"
                         AcceptsReturn="True" />
                     <Button
+                        x:Name="ClearSkewButton"
                         Grid.Row="2"
                         Margin="0,12,0,0"
                         HorizontalAlignment="Right"
@@ -132,6 +133,7 @@
                         VerticalScrollBarVisibility="Auto"
                         AcceptsReturn="True" />
                     <Button
+                        x:Name="ClearBalanceButton"
                         Grid.Row="2"
                         Margin="0,12,0,0"
                         HorizontalAlignment="Right"
@@ -167,6 +169,7 @@
                         VerticalScrollBarVisibility="Auto"
                         AcceptsReturn="True" />
                     <Button
+                        x:Name="ClearGrindingButton"
                         Grid.Row="2"
                         Margin="0,12,0,0"
                         HorizontalAlignment="Right"

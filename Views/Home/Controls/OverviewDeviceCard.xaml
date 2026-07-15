@@ -60,6 +60,7 @@
                         Background="{Binding Btn1Brush, ElementName=Root, FallbackValue=#2C86C8}"
                         Foreground="White" FontSize="11" Margin="1" Padding="2"
                         BorderThickness="0" Cursor="Hand"
+                        ToolTipService.ShowOnDisabled="True"
                         ToolTip="{Binding Btn1Tip, ElementName=Root}">
                     <TextBlock Text="{Binding Btn1, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
                 </Button>
@@ -68,6 +69,7 @@
                         Background="{Binding Btn2Brush, ElementName=Root, FallbackValue=#2C86C8}"
                         Foreground="White" FontSize="11" Margin="1" Padding="2"
                         BorderThickness="0" Cursor="Hand"
+                        ToolTipService.ShowOnDisabled="True"
                         ToolTip="{Binding Btn2Tip, ElementName=Root}">
                     <TextBlock Text="{Binding Btn2, ElementName=Root}" TextWrapping="Wrap" HorizontalAlignment="Center" />
                 </Button>

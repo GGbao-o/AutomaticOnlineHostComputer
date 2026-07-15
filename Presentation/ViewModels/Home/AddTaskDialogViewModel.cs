@@ -78,7 +78,8 @@ public sealed class AddTaskDialogViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 基础校验：版号、序号不能为空；版号和序号允许包含英文符号。
+    /// 基础校验：人工入口与ERP入口保持相同的关键尺寸约束，
+    /// 避免零值、负数和非有限数进入后续参数及坐标计算。
     /// </summary>
     public bool Validate(out string message)
     {
@@ -103,6 +104,36 @@ public sealed class AddTaskDialogViewModel : ObservableObject
         if (!TryParseBoringRegisterValue(InnerTaperText, out _validatedInnerTaper))
         {
             message = "内孔锥度必须>0且<=655.35";
+            return false;
+        }
+
+        if (!double.IsFinite(Length) || Length <= 0)
+        {
+            message = "长度必须是大于0的有效数值";
+            return false;
+        }
+
+        if (!double.IsFinite(Diameter) || Diameter <= 0)
+        {
+            message = "直径必须是大于0的有效数值";
+            return false;
+        }
+
+        if (Math.Abs(PlugHole - 70) > 0.001 && Math.Abs(PlugHole - 100) > 0.001)
+        {
+            message = "堵孔只能选择70或100";
+            return false;
+        }
+
+        if (!double.IsFinite(LeftPlugThickness) || LeftPlugThickness <= 0)
+        {
+            message = "左堵厚必须是大于0的有效数值";
+            return false;
+        }
+
+        if (!double.IsFinite(RightPlugThickness) || RightPlugThickness <= 0)
+        {
+            message = "右堵厚必须是大于0的有效数值";
             return false;
         }
 

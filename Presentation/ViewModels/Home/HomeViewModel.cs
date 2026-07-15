@@ -748,23 +748,54 @@ public sealed class HomeViewModel : ObservableObject
     /// </summary>
     private void SyncSharedFrontCards(Dictionary<string, StationCardViewModel> cards)
     {
-        var line1 = _line1Engine is { IsRunning: true } ? _line1Engine.DeviceStatus : null;
-        var line2 = _line2Engine is { IsRunning: true } ? _line2Engine.DeviceStatus : null;
+        var line1Engine = _line1Engine;
+        var line2Engine = _line2Engine;
+        var line1 = line1Engine is { IsRunning: true } ? line1Engine.DeviceStatus : null;
+        var line2 = line2Engine is { IsRunning: true } ? line2Engine.DeviceStatus : null;
         if (line1 == null && line2 == null)
         {
             MarkCardsNotStarted(cards, "ST001", "ST002");
             return;
         }
 
+        // 两条前端都维护同一组共享设备。页面只选择最新且未过期的整轮快照，
+        // 避免1号线暂停后的旧绿色状态覆盖2号线较新的实际结果。
+        DateTime nowUtc = DateTime.UtcNow;
+        bool line1Fresh = line1 != null
+                          && line1Engine?.IsPaused != true
+                          && DisplaySnapshotFreshness.IsFresh(line1.SnapshotAtUtc, nowUtc);
+        bool line2Fresh = line2 != null
+                          && line2Engine?.IsPaused != true
+                          && DisplaySnapshotFreshness.IsFresh(line2.SnapshotAtUtc, nowUtc);
+
+        if (!line1Fresh && !line2Fresh)
+        {
+            bool paused = line1Engine?.IsPaused == true || line2Engine?.IsPaused == true;
+            string state = paused ? "暂停/最后已知" : "数据过期";
+            DateTime latest = new[] { line1?.SnapshotAtUtc ?? default, line2?.SnapshotAtUtc ?? default }.Max();
+            string detail = latest == default
+                ? "等待前端完成首轮状态采集"
+                : $"最近快照 {latest.ToLocalTime():HH:mm:ss}，不作为当前设备证据";
+            foreach (string code in new[] { "ST001", "ST002" })
+            {
+                if (!cards.TryGetValue(code, out var card)) continue;
+                card.ConnectedBrush = Brushes.Gray;
+                card.Status1 = state;
+                card.Status1Brush = Brushes.Orange;
+                card.Status2 = detail;
+            }
+            return;
+        }
+
+        bool useLine1 = line1Fresh && (!line2Fresh || line1!.SnapshotAtUtc >= line2!.SnapshotAtUtc);
+
         if (cards.TryGetValue("ST001", out var rackCard))
         {
-            bool line1RackOk = line1?.RackConnected == true;
-            bool line2RackOk = line2?.RackConnected == true;
-            bool connected = line1RackOk || line2RackOk;
-            bool requestPickup = line1RackOk
-                ? line1!.RackRequestPickup
-                : line2RackOk && line2!.RackRequestPickup;
-            int plateLength = line1RackOk ? line1!.RackPlateLength : line2?.RackPlateLength ?? 0;
+            bool line1RackOk = line1Fresh && line1?.RackConnected == true;
+            bool line2RackOk = line2Fresh && line2?.RackConnected == true;
+            bool connected = useLine1 ? line1!.RackConnected : line2!.RackConnected;
+            bool requestPickup = connected && (useLine1 ? line1!.RackRequestPickup : line2!.RackRequestPickup);
+            int plateLength = useLine1 ? line1!.RackPlateLength : line2!.RackPlateLength;
 
             rackCard.ConnectedBrush = connected ? Brushes.LimeGreen : Brushes.Gray;
             rackCard.Status1 = connected ? (requestPickup ? "请求取料" : "空闲") : "断开";
@@ -790,11 +821,9 @@ public sealed class HomeViewModel : ObservableObject
 
         if (cards.TryGetValue("ST002", out var manipulatorCard))
         {
-            bool useLine1 = line1?.Manipulator1Connected == true;
-            bool useLine2 = !useLine1 && line2?.Manipulator1Connected == true;
-            bool connected = useLine1 || useLine2;
-            bool safe = useLine1 ? line1!.Manipulator1Safe : useLine2 && line2!.Manipulator1Safe;
-            int y = useLine1 ? line1!.Manipulator1Y : useLine2 ? line2!.Manipulator1Y : 0;
+            bool connected = useLine1 ? line1!.Manipulator1Connected : line2!.Manipulator1Connected;
+            bool safe = connected && (useLine1 ? line1!.Manipulator1Safe : line2!.Manipulator1Safe);
+            int y = useLine1 ? line1!.Manipulator1Y : line2!.Manipulator1Y;
 
             manipulatorCard.ConnectedBrush = connected ? Brushes.LimeGreen : Brushes.Gray;
             manipulatorCard.Status1 = connected ? (safe ? "安全位" : $"Y={y}") : "断开";
@@ -891,15 +920,17 @@ public sealed class HomeViewModel : ObservableObject
             var engine = _line1Engine;
             var ds = engine?.DeviceStatus;
             bool running = engine?.IsRunning == true;
-            AddCommunicationDiagnostic(items, "1号线前端", "机械手1", running, ds?.Manipulator1Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线前端", "货叉", running, ds?.ForkConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线前端", "总上料架/中转架PLC", running, ds?.RackConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线前端", "前天车", running, ds?.CraneFrontConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线前端", "双头镗", running, ds?.BoringConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线前端", "打号机共享目录", running, ds?.MarkerConnected == true, nowUtc);
-            AddFreshnessDiagnostic(items, "1号线前端", "货叉信号", running,
+            bool paused = engine?.IsPaused == true;
+            DateTime snapshotAtUtc = ds?.SnapshotAtUtc ?? default;
+            AddCommunicationDiagnostic(items, "1号线前端", "机械手1", running, paused, snapshotAtUtc, ds?.Manipulator1Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "货叉", running, paused, snapshotAtUtc, ds?.ForkConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "总上料架/中转架PLC", running, paused, snapshotAtUtc, ds?.RackConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "前天车", running, paused, snapshotAtUtc, ds?.CraneFrontConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "双头镗", running, paused, snapshotAtUtc, ds?.BoringConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "打号机共享目录", running, paused, snapshotAtUtc, ds?.MarkerConnected == true, nowUtc);
+            AddFreshnessDiagnostic(items, "1号线前端", "货叉信号", running, paused,
                 ds?.ForkSnapshotValid == true, ds?.ForkSnapshotAtUtc ?? default, nowUtc);
-            AddFreshnessDiagnostic(items, "1号线前端", "双头镗信号", running,
+            AddFreshnessDiagnostic(items, "1号线前端", "双头镗信号", running, paused,
                 ds?.BoringSnapshotValid == true, ds?.BoringSnapshotAtUtc ?? default, nowUtc);
         });
 
@@ -908,15 +939,17 @@ public sealed class HomeViewModel : ObservableObject
             var engine = _line2Engine;
             var ds = engine?.DeviceStatus;
             bool running = engine?.IsRunning == true;
-            AddCommunicationDiagnostic(items, "2号线前端", "机械手1", running, ds?.Manipulator1Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线前端", "货叉", running, ds?.ForkConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线前端", "总上料架/中转架PLC", running, ds?.RackConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线前端", "前天车", running, ds?.CraneFrontConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线前端", "双头镗", running, ds?.BoringConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线前端", "打号机共享目录", running, ds?.MarkerConnected == true, nowUtc);
-            AddFreshnessDiagnostic(items, "2号线前端", "货叉信号", running,
+            bool paused = engine?.IsPaused == true;
+            DateTime snapshotAtUtc = ds?.SnapshotAtUtc ?? default;
+            AddCommunicationDiagnostic(items, "2号线前端", "机械手1", running, paused, snapshotAtUtc, ds?.Manipulator1Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "货叉", running, paused, snapshotAtUtc, ds?.ForkConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "总上料架/中转架PLC", running, paused, snapshotAtUtc, ds?.RackConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "前天车", running, paused, snapshotAtUtc, ds?.CraneFrontConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "双头镗", running, paused, snapshotAtUtc, ds?.BoringConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "打号机共享目录", running, paused, snapshotAtUtc, ds?.MarkerConnected == true, nowUtc);
+            AddFreshnessDiagnostic(items, "2号线前端", "货叉信号", running, paused,
                 ds?.ForkSnapshotValid == true, ds?.ForkSnapshotAtUtc ?? default, nowUtc);
-            AddFreshnessDiagnostic(items, "2号线前端", "双头镗信号", running,
+            AddFreshnessDiagnostic(items, "2号线前端", "双头镗信号", running, paused,
                 ds?.BoringSnapshotValid == true, ds?.BoringSnapshotAtUtc ?? default, nowUtc);
         });
 
@@ -926,12 +959,14 @@ public sealed class HomeViewModel : ObservableObject
             var engine = _line1RearEngine;
             var ds = engine?.DeviceStatus;
             bool running = engine?.IsRunning == true;
-            AddCommunicationDiagnostic(items, "1号线后端", "后天车", running, ds?.CraneRearConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线后端", "ST108", running, ds?.Skew1Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线后端", "ST109", running, ds?.Skew2Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线后端", "ST110", running, ds?.Skew3Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线后端", "ST111", running, ds?.Skew4Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "1号线后端", "ST112", running, ds?.Skew5Connected == true, nowUtc);
+            bool paused = engine?.IsPaused == true;
+            DateTime snapshotAtUtc = ds?.SnapshotAtUtc ?? default;
+            AddCommunicationDiagnostic(items, "1号线后端", "后天车", running, paused, snapshotAtUtc, ds?.CraneRearConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST108", running, paused, snapshotAtUtc, ds?.Skew1Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST109", running, paused, snapshotAtUtc, ds?.Skew2Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST111", running, paused, snapshotAtUtc, ds?.Skew3Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST110", running, paused, snapshotAtUtc, ds?.Skew4Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST112", running, paused, snapshotAtUtc, ds?.Skew5Connected == true, nowUtc);
         });
 
         Collect("设备健康", "2号线后端", "设备状态", () =>
@@ -939,12 +974,14 @@ public sealed class HomeViewModel : ObservableObject
             var engine = _line2RearEngine;
             var ds = engine?.DeviceStatus;
             bool running = engine?.IsRunning == true;
-            AddCommunicationDiagnostic(items, "2号线后端", "后天车", running, ds?.CraneRearConnected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线后端", "ST606", running, ds?.Skew1Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线后端", "ST607", running, ds?.Skew2Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线后端", "ST608", running, ds?.Skew3Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线后端", "ST609", running, ds?.Skew4Connected == true, nowUtc);
-            AddCommunicationDiagnostic(items, "2号线后端", "ST610", running, ds?.Skew5Connected == true, nowUtc);
+            bool paused = engine?.IsPaused == true;
+            DateTime snapshotAtUtc = ds?.SnapshotAtUtc ?? default;
+            AddCommunicationDiagnostic(items, "2号线后端", "后天车", running, paused, snapshotAtUtc, ds?.CraneRearConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST606", running, paused, snapshotAtUtc, ds?.Skew1Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST607", running, paused, snapshotAtUtc, ds?.Skew2Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST608", running, paused, snapshotAtUtc, ds?.Skew3Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST609", running, paused, snapshotAtUtc, ds?.Skew4Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST610", running, paused, snapshotAtUtc, ds?.Skew5Connected == true, nowUtc);
         });
 
         // 中转架快照组合“现有物理信号内存值 + 软件工件身份缓存”，不现场读取PLC。
@@ -998,21 +1035,45 @@ public sealed class HomeViewModel : ObservableObject
     }
 
     private static void AddCommunicationDiagnostic(ICollection<RuntimeDiagnosticItem> items,
-        string scope, string name, bool engineRunning, bool connected, DateTime nowUtc)
+        string scope, string name, bool engineRunning, bool enginePaused,
+        DateTime capturedAtUtc, bool connected, DateTime nowUtc)
     {
-        var level = !engineRunning
-            ? RuntimeDiagnosticLevel.Waiting
-            : connected ? RuntimeDiagnosticLevel.Normal : RuntimeDiagnosticLevel.Warning;
-        string state = !engineRunning ? "未启动" : connected ? "已连接" : "断开";
-        string detail = !engineRunning
-            ? "对应引擎尚未运行，当前不把无连接状态计为故障"
-            : connected ? "来自引擎最近维护的内存连接状态" : "引擎运行中，但内存连接状态为断开";
+        RuntimeDiagnosticLevel level;
+        string state;
+        string detail;
+        if (!engineRunning)
+        {
+            level = RuntimeDiagnosticLevel.Waiting;
+            state = "未启动";
+            detail = "对应引擎尚未运行，当前不把无连接状态计为故障";
+        }
+        else if (enginePaused)
+        {
+            level = RuntimeDiagnosticLevel.Warning;
+            state = "暂停/最后已知";
+            detail = $"引擎已暂停；{FormatDisplaySnapshotAge(capturedAtUtc, nowUtc)}，旧连接值不作为当前证据";
+        }
+        else if (!DisplaySnapshotFreshness.IsFresh(capturedAtUtc, nowUtc))
+        {
+            level = RuntimeDiagnosticLevel.Warning;
+            state = "数据过期";
+            detail = $"{FormatDisplaySnapshotAge(capturedAtUtc, nowUtc)}，旧连接值不作为当前证据";
+        }
+        else
+        {
+            level = connected ? RuntimeDiagnosticLevel.Normal : RuntimeDiagnosticLevel.Warning;
+            state = connected ? "已连接" : "断开";
+            detail = connected
+                ? $"来自引擎内存快照；{FormatDisplaySnapshotAge(capturedAtUtc, nowUtc)}"
+                : $"新鲜内存快照明确为断开；{FormatDisplaySnapshotAge(capturedAtUtc, nowUtc)}";
+        }
         items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.Communication, "设备健康",
             scope, name, level, state, detail, nowUtc));
     }
 
     private static void AddFreshnessDiagnostic(ICollection<RuntimeDiagnosticItem> items,
-        string scope, string name, bool engineRunning, bool valid, DateTime capturedAtUtc, DateTime nowUtc)
+        string scope, string name, bool engineRunning, bool enginePaused,
+        bool valid, DateTime capturedAtUtc, DateTime nowUtc)
     {
         if (!engineRunning)
         {
@@ -1021,14 +1082,29 @@ public sealed class HomeViewModel : ObservableObject
             return;
         }
 
+        if (enginePaused)
+        {
+            items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.SignalFreshness, "设备健康",
+                scope, name, RuntimeDiagnosticLevel.Warning, "暂停/最后已知",
+                $"引擎已暂停；{FormatDisplaySnapshotAge(capturedAtUtc, nowUtc)}，旧信号不作为当前证据", nowUtc));
+            return;
+        }
+
         TimeSpan age = capturedAtUtc == default ? TimeSpan.MaxValue : nowUtc - capturedAtUtc;
-        bool fresh = valid && age >= TimeSpan.Zero && age <= TimeSpan.FromSeconds(3);
+        bool fresh = valid && DisplaySnapshotFreshness.IsFresh(capturedAtUtc, nowUtc);
         string detail = capturedAtUtc == default
             ? "尚未形成成功信号快照"
             : $"最近成功快照：{capturedAtUtc.ToLocalTime():HH:mm:ss.fff}，数据年龄={Math.Max(0, age.TotalSeconds):0.0}秒";
         items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.SignalFreshness, "设备健康",
             scope, name, fresh ? RuntimeDiagnosticLevel.Normal : RuntimeDiagnosticLevel.Warning,
-            fresh ? "快照有效" : "无有效快照", detail, nowUtc));
+            fresh ? "快照有效" : "数据过期/无效", detail, nowUtc));
+    }
+
+    private static string FormatDisplaySnapshotAge(DateTime capturedAtUtc, DateTime nowUtc)
+    {
+        if (capturedAtUtc == default) return "尚未形成整轮状态快照";
+        double seconds = Math.Max(0, (nowUtc - capturedAtUtc).TotalSeconds);
+        return $"最近快照 {capturedAtUtc.ToLocalTime():HH:mm:ss.fff}，数据年龄={seconds:0.0}秒";
     }
 
     private static void AddRackDiagnostics(ICollection<RuntimeDiagnosticItem> items, string scope,
@@ -1044,7 +1120,7 @@ public sealed class HomeViewModel : ObservableObject
 
         foreach (var rack in racks)
         {
-            string physical = !rack.PhysicalSignalAvailable ? "物理信号不可用" : rack.PhysicalHasPlate ? "物理有板" : "物理无板";
+            string physical = !rack.PhysicalSignalAvailable ? rack.PhysicalSignalUnavailableText : rack.PhysicalHasPlate ? "物理有板" : "物理无板";
             string software = rack.Workpiece == null ? "软件无工件身份" : $"软件={rack.Workpiece.IdentityText}";
             var level = !rack.PhysicalSignalAvailable || rack.HasIdentityMismatch
                 ? RuntimeDiagnosticLevel.Warning
@@ -1240,7 +1316,7 @@ public sealed class HomeViewModel : ObservableObject
                     ? InProcessWorkpieceStatus.SignalMismatch
                     : InProcessWorkpieceStatus.Normal;
             string physical = !rack.PhysicalSignalAvailable
-                ? "物理信号不可用"
+                ? rack.PhysicalSignalUnavailableText
                 : rack.PhysicalHasPlate ? "物理有板" : "物理无板";
             string detail = rack.HasIdentityMismatch
                 ? $"{physical}，软件身份={(rack.Workpiece?.IdentityText ?? "缺失")}；请人工核对，页面不会清理缓存"
@@ -1314,7 +1390,7 @@ public sealed class HomeViewModel : ObservableObject
         if (snapshots == null) return "中转架数据暂不可用";
         return string.Join(Environment.NewLine + Environment.NewLine, snapshots.Select(snapshot =>
         {
-            if (!snapshot.PhysicalSignalAvailable) return $"{snapshot.StationCode}：物理信号不可用";
+            if (!snapshot.PhysicalSignalAvailable) return $"{snapshot.StationCode}：{snapshot.PhysicalSignalUnavailableText}";
             if (snapshot.Workpiece == null)
                 return snapshot.PhysicalHasPlate ? $"{snapshot.StationCode}：物理有板，但软件身份缺失" : $"{snapshot.StationCode}：物理无板";
             var wp = snapshot.Workpiece;
