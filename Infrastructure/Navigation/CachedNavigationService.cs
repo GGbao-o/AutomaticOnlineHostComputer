@@ -1,6 +1,7 @@
 using AutomaticOnlineHostComputer.Views.Controller;
 using AutomaticOnlineHostComputer.Views.Crane;
 using AutomaticOnlineHostComputer.Views.FlowStatus;
+using AutomaticOnlineHostComputer.Views.RuntimeDiagnostics;
 using AutomaticOnlineHostComputer.Views.AttentionMonitor;
 using AutomaticOnlineHostComputer.Views.Home;
 using AutomaticOnlineHostComputer.Views.Machine;
@@ -38,7 +39,8 @@ namespace AutomaticOnlineHostComputer.Infrastructure.Navigation;
 public sealed class CachedNavigationService
 {
     /// <summary>
-    /// 页面缓存：key = 菜单 Tag（main/crane/machine/controller/process/motion/overview/flowStatus），
+    /// 页面缓存：key = 菜单 Tag（main/crane/machine/controller/process/motion/overview/
+    /// flowStatus/runtimeDiagnostics/attentionMonitor），
     /// value = 对应的 UserControl 实例。
     /// </summary>
     private readonly Dictionary<string, UserControl> _pageCache = new(StringComparer.OrdinalIgnoreCase);
@@ -66,6 +68,7 @@ public sealed class CachedNavigationService
             "motion" => new MotionSettingsView(),
             "overview" => new EquipmentOverviewView(),
             "flowStatus" => new FlowStatusView(),
+            "runtimeDiagnostics" => new RuntimeDiagnosticsView(),
             "attentionMonitor" => new AttentionMonitorView(),
             _ => new HomeView()
         };

@@ -867,6 +867,255 @@ public sealed class HomeViewModel : ObservableObject
         CraneGL.FlowTaskTooltipText = FormatCraneTooltip(_grindingEngine?.GetCraneTaskSnapshot());
     }
 
+    /// <summary>
+    /// 生成“运行诊断”页面使用的只读内存快照。
+    ///
+    /// 重要边界：本方法只读取各引擎已经维护的状态字段和展示快照，
+    /// 不创建/重连设备、不读取PLC/CNC、不写寄存器、不访问数据库，也不改变任何流程状态。
+    /// 某一来源读取失败时只生成一条页面警告，其余来源继续采集。
+    /// </summary>
+    public RuntimeDiagnosticsSnapshot GetRuntimeDiagnosticsSnapshot()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var items = new List<RuntimeDiagnosticItem>(48);
+
+        // 前端准入结果直接复用全局分线当前正在使用的判断器，页面不另写一套放行逻辑。
+        Collect("当前等待", "1号线", "前端准入",
+            () => AddFrontReadinessDiagnostic(items, GetFrontDispatchReadiness(1), nowUtc));
+        Collect("当前等待", "2号线", "前端准入",
+            () => AddFrontReadinessDiagnostic(items, GetFrontDispatchReadiness(2), nowUtc));
+
+        // 只复制前端引擎已刷新的 DeviceStatus。下面每个字段均为内存值，不触发设备通信。
+        Collect("设备健康", "1号线前端", "设备状态", () =>
+        {
+            var engine = _line1Engine;
+            var ds = engine?.DeviceStatus;
+            bool running = engine?.IsRunning == true;
+            AddCommunicationDiagnostic(items, "1号线前端", "机械手1", running, ds?.Manipulator1Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "货叉", running, ds?.ForkConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "总上料架/中转架PLC", running, ds?.RackConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "前天车", running, ds?.CraneFrontConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "双头镗", running, ds?.BoringConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线前端", "打号机共享目录", running, ds?.MarkerConnected == true, nowUtc);
+            AddFreshnessDiagnostic(items, "1号线前端", "货叉信号", running,
+                ds?.ForkSnapshotValid == true, ds?.ForkSnapshotAtUtc ?? default, nowUtc);
+            AddFreshnessDiagnostic(items, "1号线前端", "双头镗信号", running,
+                ds?.BoringSnapshotValid == true, ds?.BoringSnapshotAtUtc ?? default, nowUtc);
+        });
+
+        Collect("设备健康", "2号线前端", "设备状态", () =>
+        {
+            var engine = _line2Engine;
+            var ds = engine?.DeviceStatus;
+            bool running = engine?.IsRunning == true;
+            AddCommunicationDiagnostic(items, "2号线前端", "机械手1", running, ds?.Manipulator1Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "货叉", running, ds?.ForkConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "总上料架/中转架PLC", running, ds?.RackConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "前天车", running, ds?.CraneFrontConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "双头镗", running, ds?.BoringConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线前端", "打号机共享目录", running, ds?.MarkerConnected == true, nowUtc);
+            AddFreshnessDiagnostic(items, "2号线前端", "货叉信号", running,
+                ds?.ForkSnapshotValid == true, ds?.ForkSnapshotAtUtc ?? default, nowUtc);
+            AddFreshnessDiagnostic(items, "2号线前端", "双头镗信号", running,
+                ds?.BoringSnapshotValid == true, ds?.BoringSnapshotAtUtc ?? default, nowUtc);
+        });
+
+        // 后端连接状态同样只来自后端主循环已经维护的 DeviceStatus。
+        Collect("设备健康", "1号线后端", "设备状态", () =>
+        {
+            var engine = _line1RearEngine;
+            var ds = engine?.DeviceStatus;
+            bool running = engine?.IsRunning == true;
+            AddCommunicationDiagnostic(items, "1号线后端", "后天车", running, ds?.CraneRearConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST108", running, ds?.Skew1Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST109", running, ds?.Skew2Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST110", running, ds?.Skew3Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST111", running, ds?.Skew4Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "1号线后端", "ST112", running, ds?.Skew5Connected == true, nowUtc);
+        });
+
+        Collect("设备健康", "2号线后端", "设备状态", () =>
+        {
+            var engine = _line2RearEngine;
+            var ds = engine?.DeviceStatus;
+            bool running = engine?.IsRunning == true;
+            AddCommunicationDiagnostic(items, "2号线后端", "后天车", running, ds?.CraneRearConnected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST606", running, ds?.Skew1Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST607", running, ds?.Skew2Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST608", running, ds?.Skew3Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST609", running, ds?.Skew4Connected == true, nowUtc);
+            AddCommunicationDiagnostic(items, "2号线后端", "ST610", running, ds?.Skew5Connected == true, nowUtc);
+        });
+
+        // 中转架快照组合“现有物理信号内存值 + 软件工件身份缓存”，不现场读取PLC。
+        Collect("中转架", "1号线", "一致性",
+            () => AddRackDiagnostics(items, "1号线", _line1RearEngine?.GetTransferRackSnapshots(), nowUtc));
+        Collect("中转架", "2号线", "一致性",
+            () => AddRackDiagnostics(items, "2号线", _line2RearEngine?.GetTransferRackSnapshots(), nowUtc));
+
+        // 五台天车始终各显示一行；引擎尚未初始化时明确显示“未初始化”。
+        Collect("天车任务", "1号线", "前天车",
+            () => AddCraneDiagnostic(items, "1号线", "前天车", _line1Engine?.GetCraneTaskSnapshot(), nowUtc));
+        Collect("天车任务", "1号线", "后天车",
+            () => AddCraneDiagnostic(items, "1号线", "后天车", _line1RearEngine?.GetCraneTaskSnapshot(), nowUtc));
+        Collect("天车任务", "2号线", "前天车",
+            () => AddCraneDiagnostic(items, "2号线", "前天车", _line2Engine?.GetCraneTaskSnapshot(), nowUtc));
+        Collect("天车任务", "2号线", "后天车",
+            () => AddCraneDiagnostic(items, "2号线", "后天车", _line2RearEngine?.GetCraneTaskSnapshot(), nowUtc));
+        Collect("天车任务", "研磨", "研磨天车",
+            () => AddCraneDiagnostic(items, "研磨", "研磨天车", _grindingEngine?.GetCraneTaskSnapshot(), nowUtc));
+
+        // 仅把引擎已明确标记“需人工补录/确认”的工位加入人工关注区。
+        Collect("人工确认", "1号线斜床", "工件身份",
+            () => AddManualStationDiagnostics(items, "1号线斜床", _line1RearEngine?.GetSkewStationSnapshots(), nowUtc));
+        Collect("人工确认", "2号线斜床", "工件身份",
+            () => AddManualStationDiagnostics(items, "2号线斜床", _line2RearEngine?.GetSkewStationSnapshots(), nowUtc));
+        Collect("人工确认", "研磨", "工件身份",
+            () => AddManualStationDiagnostics(items, "研磨", _grindingEngine?.GetGrinderStationSnapshots(), nowUtc));
+
+        return new RuntimeDiagnosticsSnapshot(items.ToArray(), nowUtc);
+
+        // 单一来源降级：页面每秒刷新，故意不在这里写Console，避免同一故障形成日志风暴。
+        void Collect(string section, string scope, string name, Action collect)
+        {
+            try { collect(); }
+            catch { AddSnapshotFailure(items, section, scope, name, nowUtc); }
+        }
+    }
+
+    private static void AddFrontReadinessDiagnostic(ICollection<RuntimeDiagnosticItem> items,
+        FrontDispatchReadinessSnapshot readiness, DateTime nowUtc)
+    {
+        // HomeViewModel用999表示“未启动/未初始化”的不可选线路；该内部哨兵值不应展示给操作员。
+        string detail = readiness.Pressure >= 999
+            ? readiness.RejectReason
+            : $"{readiness.RejectReason}；当前压力={readiness.Pressure}";
+        items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.FrontReadiness, "当前等待",
+            $"{readiness.Line}号线", "前端准入",
+            readiness.CanAccept ? RuntimeDiagnosticLevel.Normal : RuntimeDiagnosticLevel.Waiting,
+            readiness.CanAccept ? "可接板" : "暂不可接板",
+            detail, nowUtc));
+    }
+
+    private static void AddCommunicationDiagnostic(ICollection<RuntimeDiagnosticItem> items,
+        string scope, string name, bool engineRunning, bool connected, DateTime nowUtc)
+    {
+        var level = !engineRunning
+            ? RuntimeDiagnosticLevel.Waiting
+            : connected ? RuntimeDiagnosticLevel.Normal : RuntimeDiagnosticLevel.Warning;
+        string state = !engineRunning ? "未启动" : connected ? "已连接" : "断开";
+        string detail = !engineRunning
+            ? "对应引擎尚未运行，当前不把无连接状态计为故障"
+            : connected ? "来自引擎最近维护的内存连接状态" : "引擎运行中，但内存连接状态为断开";
+        items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.Communication, "设备健康",
+            scope, name, level, state, detail, nowUtc));
+    }
+
+    private static void AddFreshnessDiagnostic(ICollection<RuntimeDiagnosticItem> items,
+        string scope, string name, bool engineRunning, bool valid, DateTime capturedAtUtc, DateTime nowUtc)
+    {
+        if (!engineRunning)
+        {
+            items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.SignalFreshness, "设备健康",
+                scope, name, RuntimeDiagnosticLevel.Waiting, "未启动", "对应引擎尚未运行，暂无信号快照", nowUtc));
+            return;
+        }
+
+        TimeSpan age = capturedAtUtc == default ? TimeSpan.MaxValue : nowUtc - capturedAtUtc;
+        bool fresh = valid && age >= TimeSpan.Zero && age <= TimeSpan.FromSeconds(3);
+        string detail = capturedAtUtc == default
+            ? "尚未形成成功信号快照"
+            : $"最近成功快照：{capturedAtUtc.ToLocalTime():HH:mm:ss.fff}，数据年龄={Math.Max(0, age.TotalSeconds):0.0}秒";
+        items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.SignalFreshness, "设备健康",
+            scope, name, fresh ? RuntimeDiagnosticLevel.Normal : RuntimeDiagnosticLevel.Warning,
+            fresh ? "快照有效" : "无有效快照", detail, nowUtc));
+    }
+
+    private static void AddRackDiagnostics(ICollection<RuntimeDiagnosticItem> items, string scope,
+        IEnumerable<TransferRackSnapshot>? racks, DateTime nowUtc)
+    {
+        if (racks == null)
+        {
+            items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.RackConsistency, "中转架",
+                scope, "中转架", RuntimeDiagnosticLevel.Waiting, "未初始化",
+                "后端引擎尚未初始化，未创建额外设备连接", nowUtc));
+            return;
+        }
+
+        foreach (var rack in racks)
+        {
+            string physical = !rack.PhysicalSignalAvailable ? "物理信号不可用" : rack.PhysicalHasPlate ? "物理有板" : "物理无板";
+            string software = rack.Workpiece == null ? "软件无工件身份" : $"软件={rack.Workpiece.IdentityText}";
+            var level = !rack.PhysicalSignalAvailable || rack.HasIdentityMismatch
+                ? RuntimeDiagnosticLevel.Warning
+                : RuntimeDiagnosticLevel.Normal;
+            string state = !rack.PhysicalSignalAvailable ? "信号不可用" : rack.HasIdentityMismatch ? "身份不一致" : "一致";
+            items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.RackConsistency, "中转架",
+                scope, rack.StationCode, level, state, $"{physical}；{software}", nowUtc));
+
+            if (rack.HasIdentityMismatch)
+            {
+                items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.ManualConfirmation, "人工确认",
+                    scope, rack.StationCode, RuntimeDiagnosticLevel.ManualConfirmation, "中转架身份不一致",
+                    $"{physical}；{software}。请人工核对现场，页面不会自动清理缓存", nowUtc));
+            }
+        }
+    }
+
+    private static void AddCraneDiagnostic(ICollection<RuntimeDiagnosticItem> items, string scope,
+        string displayName, CraneTaskSnapshot? snapshot, DateTime nowUtc)
+    {
+        if (snapshot == null)
+        {
+            items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.CraneTask, "天车任务",
+                scope, displayName, RuntimeDiagnosticLevel.Waiting, "未初始化",
+                "对应引擎尚未初始化", nowUtc));
+            return;
+        }
+
+        var level = snapshot.NeedsManualConfirmation
+            ? RuntimeDiagnosticLevel.ManualConfirmation
+            : RuntimeDiagnosticLevel.Normal;
+        string state = snapshot.NeedsManualConfirmation ? "需人工确认" : snapshot.IsActive ? "执行中" : "空闲";
+        string workpiece = FormatDiagnosticWorkpiece(snapshot.Workpiece);
+        string route = string.IsNullOrWhiteSpace(snapshot.SourceStation) && string.IsNullOrWhiteSpace(snapshot.TargetStation)
+            ? ""
+            : $"；{snapshot.SourceStation} → {snapshot.TargetStation}";
+        string manual = string.IsNullOrWhiteSpace(snapshot.ManualConfirmationText)
+            ? ""
+            : $"；{snapshot.ManualConfirmationText}";
+        items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.CraneTask, "天车任务",
+            scope, snapshot.CraneName, level, state,
+            $"阶段={snapshot.Stage}{route}；{workpiece}{manual}", nowUtc));
+    }
+
+    private static void AddManualStationDiagnostics(ICollection<RuntimeDiagnosticItem> items, string scope,
+        IEnumerable<ProcessStationSnapshot>? stations, DateTime nowUtc)
+    {
+        if (stations == null) return;
+        foreach (var station in stations.Where(x => x.NeedsManualWorkpiece))
+        {
+            items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.ManualConfirmation, "人工确认",
+                scope, station.StationCode, RuntimeDiagnosticLevel.ManualConfirmation, "需确认工件身份",
+                $"工位状态={station.State}；{FormatDiagnosticWorkpiece(station.Workpiece)}", nowUtc));
+        }
+    }
+
+    private static void AddSnapshotFailure(ICollection<RuntimeDiagnosticItem> items, string section,
+        string scope, string name, DateTime nowUtc)
+    {
+        items.Add(new RuntimeDiagnosticItem(RuntimeDiagnosticCategory.SignalFreshness, section,
+            scope, name, RuntimeDiagnosticLevel.Warning, "快照暂不可用",
+            "读取现有内存快照时发生异常；未触发设备重读、重连或流程控制", nowUtc));
+    }
+
+    private static string FormatDiagnosticWorkpiece(WorkpieceDisplaySnapshot? workpiece)
+    {
+        if (workpiece == null) return "工件=未记录";
+        string length = workpiece.Length > 0 ? $"L={workpiece.Length}mm" : "L=未记录";
+        return $"{workpiece.IdentityText}，直径={workpiece.Diameter}mm，{length}";
+    }
+
     private void ApplyProcessTooltips(IEnumerable<ProcessStationSnapshot>? snapshots)
     {
         if (snapshots == null) return;

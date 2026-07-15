@@ -112,6 +112,10 @@ services.AddSingleton<HomeViewModel>();
         // ── 6.1 异常监控页面 VM（Singleton）──────────────────────────────
         services.AddSingleton<AttentionMonitorViewModel>();
 
+        // ── 6.2 运行诊断页面 VM（Singleton）──────────────────────────────
+        // 该VM只消费HomeViewModel提供的内存快照，不持有设备连接，也不创建后台轮询。
+        services.AddSingleton<RuntimeDiagnosticsViewModel>();
+
         return services;
     }
 }

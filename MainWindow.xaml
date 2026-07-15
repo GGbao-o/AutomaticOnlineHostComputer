@@ -51,6 +51,10 @@
                 Tag="flowStatus" />
             <MenuItem
                 Click="MenuItem_Click"
+                Header="运行诊断"
+                Tag="runtimeDiagnostics" />
+            <MenuItem
+                Click="MenuItem_Click"
                 Header="异常监控"
                 Tag="attentionMonitor" />
         </Menu>
