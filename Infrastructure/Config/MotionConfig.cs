@@ -40,7 +40,9 @@ public sealed class MotionConfig
     /// <summary>斜床加工完成后导出给ERP/外部系统的完工文件参数。</summary>
     public SkewCompletionExportSection SkewCompletionExport { get; set; } = new();
     /// <summary>X绝对编码器下降前微调参数。只在Z下降取/放料前使用, 不改变原始运动路径。</summary>
-    public XAbsFineTuneSection XAbsFineTune { get; set; } = new();
+    public AxisAbsFineTuneSection XAbsFineTune { get; set; } = new();
+    /// <summary>Y绝对编码器下降前微调参数。仅适用于1～5号天车，默认关闭，完成现场标定后才可启用。</summary>
+    public AxisAbsFineTuneSection YAbsFineTune { get; set; } = new() { Enabled = false };
 
     /// <summary>单轴速度/加减速参数</summary>
     public sealed class AxisSpeed
@@ -137,15 +139,15 @@ public sealed class MotionConfig
             => StationMachineCodes.TryGetValue(stationCode, out machineCode!);
     }
 
-    public sealed class XAbsFineTuneSection
+    public sealed class AxisAbsFineTuneSection
     {
-        /// <summary>总开关。false时完全跳过X绝对编码器微调。</summary>
+        /// <summary>总开关。false时完全跳过本轴绝对编码器微调。</summary>
         public bool Enabled { get; set; } = true;
         /// <summary>绝对编码器偏差允许值(mm)。|目标-当前|小于等于该值时不微调。</summary>
         public int ToleranceMm { get; set; } = 5;
         /// <summary>单次最大允许微调量(mm)。超过该值直接报警, 防止标定/坐标错误时大距离盲修。</summary>
         public int MaxAdjustMm { get; set; } = 50;
-        /// <summary>每台天车每个工位的X绝对编码器标定值。值为-1表示该工位不做微调。</summary>
+        /// <summary>每台天车每个工位的本轴绝对编码器标定值。值为-1表示该工位不做微调。</summary>
         public Dictionary<int, Dictionary<string, int>> StationTargets { get; set; } = new()
         {
             [3] = new()

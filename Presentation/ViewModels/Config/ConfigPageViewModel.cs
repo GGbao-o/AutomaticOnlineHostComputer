@@ -27,12 +27,14 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
         _cfg = cfg;
         _craneProvider = craneProvider;
         SaveCommand = new RelayCommand(_ => Save());
-        ReadCurrentXCommand = new RelayCommand(async p => await ReadCurrentXAsync(p as string));
+        ReadCurrentXCommand = new RelayCommand(async p => await ReadCurrentEncoderAsync(p as string, "X"));
+        ReadCurrentYCommand = new RelayCommand(async p => await ReadCurrentEncoderAsync(p as string, "Y"));
         RefreshTabs();
     }
 
     public ICommand SaveCommand { get; }
     public ICommand ReadCurrentXCommand { get; }
+    public ICommand ReadCurrentYCommand { get; }
 
     // ═══════════════════════════════════════════════════════════════
     //  Tab1 — 天车速度（直接读写 _cfg.CraneSpeeds 内 AxisSpeed 对象）
@@ -72,6 +74,12 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
         set { _cfg.XAbsFineTune.Enabled = value; OnPropertyChanged(); }
     }
 
+    public bool YAbsFineTuneEnabled
+    {
+        get => _cfg.YAbsFineTune.Enabled;
+        set { _cfg.YAbsFineTune.Enabled = value; OnPropertyChanged(); }
+    }
+
     public ObservableCollection<StationTargetRow> StationTargetRows { get; } = new();
 
     // ═══════════════════════════════════════════════════════════════
@@ -105,6 +113,8 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
 
     public int XAbsToleranceMm { get => _cfg.XAbsFineTune.ToleranceMm; set { _cfg.XAbsFineTune.ToleranceMm = value; OnPropertyChanged(); } }
     public int XAbsMaxAdjustMm { get => _cfg.XAbsFineTune.MaxAdjustMm; set { _cfg.XAbsFineTune.MaxAdjustMm = value; OnPropertyChanged(); } }
+    public int YAbsToleranceMm { get => _cfg.YAbsFineTune.ToleranceMm; set { _cfg.YAbsFineTune.ToleranceMm = value; OnPropertyChanged(); } }
+    public int YAbsMaxAdjustMm { get => _cfg.YAbsFineTune.MaxAdjustMm; set { _cfg.YAbsFineTune.MaxAdjustMm = value; OnPropertyChanged(); } }
 
     // ═══════════════════════════════════════════════════════════════
     //  初始化 — 每行持有对 _cfg 内对象的直接引用，修改即时生效
@@ -164,6 +174,7 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
 
         // Tab6 — PropertyChanged 驱动 UI 刷新
         OnPropertyChanged(nameof(XAbsFineTuneEnabled));
+        OnPropertyChanged(nameof(YAbsFineTuneEnabled));
         OnPropertyChanged(nameof(Crane1HomeX)); OnPropertyChanged(nameof(Crane2HomeX));
         OnPropertyChanged(nameof(Crane3HomeX)); OnPropertyChanged(nameof(Crane4HomeX));
         OnPropertyChanged(nameof(Crane5HomeX));
@@ -172,13 +183,23 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     private void RefreshStationTargetRows()
     {
         StationTargetRows.Clear();
-        if (!_cfg.XAbsFineTune.StationTargets.TryGetValue(_selectedCraneNo, out var dict))
+        if (!_cfg.XAbsFineTune.StationTargets.TryGetValue(_selectedCraneNo, out var xTargets))
         {
-            dict = new Dictionary<string, int>();
-            _cfg.XAbsFineTune.StationTargets[_selectedCraneNo] = dict;
+            xTargets = new Dictionary<string, int>();
+            _cfg.XAbsFineTune.StationTargets[_selectedCraneNo] = xTargets;
         }
-        foreach (var kv in dict)
-            StationTargetRows.Add(new StationTargetRow(kv.Key, dict));
+        if (!_cfg.YAbsFineTune.StationTargets.TryGetValue(_selectedCraneNo, out var yTargets))
+        {
+            yTargets = new Dictionary<string, int>();
+            _cfg.YAbsFineTune.StationTargets[_selectedCraneNo] = yTargets;
+        }
+
+        foreach (string stationCode in xTargets.Keys.Union(yTargets.Keys).OrderBy(code => code, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!xTargets.ContainsKey(stationCode)) xTargets[stationCode] = -1;
+            if (!yTargets.ContainsKey(stationCode)) yTargets[stationCode] = -1;
+            StationTargetRows.Add(new StationTargetRow(stationCode, xTargets, yTargets));
+        }
     }
 
     private static readonly Dictionary<string, string> DiameterStationNames = new()
@@ -227,18 +248,24 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>编码器标定行切换天车号前，把当前行的值写回对应字典。</summary>
+    /// <summary>编码器标定行切换天车号前，把当前行的X/Y值写回对应字典。</summary>
     private void SyncStationTargets()
     {
-        if (!_cfg.XAbsFineTune.StationTargets.TryGetValue(_selectedCraneNo, out var dict)) return;
+        if (!_cfg.XAbsFineTune.StationTargets.TryGetValue(_selectedCraneNo, out var xTargets))
+            _cfg.XAbsFineTune.StationTargets[_selectedCraneNo] = xTargets = new Dictionary<string, int>();
+        if (!_cfg.YAbsFineTune.StationTargets.TryGetValue(_selectedCraneNo, out var yTargets))
+            _cfg.YAbsFineTune.StationTargets[_selectedCraneNo] = yTargets = new Dictionary<string, int>();
         foreach (var row in StationTargetRows)
-            dict[row.StationCode] = row.TargetX;
+        {
+            xTargets[row.StationCode] = row.TargetX;
+            yTargets[row.StationCode] = row.TargetY;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
     //  读当前位置
     // ═══════════════════════════════════════════════════════════════
-    private async Task ReadCurrentXAsync(string? stationCode)
+    private async Task ReadCurrentEncoderAsync(string? stationCode, string axis)
     {
         if (string.IsNullOrWhiteSpace(stationCode) || _craneProvider == null) return;
         try
@@ -259,7 +286,12 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
             }
             var row = StationTargetRows.FirstOrDefault(r => r.StationCode == stationCode);
             if (row != null)
-                row.TargetX = status.XEncoderAbs; // D5014~D5015: X轴绝对编码器标定值
+            {
+                if (axis == "X")
+                    row.TargetX = status.XEncoderAbs; // D5014~D5015: X轴绝对编码器标定值
+                else
+                    row.TargetY = status.YEncoderAbs; // D5020: Y轴绝对编码器标定值
+            }
         }
         catch (Exception ex)
         {
@@ -453,17 +485,24 @@ public sealed class DiameterOffsetRow : INotifyPropertyChanged
 
 public sealed class StationTargetRow : INotifyPropertyChanged
 {
-    private readonly Dictionary<string, int> _dict;
+    private readonly Dictionary<string, int> _xTargets;
+    private readonly Dictionary<string, int> _yTargets;
     public string StationCode { get; }
     public string StationDisplayName => ConfigStationNames.Format(StationCode);
 
-    public StationTargetRow(string code, Dictionary<string, int> dict)
-    { StationCode = code; _dict = dict; }
+    public StationTargetRow(string code, Dictionary<string, int> xTargets, Dictionary<string, int> yTargets)
+    { StationCode = code; _xTargets = xTargets; _yTargets = yTargets; }
 
     public int TargetX
     {
-        get => _dict.TryGetValue(StationCode, out var v) ? v : -1;
-        set { _dict[StationCode] = value; OnProp(); }
+        get => _xTargets.TryGetValue(StationCode, out var v) ? v : -1;
+        set { _xTargets[StationCode] = value; OnProp(); }
+    }
+
+    public int TargetY
+    {
+        get => _yTargets.TryGetValue(StationCode, out var v) ? v : -1;
+        set { _yTargets[StationCode] = value; OnProp(); }
     }
 
     public string TargetDisplay => TargetX == -1 ? "(跳过)" : TargetX.ToString();

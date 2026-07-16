@@ -258,11 +258,13 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="10">
                     <StackPanel>
                         <TextBlock Style="{StaticResource SectionHeaderStyle}"
-                                   Text="X 绝对编码器标定值 (-1 = 跳过该工位, 不做微调检查)" />
+                                   Text="X / Y 绝对编码器标定值 (-1 = 跳过该轴, 不做微调检查)" />
 
                         <!-- 开关 -->
                         <CheckBox IsChecked="{Binding XAbsFineTuneEnabled}" Margin="0,0,0,10"
-                                  Content="启用绝对值编码器微调 (Enabled)" FontSize="12" />
+                                  Content="启用 X 绝对编码器微调 (Enabled)" FontSize="12" />
+                        <CheckBox IsChecked="{Binding YAbsFineTuneEnabled}" Margin="0,0,0,10"
+                                  Content="启用 Y 绝对编码器微调 (需现场标定后开启)" FontSize="12" />
 
                         <!-- 通用参数 -->
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
@@ -271,6 +273,12 @@
                                      Style="{StaticResource ParamTextBoxStyle}" Margin="0,0,14,0" />
                             <TextBlock Text="最大微调量 (mm):" Style="{StaticResource ParamLabelStyle}" />
                             <TextBox Text="{Binding XAbsMaxAdjustMm, UpdateSourceTrigger=PropertyChanged}" Width="50" Height="26"
+                                     Style="{StaticResource ParamTextBoxStyle}" Margin="0,0,14,0" />
+                            <TextBlock Text="Y偏差允许 (mm):" Style="{StaticResource ParamLabelStyle}" />
+                            <TextBox Text="{Binding YAbsToleranceMm, UpdateSourceTrigger=PropertyChanged}" Width="50" Height="26"
+                                     Style="{StaticResource ParamTextBoxStyle}" Margin="0,0,14,0" />
+                            <TextBlock Text="Y最大微调量 (mm):" Style="{StaticResource ParamLabelStyle}" />
+                            <TextBox Text="{Binding YAbsMaxAdjustMm, UpdateSourceTrigger=PropertyChanged}" Width="50" Height="26"
                                      Style="{StaticResource ParamTextBoxStyle}" />
                         </StackPanel>
 
@@ -284,9 +292,11 @@
                         <!-- 工位列表 -->
                         <Border Padding="8,4" Margin="0,0,0,4" Background="{StaticResource HeaderBrush}" CornerRadius="4">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Width="250" Style="{StaticResource ColHeaderStyle}" Text="工位 / 设备" HorizontalAlignment="Left" />
-                                <TextBlock Width="100" Style="{StaticResource ColHeaderStyle}" Text="编码器X目标" />
-                                <TextBlock Width="40" />
+                                <TextBlock Width="210" Style="{StaticResource ColHeaderStyle}" Text="工位 / 设备" HorizontalAlignment="Left" />
+                                <TextBlock Width="90" Style="{StaticResource ColHeaderStyle}" Text="编码器X目标" />
+                                <TextBlock Width="70" />
+                                <TextBlock Width="90" Style="{StaticResource ColHeaderStyle}" Text="编码器Y目标" />
+                                <TextBlock Width="70" />
                             </StackPanel>
                         </Border>
 
@@ -295,12 +305,18 @@
                                 <DataTemplate>
                                     <Border Margin="0,0,0,2" Padding="8,3" CornerRadius="4">
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Width="250" Text="{Binding StationDisplayName}" Style="{StaticResource StationLabelStyle}" />
+                                            <TextBlock Width="210" Text="{Binding StationDisplayName}" Style="{StaticResource StationLabelStyle}" />
                                             <TextBox Text="{Binding TargetX, UpdateSourceTrigger=PropertyChanged}"
-                                                     Style="{StaticResource ParamTextBoxStyle}" Width="100" />
-                                            <Button Width="90" Height="24" FontSize="11" Margin="8,0,0,0"
-                                                    Content="读当前位置"
+                                                     Style="{StaticResource ParamTextBoxStyle}" Width="90" />
+                                            <Button Width="70" Height="24" FontSize="11" Margin="8,0,0,0"
+                                                    Content="读 X"
                                                     Command="{Binding DataContext.ReadCurrentXCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding StationCode}" />
+                                            <TextBox Text="{Binding TargetY, UpdateSourceTrigger=PropertyChanged}"
+                                                     Style="{StaticResource ParamTextBoxStyle}" Width="90" Margin="8,0,0,0" />
+                                            <Button Width="70" Height="24" FontSize="11" Margin="8,0,0,0"
+                                                    Content="读 Y"
+                                                    Command="{Binding DataContext.ReadCurrentYCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding StationCode}" />
                                         </StackPanel>
                                     </Border>
@@ -309,7 +325,7 @@
                         </ItemsControl>
 
                         <TextBlock Margin="0,8,0,0" FontSize="11" Foreground="{StaticResource TextMutedBrush}"
-                                   Text="提示：天车必须在线才能读取当前位置。点「读当前位置」后 D5014/D5015 的值自动填入。" />
+                                   Text="提示：仅1～5号天车使用。天车在线时可读取X(D5014/D5015)或Y(D5020)绝对值；Y默认关闭且全部为-1，完成现场标定并保存后再开启。" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
