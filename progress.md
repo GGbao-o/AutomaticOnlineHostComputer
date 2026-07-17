@@ -45,3 +45,6 @@
 - 用户确认仅实施1～5号天车Y绝对编码器微调，不覆盖机械手或Z轴。已创建设计与实施计划；下一步将新增独立的安全默认Y配置、复用现有两次稳定微调助手，并扩展标定页读取/保存Y目标值。
 - 首次完整编译在`XAbsFineTuneHelper.cs:174`发现字符串插值中的条件表达式缺少括号（CS8361）；已针对性修正，随后重新执行完整构建。
 - Y微调实现完成：新增独立`yAbsFineTune`配置与配置页X/Y双列标定，现有前置微调助手改为X通过后检查Y。完整`dotnet build AutomaticOnlineHostComputer.csproj --no-restore --nologo --consoleloggerparameters:"ErrorsOnly;Summary"`成功，0错误（660个既有警告）；配置解析确认Y默认关闭、5台天车共36个目标且均为`-1`。
+- 用户确认实现“斜床自动上料前仅清上位机命令输出”：Modbus 10370~10374，FANUC #1101~#1105。已写入设计和实施计划，开始修改通信服务及两条后端DoLoad门槛。
+- 首次构建发现2号线`SkewCtx`没有Modbus服务字段`M`（2号线全为FANUC）；已删除该不可达分支，保持2号线仅清FANUC #1101~#1105后重新构建。
+- 斜床上料前命令清理实现完成。完整`dotnet build AutomaticOnlineHostComputer.csproj --no-restore --nologo --consoleloggerparameters:"ErrorsOnly;Summary"`成功，0错误（660个既有警告）；静态核对确认两条线调用都早于后天车服务创建和任何区域锁/运动。

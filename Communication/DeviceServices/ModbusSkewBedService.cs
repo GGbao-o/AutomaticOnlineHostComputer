@@ -194,6 +194,23 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             Console.WriteLine("[ModbusSkewBed] 应急清零: 10300~10305/10370~10374 → 0");
         }
 
+        /// <summary>
+        /// 自动上料前清理上一轮上位机写入的动作/握手输出。
+        /// 仅清10370~10374，不清长度、直径、堵孔等加工参数，也不读取或改写机床反馈。
+        /// </summary>
+        public async Task ClearUpperComputerCommandOutputsAsync(CancellationToken ct = default)
+        {
+            await SafeCallAsync(async token =>
+            {
+                await _client.WriteAsync(ModbusSkewBedAddress.MachiningMode, 0, token);
+                await _client.WriteAsync(ModbusSkewBedAddress.TailstockClampCmd, 0, token);
+                await _client.WriteAsync(ModbusSkewBedAddress.RemoteStart, 0, token);
+                await _client.WriteAsync(ModbusSkewBedAddress.TailstockOpenCmd, 0, token);
+                await _client.WriteAsync(ModbusSkewBedAddress.TailstockStopCmd, 0, token);
+            }, "上料前清零10370~10374", ct);
+            Console.WriteLine("[ModbusSkewBed] 上料前命令清零: 10370~10374 → 0");
+        }
+
         // ─── 私有辅助 ─────────────────────────────────────────────────
 
         private async Task<T> SafeCallAsync<T>(Func<CancellationToken, Task<T>> action, string desc, CancellationToken ct)

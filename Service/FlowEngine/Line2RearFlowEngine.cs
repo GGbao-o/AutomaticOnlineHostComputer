@@ -1091,6 +1091,17 @@ public sealed class Line2RearFlowEngine : IDisposable
         throw new InvalidOperationException($"{bed.Code}斜床通信服务未注入或未连接, 设备寄存器未清零");
     }
 
+    /// <summary>自动上料前只清目标斜床的命令输出，不清尺寸/堵孔参数、FANUC #909或机床反馈。</summary>
+    private static async Task ClearSkewLoadCommandOutputsAsync(SkewCtx bed, CancellationToken ct)
+    {
+        if (bed.F != null)
+        {
+            await bed.F.ClearUpperComputerCommandOutputsAsync(ct);
+            return;
+        }
+        throw new InvalidOperationException($"{bed.Code}斜床通信服务未注入或未连接，无法清理上料前命令输出");
+    }
+
     private SkewCtx? FindBed(string bedCode)
     {
         foreach (var bed in _beds)
@@ -1231,6 +1242,19 @@ public sealed class Line2RearFlowEngine : IDisposable
             _craneRearLock.Release();
             bed.St = SkewState.Idle;
             Console.WriteLine($"[上料] ❌ 失败: {wp.IdentityText} L={wp.Length}mm 超出 {bed.Code} 最大加工长度 {_cfg.SkewBed.GetMaxWorkpieceLengthMm(bed.Code)}mm, 已退回中转架缓存");
+            return;
+        }
+        try
+        {
+            Console.WriteLine($"[上料] {bed.Code} 已选中，天车取板前清理上位机命令输出...");
+            await ClearSkewLoadCommandOutputsAsync(bed, ct);
+        }
+        catch (Exception ex)
+        {
+            lock (_wpLock) RestoreRackWorkpieceLocked(rs, wp, rackArrivalSeq);
+            _craneRearLock.Release();
+            bed.St = SkewState.Idle;
+            Console.WriteLine($"[上料] ❌ {bed.Code} 上料前命令清理失败，未取中转架{rs}工件，缓存已恢复：{ex.Message}");
             return;
         }
         wp.ReportStage($"2号线 后端上斜床 {bed.Code}");

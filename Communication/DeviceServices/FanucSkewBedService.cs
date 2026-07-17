@@ -581,6 +581,31 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             }, "FANUC应急清零", ct);
         }
 
+        /// <summary>
+        /// 自动上料前清理上一轮上位机写入的天车握手输出。
+        /// 仅清#1101~#1105，不清#800/#801/#802/#909加工参数，也不读取或改写机床输入状态。
+        /// </summary>
+        public Task ClearUpperComputerCommandOutputsAsync(CancellationToken ct = default)
+        {
+            return SafeCallAsync(() =>
+            {
+                int[] addrs =
+                {
+                    FanucSkewBedAddress.DataSentDone,
+                    FanucSkewBedAddress.CraneLoadInPlace,
+                    FanucSkewBedAddress.CraneLoadDone,
+                    FanucSkewBedAddress.CraneUnloadInPlace,
+                    FanucSkewBedAddress.CraneUnloadDone
+                };
+                foreach (int addr in addrs)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    _sdk.SetMacro(addr, 0.0);
+                }
+                Console.WriteLine("[FANUC-SDK] 上料前命令清零: #1101~#1105 → 0");
+            }, "FANUC上料前清零#1101~#1105", ct);
+        }
+
         public Task<string> TestPmcAsync(CancellationToken ct = default)
         {
             return SafeCallAsync(() =>
