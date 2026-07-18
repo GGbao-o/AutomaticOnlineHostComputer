@@ -30,7 +30,8 @@ internal static class XAbsFineTuneHelper
         string Name,
         MotionConfig.AxisAbsFineTuneSection Settings,
         Func<CraneStatus, int> DisplayPosition,
-        Func<CraneStatus, int> AbsoluteEncoder);
+        Func<CraneStatus, int> AbsoluteEncoder,
+        int AbsolutePerDisplayDirection);
 
     private sealed record ActiveAxisFineTune(AxisFineTune Axis, int TargetAbs)
     {
@@ -39,6 +40,7 @@ internal static class XAbsFineTuneHelper
         public int MaxAdjust => Math.Max(Tolerance, Axis.Settings.MaxAdjustMm);
         public int DisplayPosition(CraneStatus status) => Axis.DisplayPosition(status);
         public int AbsoluteEncoder(CraneStatus status) => Axis.AbsoluteEncoder(status);
+        public int AbsolutePerDisplayDirection => Axis.AbsolutePerDisplayDirection;
     }
 
     private sealed record AxisCorrection(ActiveAxisFineTune Axis, int Delta)
@@ -56,8 +58,8 @@ internal static class XAbsFineTuneHelper
     {
         var axes = new[]
         {
-            new AxisFineTune("X", cfg.XAbsFineTune, status => status.XPos, status => status.XEncoderAbs),
-            new AxisFineTune("Y", cfg.YAbsFineTune, status => status.YPos, status => status.YEncoderAbs)
+            new AxisFineTune("X", cfg.XAbsFineTune, status => status.XPos, status => status.XEncoderAbs, +1),
+            new AxisFineTune("Y", cfg.YAbsFineTune, status => status.YPos, status => status.YEncoderAbs, -1)
         };
         List<ActiveAxisFineTune> activeAxes = ResolveActiveAxes(axes, craneNo, stationCode, context);
         if (activeAxes.Count == 0)
@@ -94,13 +96,14 @@ internal static class XAbsFineTuneHelper
             int targetY = -1;
             foreach (AxisCorrection correction in movingAxes)
             {
-                int adjustDisplay = correction.Axis.DisplayPosition(status) + correction.Delta;
+                int deltaDisplay = correction.Delta * correction.Axis.AbsolutePerDisplayDirection;
+                int adjustDisplay = correction.Axis.DisplayPosition(status) + deltaDisplay;
                 Console.WriteLine(
                     $"[{correction.Axis.Name}AbsFineTune] [{context}] {stationCode} 需要同步微调({fineTuneAttempt}/{FineTuneMaxAttempts}): " +
                     $"显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
                     $"当前Abs{correction.Axis.Name}={correction.Axis.AbsoluteEncoder(status)}, " +
-                    $"目标Abs{correction.Axis.Name}={correction.Axis.TargetAbs}, Δ={correction.Delta}mm → " +
-                    $"微调显示{correction.Axis.Name}={adjustDisplay}");
+                    $"目标Abs{correction.Axis.Name}={correction.Axis.TargetAbs}, ΔAbs={correction.Delta}mm, " +
+                    $"Δ显示={deltaDisplay}mm → 微调显示{correction.Axis.Name}={adjustDisplay}");
 
                 if (correction.Axis.Name == "X") targetX = adjustDisplay;
                 else targetY = adjustDisplay;
@@ -278,7 +281,8 @@ internal static class XAbsFineTuneHelper
         int displayMove = axis.DisplayPosition(afterMove) - axis.DisplayPosition(beforeMove);
         int absMove = axis.AbsoluteEncoder(afterMove) - axis.AbsoluteEncoder(beforeMove);
         int allowedError = Math.Max(axis.Tolerance, StableReadToleranceMm);
-        int followError = absMove - displayMove;
+        int expectedAbsMove = displayMove * axis.AbsolutePerDisplayDirection;
+        int followError = absMove - expectedAbsMove;
 
         if (Math.Abs(displayMove) <= allowedError)
         {
@@ -286,11 +290,11 @@ internal static class XAbsFineTuneHelper
             return false;
         }
 
-        if (Math.Sign(absMove) != Math.Sign(displayMove) || Math.Abs(followError) > allowedError)
+        if (Math.Abs(followError) > allowedError)
         {
             reason = $"显示{axis.Name} {axis.DisplayPosition(beforeMove)}->{axis.DisplayPosition(afterMove)}(Δ={displayMove}mm), " +
                      $"Abs{axis.Name} {axis.AbsoluteEncoder(beforeMove)}->{axis.AbsoluteEncoder(afterMove)}(Δ={absMove}mm), " +
-                     $"跟随误差={followError}mm, 允许={allowedError}mm";
+                     $"预期Abs位移={expectedAbsMove}mm, 跟随误差={followError}mm, 允许={allowedError}mm";
             return false;
         }
 
