@@ -33,7 +33,7 @@ internal static class XAbsFineTuneHelper
         Func<CraneStatus, int> AbsoluteEncoder,
         int AbsolutePerDisplayDirection);
 
-    private sealed record ActiveAxisFineTune(AxisFineTune Axis, int TargetAbs)
+    private sealed record ActiveAxisFineTune(AxisFineTune Axis, int BaseTargetAbs, int TargetAbs)
     {
         public string Name => Axis.Name;
         public int Tolerance => Math.Max(0, Axis.Settings.ToleranceMm);
@@ -41,6 +41,10 @@ internal static class XAbsFineTuneHelper
         public int DisplayPosition(CraneStatus status) => Axis.DisplayPosition(status);
         public int AbsoluteEncoder(CraneStatus status) => Axis.AbsoluteEncoder(status);
         public int AbsolutePerDisplayDirection => Axis.AbsolutePerDisplayDirection;
+        public int TargetAbsOffset => TargetAbs - BaseTargetAbs;
+        public string TargetDescription => Name == "Y" && TargetAbsOffset != 0
+            ? $"基准AbsY={BaseTargetAbs}, 动态偏移={TargetAbsOffset:+#;-#;0}mm, 动态目标AbsY={TargetAbs}"
+            : $"目标Abs{Name}={TargetAbs}";
     }
 
     private sealed record AxisCorrection(ActiveAxisFineTune Axis, int Delta)
@@ -54,14 +58,15 @@ internal static class XAbsFineTuneHelper
         int craneNo,
         string stationCode,
         string context,
-        CancellationToken ct)
+        CancellationToken ct,
+        int yTargetAbsOffsetMm = 0)
     {
         var axes = new[]
         {
             new AxisFineTune("X", cfg.XAbsFineTune, status => status.XPos, status => status.XEncoderAbs, +1),
             new AxisFineTune("Y", cfg.YAbsFineTune, status => status.YPos, status => status.YEncoderAbs, -1)
         };
-        List<ActiveAxisFineTune> activeAxes = ResolveActiveAxes(axes, craneNo, stationCode, context);
+        List<ActiveAxisFineTune> activeAxes = ResolveActiveAxes(axes, craneNo, stationCode, context, yTargetAbsOffsetMm);
         if (activeAxes.Count == 0)
             return;
 
@@ -85,7 +90,7 @@ internal static class XAbsFineTuneHelper
                         $"[{context}] {stationCode} {correction.Axis.Name}绝对编码器偏差过大: " +
                         $"显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
                         $"当前Abs{correction.Axis.Name}={correction.Axis.AbsoluteEncoder(status)}, " +
-                        $"目标Abs{correction.Axis.Name}={correction.Axis.TargetAbs}, Δ={correction.Delta}mm > " +
+                        $"{correction.Axis.TargetDescription}, Δ={correction.Delta}mm > " +
                         $"最大微调{correction.Axis.MaxAdjust}mm, 禁止Z下降");
                 }
             }
@@ -102,7 +107,7 @@ internal static class XAbsFineTuneHelper
                     $"[{correction.Axis.Name}AbsFineTune] [{context}] {stationCode} 需要同步微调({fineTuneAttempt}/{FineTuneMaxAttempts}): " +
                     $"显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
                     $"当前Abs{correction.Axis.Name}={correction.Axis.AbsoluteEncoder(status)}, " +
-                    $"目标Abs{correction.Axis.Name}={correction.Axis.TargetAbs}, ΔAbs={correction.Delta}mm, " +
+                    $"{correction.Axis.TargetDescription}, ΔAbs={correction.Delta}mm, " +
                     $"Δ显示={deltaDisplay}mm → 微调显示{correction.Axis.Name}={adjustDisplay}");
 
                 if (correction.Axis.Name == "X") targetX = adjustDisplay;
@@ -133,7 +138,7 @@ internal static class XAbsFineTuneHelper
             .Select(correction =>
                 $"{correction.Axis.Name}: 显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
                 $"当前Abs{correction.Axis.Name}={correction.Axis.AbsoluteEncoder(status)}, " +
-                $"目标Abs{correction.Axis.Name}={correction.Axis.TargetAbs}, Δ={correction.Delta}mm, 容差={correction.Axis.Tolerance}mm"));
+                $"{correction.Axis.TargetDescription}, Δ={correction.Delta}mm, 容差={correction.Axis.Tolerance}mm"));
         throw new InvalidOperationException($"[{context}] {stationCode} XY绝对编码器两次微调后仍超差: {remaining}, 禁止Z下降");
     }
 
@@ -141,7 +146,8 @@ internal static class XAbsFineTuneHelper
         IEnumerable<AxisFineTune> axes,
         int craneNo,
         string stationCode,
-        string context)
+        string context,
+        int yTargetAbsOffsetMm)
     {
         var activeAxes = new List<ActiveAxisFineTune>();
         foreach (AxisFineTune axis in axes)
@@ -153,13 +159,14 @@ internal static class XAbsFineTuneHelper
                 continue;
             }
 
-            if (!axis.Settings.TryGetTarget(craneNo, stationCode, out int targetAbs) || targetAbs == -1)
+            if (!axis.Settings.TryGetTarget(craneNo, stationCode, out int baseTargetAbs) || baseTargetAbs == -1)
             {
                 Console.WriteLine($"{prefix} [{context}] {stationCode} 未配置{axis.Name}AbsEncoder或为-1, 跳过微调");
                 continue;
             }
 
-            activeAxes.Add(new ActiveAxisFineTune(axis, targetAbs));
+            int targetAbs = axis.Name == "Y" ? baseTargetAbs + yTargetAbsOffsetMm : baseTargetAbs;
+            activeAxes.Add(new ActiveAxisFineTune(axis, baseTargetAbs, targetAbs));
         }
 
         return activeAxes;
@@ -176,7 +183,7 @@ internal static class XAbsFineTuneHelper
                 $"[{correction.Axis.Name}AbsFineTune] [{context}] {stationCode} 合格: " +
                 $"显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
                 $"当前Abs{correction.Axis.Name}={correction.Axis.AbsoluteEncoder(status)}, " +
-                $"目标Abs{correction.Axis.Name}={correction.Axis.TargetAbs}, Δ={correction.Delta}mm, 容差={correction.Axis.Tolerance}mm");
+                $"{correction.Axis.TargetDescription}, Δ={correction.Delta}mm, 容差={correction.Axis.Tolerance}mm");
         }
     }
 

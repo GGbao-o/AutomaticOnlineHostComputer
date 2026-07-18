@@ -1698,7 +1698,9 @@ public sealed class Line2RearFlowEngine : IDisposable
             // Console.WriteLine($"│ [下料] ① Y→顶尖对中位置{yPick}");
             //先移动xy   移动到xy指定位置
             await cr.MoveAbsoluteAsync(bx + _ox, yPick, -1, ct: ct);
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(cr, _cfg, CraneRearNo, bed.Code, $"2号线后天车-{bed.Code}下料取料前", ct);
+            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                cr, _cfg, CraneRearNo, bed.Code, $"2号线后天车-{bed.Code}下料取料前", ct,
+                yTargetAbsOffsetMm: yOff);
             //下降取料    加上数据库的偏移值   lz是计算公式算的
             int zDown = lz + _oz;
             Console.WriteLine($"│ [下料] ① Z下降到{lz}(Z-半径)+天车偏移({_oz})={zDown} 充磁取料");
