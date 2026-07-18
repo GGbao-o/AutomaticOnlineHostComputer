@@ -134,8 +134,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     XEncoderAbs  = ((r[15] & 0xFFFF) << 16) | (r[14] & 0xFFFF),  // D5014(低)+D5015(高)
                     XEncoderZero = ((r[17] & 0xFFFF) << 16) | (r[16] & 0xFFFF),  // D5016(低)+D5017(高)
                     XPos         = ((r[19] & 0xFFFF) << 16) | (r[18] & 0xFFFF),  // D5018(低)+D5019(高)
-                    YEncoderAbs  = (ushort)r[20],  // D5020
-                    YEncoderZero = (ushort)r[21],  // D5021
+                    YEncoderAbs  = (short)r[20],   // D5020（INT16，自动提升为C# int）
+                    YEncoderZero = (short)r[21],   // D5021（INT16，自动提升为C# int）
                     YPos         = (ushort)r[22],  // D5022（无符号，0~65535）
                     ZEncoderAbs  = (ushort)r[23],  // D5023
                     ZEncoderZero = (ushort)r[24],  // D5024
@@ -1107,8 +1107,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public int   XEncoderZero        { get; set; }
         /// <summary>X轴显示坐标（DINT，D5018~D5019）</summary>
         public int   XPos                { get; set; }
-        public int   YEncoderAbs         { get; set; }  // D5020（ushort→int）
-        public int   YEncoderZero        { get; set; }  // D5021（ushort→int）
+        public int   YEncoderAbs         { get; set; }  // D5020（INT16→int）
+        public int   YEncoderZero        { get; set; }  // D5021（INT16→int）
         /// <summary>Y轴显示坐标（INT，0~65535）</summary>
         public int   YPos                { get; set; }  // D5022（ushort→int，无符号避免 32768+ 显示为负数）
         public int   ZEncoderAbs         { get; set; }  // D5023（ushort→int）
