@@ -17,6 +17,8 @@ public sealed class OperationalEventModelTests
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.AbsY.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetX.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetY.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetZ.Availability);
+        Assert.False(evidence.TargetZ.HasValue);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetAbsX.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetAbsY.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.DeltaX.Availability);
@@ -45,7 +47,7 @@ public sealed class OperationalEventModelTests
             {
                 evidence.DisplayX.Reason, evidence.DisplayY.Reason, evidence.DisplayZ.Reason,
                 evidence.AbsX.Reason, evidence.AbsY.Reason, evidence.TargetX.Reason,
-                evidence.TargetY.Reason, evidence.TargetAbsX.Reason, evidence.TargetAbsY.Reason,
+                evidence.TargetY.Reason, evidence.TargetZ.Reason, evidence.TargetAbsX.Reason, evidence.TargetAbsY.Reason,
                 evidence.LastSentDisplayTargetX.Reason, evidence.LastSentDisplayTargetY.Reason,
                 evidence.FailureStage.Reason, evidence.DeltaX.Reason, evidence.DeltaY.Reason,
                 evidence.ToleranceX.Reason, evidence.ToleranceY.Reason,
@@ -115,6 +117,7 @@ public sealed class OperationalEventModelTests
             DisplayX = EvidenceValue<int>.Confirmed(120, "界面坐标快照"),
             AbsX = EvidenceValue<int>.Confirmed(1000, "绝对坐标快照"),
             TargetX = EvidenceValue<int>.Confirmed(125, "动作目标"),
+            TargetZ = EvidenceValue<int>.Confirmed(0, "Z动作目标已明确为零"),
             DeltaX = EvidenceValue<int>.Confirmed(-5, "调用点已计算"),
             LastSentDisplayTargetX = EvidenceValue<int>.Confirmed(125, "最后一次X移动命令参数"),
             XFineTuneCommand = new DeviceCommandEvidence(
@@ -134,6 +137,9 @@ public sealed class OperationalEventModelTests
         Assert.Equal(EvidenceAvailability.Unavailable, position.DisplayY.Availability);
         Assert.Equal(EvidenceAvailability.Confirmed, position.AbsX.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, position.AbsY.Availability);
+        Assert.True(position.TargetZ.HasValue);
+        Assert.Equal(0, position.TargetZ.Value);
+        Assert.Equal(EvidenceAvailability.Confirmed, position.TargetZ.Availability);
         Assert.Equal(-5, position.DeltaX.Value);
         Assert.Equal(EvidenceAvailability.Unavailable, position.ToleranceY.Availability);
         Assert.Equal(1, position.FeedbackRereadCount.Value);

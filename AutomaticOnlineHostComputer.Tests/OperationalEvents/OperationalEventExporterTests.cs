@@ -37,6 +37,24 @@ public sealed class OperationalEventExporterTests
         Assert.True(headers.Length > 150, $"实际列数: {headers.Length}");
         Assert.Contains("First.Position.DisplayX.Availability", headers);
         Assert.Contains("Latest.Position.FeedbackRereadCount.Value", headers);
+        AssertTargetZQuadruple(
+            headers,
+            values,
+            "First.Position.TargetZ",
+            "Confirmed",
+            "true",
+            "0",
+            "Z动作目标已明确为零");
+        AssertTargetZQuadruple(
+            headers,
+            values,
+            "Latest.Position.TargetZ",
+            "Unavailable",
+            "false",
+            "<Unavailable>",
+            "最近动作没有Z目标");
+        AssertTargetZColumnOrder(headers, "First.Position");
+        AssertTargetZColumnOrder(headers, "Latest.Position");
         Assert.Contains("First.Exception.InnerExceptionChain", headers);
         Assert.Contains("Latest.BusinessState.PhysicalCommitments", headers);
         Assert.Contains("EffectiveGuidance.RequiredActions", headers);
@@ -227,6 +245,37 @@ public sealed class OperationalEventExporterTests
 
     private static JsonDocument ParseJsonColumn(string[] headers, string[] values, string name) =>
         JsonDocument.Parse(Value(headers, values, name));
+
+    private static void AssertTargetZQuadruple(
+        string[] headers,
+        string[] values,
+        string prefix,
+        string availability,
+        string hasValue,
+        string value,
+        string reason)
+    {
+        Assert.Equal(availability, Value(headers, values, prefix + ".Availability"));
+        Assert.Equal(hasValue, Value(headers, values, prefix + ".HasValue"));
+        Assert.Equal(value, Value(headers, values, prefix + ".Value"));
+        Assert.Equal(reason, Value(headers, values, prefix + ".Reason"));
+    }
+
+    private static void AssertTargetZColumnOrder(string[] headers, string positionPrefix)
+    {
+        int targetYReason = Array.IndexOf(headers, positionPrefix + ".TargetY.Reason");
+        int targetZAvailability = Array.IndexOf(headers, positionPrefix + ".TargetZ.Availability");
+        int targetZHasValue = Array.IndexOf(headers, positionPrefix + ".TargetZ.HasValue");
+        int targetZValue = Array.IndexOf(headers, positionPrefix + ".TargetZ.Value");
+        int targetZReason = Array.IndexOf(headers, positionPrefix + ".TargetZ.Reason");
+        int targetAbsXAvailability = Array.IndexOf(headers, positionPrefix + ".TargetAbsX.Availability");
+
+        Assert.Equal(targetYReason + 1, targetZAvailability);
+        Assert.Equal(targetZAvailability + 1, targetZHasValue);
+        Assert.Equal(targetZHasValue + 1, targetZValue);
+        Assert.Equal(targetZValue + 1, targetZReason);
+        Assert.Equal(targetZReason + 1, targetAbsXAvailability);
+    }
 
     private static string Value(string[] headers, string[] values, string name)
     {

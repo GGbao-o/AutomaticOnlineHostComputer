@@ -90,7 +90,7 @@ public sealed class OperationalEventFormatterTests
         [
             "EventId", "EventCode", "First ActionId", "Latest ActionId", "首次物理结论", "最近物理结论",
             "首次DetailMessage", "最近DetailMessage", "首次BusinessPaused", "最近BusinessPaused",
-            "DisplayX", "DisplayY", "DisplayZ", "AbsX", "AbsY", "TargetX", "TargetY", "TargetAbsX", "TargetAbsY",
+            "DisplayX", "DisplayY", "DisplayZ", "AbsX", "AbsY", "TargetX", "TargetY", "TargetZ", "TargetAbsX", "TargetAbsY",
             "LastSentDisplayTargetX", "LastSentDisplayTargetY", "XFineTuneCommand", "YFineTuneCommand", "FailureStage",
             "DeltaX", "DeltaY", "ToleranceX", "ToleranceY", "MaximumCorrectionX", "MaximumCorrectionY",
             "StableSampleCount", "StageReadCount", "TotalReadCount", "FineTuneAttemptCount", "FeedbackRereadCount", "CapturedAtUtc",
@@ -108,9 +108,33 @@ public sealed class OperationalEventFormatterTests
         Assert.Contains("[首次证据]", text, StringComparison.Ordinal);
         Assert.Contains("[最近证据]", text, StringComparison.Ordinal);
         Assert.Contains("DisplayX: Confirmed/HasValue=True/Value=0", text, StringComparison.Ordinal);
+        Assert.Contains("TargetZ: Confirmed/HasValue=True/Value=0/Reason=Z动作目标已明确为零", text, StringComparison.Ordinal);
+        Assert.Contains("TargetZ: Unavailable/HasValue=False/Value=不可用：最近动作没有Z目标/Reason=最近动作没有Z目标", text, StringComparison.Ordinal);
         Assert.Contains("可能已发送但未取得确认", text, StringComparison.Ordinal);
         Assert.Contains("首次异常消息", text, StringComparison.Ordinal);
         Assert.Contains("最近异常消息", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Position_detail_keeps_first_and_latest_target_z_evidence_separate()
+    {
+        OperationalEvent item = OperationalEventFormattingTestFactory.CreateCompleteEvent();
+
+        string section = new OperationalEventFormatter().FormatSections(item).PositionAndFineTune;
+
+        int firstMarker = section.IndexOf("[首次证据]", StringComparison.Ordinal);
+        int confirmedZero = section.IndexOf(
+            "TargetZ: Confirmed/HasValue=True/Value=0/Reason=Z动作目标已明确为零",
+            StringComparison.Ordinal);
+        int latestMarker = section.IndexOf("[最近证据]", StringComparison.Ordinal);
+        int unavailable = section.IndexOf(
+            "TargetZ: Unavailable/HasValue=False/Value=不可用：最近动作没有Z目标/Reason=最近动作没有Z目标",
+            StringComparison.Ordinal);
+
+        Assert.True(firstMarker >= 0);
+        Assert.True(confirmedZero > firstMarker);
+        Assert.True(latestMarker > confirmedZero);
+        Assert.True(unavailable > latestMarker);
     }
 
     [Fact]
@@ -223,6 +247,7 @@ internal static class OperationalEventFormattingTestFactory
             AbsY = EvidenceValue<int>.Confirmed(2000, "绝对编码器"),
             TargetX = EvidenceValue<int>.Confirmed(5, "计算目标"),
             TargetY = EvidenceValue<int>.Confirmed(25, "计算目标"),
+            TargetZ = EvidenceValue<int>.Confirmed(0, "Z动作目标已明确为零"),
             TargetAbsX = EvidenceValue<int>.Confirmed(1005, "配置目标"),
             TargetAbsY = EvidenceValue<int>.Confirmed(2005, "配置目标"),
             LastSentDisplayTargetX = EvidenceValue<int>.Confirmed(5, "最后X命令参数"),
@@ -246,6 +271,7 @@ internal static class OperationalEventFormattingTestFactory
         PositionEvidence latestPosition = firstPosition with
         {
             DisplayX = EvidenceValue<int>.Confirmed(4, "最近显示坐标"),
+            TargetZ = EvidenceValue<int>.Unavailable("最近动作没有Z目标"),
             YFineTuneCommand = new(DeviceCommandState.SentUnconfirmed, EvidenceAvailability.Unknown, "Y命令等待响应超时"),
             FailureStage = EvidenceValue<string>.Confirmed("feedback-reread", "最近异常阶段"),
             TotalReadCount = EvidenceValue<int>.Confirmed(9, "累计")

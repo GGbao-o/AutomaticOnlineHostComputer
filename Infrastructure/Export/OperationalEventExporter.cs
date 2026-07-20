@@ -265,6 +265,7 @@ public static class OperationalEventExporter
         Int("Position.AbsY", value => value.Position.AbsY);
         Int("Position.TargetX", value => value.Position.TargetX);
         Int("Position.TargetY", value => value.Position.TargetY);
+        Int("Position.TargetZ", value => value.Position.TargetZ);
         Int("Position.TargetAbsX", value => value.Position.TargetAbsX);
         Int("Position.TargetAbsY", value => value.Position.TargetAbsY);
         Int("Position.LastSentDisplayTargetX", value => value.Position.LastSentDisplayTargetX);

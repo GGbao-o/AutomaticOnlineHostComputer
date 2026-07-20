@@ -178,6 +178,7 @@ public sealed class OperationalEventFormatter
         Add(builder, "AbsY", FormatEvidenceValue(item.AbsY));
         Add(builder, "TargetX", FormatEvidenceValue(item.TargetX));
         Add(builder, "TargetY", FormatEvidenceValue(item.TargetY));
+        Add(builder, "TargetZ", FormatEvidenceValue(item.TargetZ));
         Add(builder, "TargetAbsX", FormatEvidenceValue(item.TargetAbsX));
         Add(builder, "TargetAbsY", FormatEvidenceValue(item.TargetAbsY));
         Add(builder, "LastSentDisplayTargetX", FormatEvidenceValue(item.LastSentDisplayTargetX));
