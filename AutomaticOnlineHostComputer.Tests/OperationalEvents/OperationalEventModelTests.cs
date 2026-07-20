@@ -37,6 +37,30 @@ public sealed class OperationalEventModelTests
     }
 
     [Fact]
+    public void Business_pause_state_is_evidence_not_an_inferred_boolean()
+    {
+        OperationalEventContext context = new()
+        {
+            EventCode = "LEGACY",
+            Severity = OperationalEventSeverity.Warning,
+            Category = OperationalEventCategory.Safety,
+            Scope = "line-1",
+            Engine = "legacy-adapter",
+            DeviceType = "unknown",
+            DeviceNo = "",
+            Station = "",
+            ActionStage = "callback",
+            Title = "legacy event",
+            Evidence = OperationalEvidence.Unavailable("旧入口没有提供证据")
+        };
+
+        Assert.Equal(EvidenceAvailability.Unknown, context.BusinessPaused.Availability);
+        Assert.False(context.BusinessPaused.HasValue);
+        Assert.Equal(string.Empty, context.ActionId);
+        Assert.Equal(string.Empty, context.CorrelationKey);
+    }
+
+    [Fact]
     public void Confirmed_zero_coordinate_is_distinct_from_unknown_coordinate()
     {
         EvidenceValue<int> confirmedZero = EvidenceValue<int>.Confirmed(0, "显示坐标已读取为零");
@@ -238,7 +262,8 @@ public sealed class OperationalEventModelTests
             "1号线", "前端引擎", "原安全回调", "天车", "1", "ST713",
             "取料", "取料失败", physical,
             physical with { Code = PhysicalConclusionCode.ManualConfirmationRequired },
-            false, true,
+            EvidenceValue<bool>.Confirmed(false, "业务未暂停"),
+            EvidenceValue<bool>.Confirmed(true, "业务已暂停"),
             "首次详情", "最近详情",
             "首次结果", "最近结果",
             evidence, evidence);
@@ -252,8 +277,10 @@ public sealed class OperationalEventModelTests
         Assert.Equal("最近详情", item.LatestDetailMessage);
         Assert.Equal("首次结果", item.FirstResult);
         Assert.Equal("最近结果", item.LatestResult);
-        Assert.False(item.FirstBusinessPaused);
-        Assert.True(item.LatestBusinessPaused);
+        Assert.True(item.FirstBusinessPaused.HasValue);
+        Assert.False(item.FirstBusinessPaused.Value);
+        Assert.True(item.LatestBusinessPaused.HasValue);
+        Assert.True(item.LatestBusinessPaused.Value);
     }
 
     [Fact]
@@ -273,7 +300,9 @@ public sealed class OperationalEventModelTests
                 DateTime.UnixEpoch, DateTime.UnixEpoch, 1L,
                 "全局", "测试", "测试", "PLC", "1", "R6101",
                 "等待", "等待滞留", physical, physical,
-                false, false, "首次", "最近", "", "", evidence, evidence)
+                EvidenceValue<bool>.Unknown("未取得暂停状态"),
+                EvidenceValue<bool>.Unknown("未取得暂停状态"),
+                "首次", "最近", "", "", evidence, evidence)
         };
         var diagnostics = new OperationalEventDiagnostics(1, 0, 0, 0, null, string.Empty);
 

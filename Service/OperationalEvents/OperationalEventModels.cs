@@ -26,6 +26,8 @@ public sealed record OperationalEventContext
 
     public string ActionId { get; init; } = string.Empty;
 
+    public string CorrelationKey { get; init; } = string.Empty;
+
     public bool IndependentAction { get; init; }
 
     public string DetailMessage { get; init; } = string.Empty;
@@ -40,7 +42,8 @@ public sealed record OperationalEventContext
         "物理结论未知",
         "调用点没有确认依据");
 
-    public bool BusinessPaused { get; init; }
+    public EvidenceValue<bool> BusinessPaused { get; init; } =
+        EvidenceValue<bool>.Unknown("调用点没有提供业务暂停状态");
 
     public required OperationalEvidence Evidence { get; init; }
 
@@ -67,8 +70,8 @@ public sealed record OperationalEvent(
     string Title,
     PhysicalConclusionEvidence FirstPhysicalConclusion,
     PhysicalConclusionEvidence LatestPhysicalConclusion,
-    bool FirstBusinessPaused,
-    bool LatestBusinessPaused,
+    EvidenceValue<bool> FirstBusinessPaused,
+    EvidenceValue<bool> LatestBusinessPaused,
     string FirstDetailMessage,
     string LatestDetailMessage,
     string FirstResult,
@@ -82,7 +85,9 @@ public sealed record OperationalEventDiagnostics(
     long EvictedCount,
     long ReporterFailureCount,
     DateTime? LastReporterFailureAtUtc,
-    string LastReporterFailureReason);
+    string LastReporterFailureReason,
+    long TransientStateEvictedCount = 0,
+    long StageStateEvictedCount = 0);
 
 public sealed record OperationalEventStoreSnapshot
 {
