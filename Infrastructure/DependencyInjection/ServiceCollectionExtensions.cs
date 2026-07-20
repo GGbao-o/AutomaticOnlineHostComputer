@@ -2,6 +2,7 @@ using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Infrastructure.Navigation;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 using AutomaticOnlineHostComputer.Service;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AutomaticOnlineHostComputer.Infrastructure.DependencyInjection;
@@ -95,7 +96,14 @@ services.AddSingleton<HomeViewModel>();
         // ── 3. 注册导航服务（页面缓存）────────────────────────────────────
         services.AddSingleton<CachedNavigationService>();
 
-        // ── 3.1 人工关注事件中心（仅当前程序生命周期内存）──────────────────
+        // ── 3.1 结构化生产异常旁路（仅当前程序生命周期内存）────────────────
+        services.AddSingleton(_ => OperationalEventMonitorOptionsLoader.Load());
+        services.AddSingleton<IOperationalEventClock, SystemOperationalEventClock>();
+        services.AddSingleton<OperationalEventStore>();
+        services.AddSingleton<IOperationalEventStore>(
+            provider => provider.GetRequiredService<OperationalEventStore>());
+        services.AddSingleton<IOperationalEventReporter, OperationalEventReporter>();
+        services.AddSingleton<OperationalEventFormatter>();
         services.AddSingleton<AttentionEventCenter>();
 
         // ── 4. 注册工件跟踪/设备数据写库服务（天车实时坐标不再持久化）─────────

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Service;
 
@@ -41,9 +43,20 @@ public sealed class AttentionEventCenter
 {
     public const int Capacity = 500;
 
-    private readonly object _gate = new();
-    private readonly List<AttentionEvent> _events = new();
-    private long _nextSequence;
+    private const string Unknown = "Unknown";
+    private const string UnavailableReason = "旧Attention事件入口没有提供该项证据";
+
+    private readonly IOperationalEventStore _store;
+    private readonly IOperationalEventReporter _reporter;
+
+    public AttentionEventCenter(
+        IOperationalEventStore store,
+        IOperationalEventReporter reporter)
+    {
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _reporter = reporter ?? throw new ArgumentNullException(nameof(reporter));
+        _store.Changed += ForwardChanged;
+    }
 
     /// <summary>仅用于通知 UI 刷新；订阅方异常由 Record 兜底吞掉。</summary>
     public event Action? Changed;
@@ -53,22 +66,37 @@ public sealed class AttentionEventCenter
     {
         try
         {
-            lock (_gate)
+            LegacyEventMapping mapping = Map(kind);
+            string safeScope = scope ?? string.Empty;
+            string safeSource = source ?? string.Empty;
+            string safeMessage = message ?? string.Empty;
+            _reporter.Report(new OperationalEventContext
             {
-                _events.Add(new AttentionEvent(
-                    ++_nextSequence,
-                    DateTime.Now,
-                    kind,
-                    scope,
-                    source,
-                    message,
-                    result));
-
-                if (_events.Count > Capacity)
-                    _events.RemoveAt(0);
-            }
-
-            Changed?.Invoke();
+                EventCode = mapping.EventCode,
+                Severity = mapping.Severity,
+                Category = mapping.Category,
+                Scope = safeScope,
+                Engine = Unknown,
+                DeviceType = Unknown,
+                DeviceNo = Unknown,
+                Station = Unknown,
+                ActionStage = Unknown,
+                Title = mapping.Title,
+                Source = safeSource,
+                ActionId = string.Empty,
+                CorrelationKey = BuildCorrelationKey(kind, safeScope, safeSource, safeMessage),
+                IndependentAction = false,
+                DetailMessage = safeMessage,
+                Result = result ?? string.Empty,
+                CapturedException = null,
+                PhysicalConclusion = new PhysicalConclusionEvidence(
+                    PhysicalConclusionCode.Unknown,
+                    EvidenceAvailability.Unknown,
+                    "旧Attention事件未提供物理结论",
+                    UnavailableReason),
+                BusinessPaused = EvidenceValue<bool>.Unknown("旧Attention事件入口没有暂停参数"),
+                Evidence = OperationalEvidence.Unavailable(UnavailableReason)
+            });
         }
         catch
         {
@@ -78,7 +106,131 @@ public sealed class AttentionEventCenter
 
     public IReadOnlyList<AttentionEvent> Snapshot()
     {
-        lock (_gate)
-            return _events.OrderByDescending(x => x.Sequence).ToArray();
+        try
+        {
+            return _store.Snapshot().Events
+                .Select(TryMapBack)
+                .Where(item => item is not null)
+                .Cast<AttentionEvent>()
+                .ToArray();
+        }
+        catch
+        {
+            return Array.Empty<AttentionEvent>();
+        }
     }
+
+    private static LegacyEventMapping Map(AttentionEventKind kind) => kind switch
+    {
+        AttentionEventKind.SafetyAlarm => new(
+            "LEGACY_SAFETY_ALARM",
+            "既有安全异常",
+            OperationalEventSeverity.Critical,
+            OperationalEventCategory.Safety),
+        AttentionEventKind.Warning => new(
+            "LEGACY_WARNING",
+            "既有黄色警告",
+            OperationalEventSeverity.Warning,
+            OperationalEventCategory.Safety),
+        AttentionEventKind.Emergency => new(
+            "LEGACY_EMERGENCY",
+            "应急操作结果",
+            OperationalEventSeverity.Critical,
+            OperationalEventCategory.Emergency),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "未知Attention事件类别")
+    };
+
+    private static AttentionEvent? TryMapBack(OperationalEvent item)
+    {
+        AttentionEventKind? kind = item.EventCode switch
+        {
+            "LEGACY_SAFETY_ALARM" => AttentionEventKind.SafetyAlarm,
+            "LEGACY_WARNING" => AttentionEventKind.Warning,
+            "LEGACY_EMERGENCY" => AttentionEventKind.Emergency,
+            _ => null
+        };
+
+        return kind is null
+            ? null
+            : new AttentionEvent(
+                item.LastOccurredAtUtc.Ticks,
+                item.LastOccurredAtUtc.ToLocalTime(),
+                kind.Value,
+                item.Scope,
+                item.Source,
+                item.LatestDetailMessage,
+                string.IsNullOrEmpty(item.LatestResult) ? null : item.LatestResult);
+    }
+
+    private static string BuildCorrelationKey(
+        AttentionEventKind kind,
+        string scope,
+        string source,
+        string message) =>
+        Encode(kind.ToString(), scope, source, NormalizeMessage(message));
+
+    private static string NormalizeMessage(string message)
+    {
+        var normalized = new StringBuilder(message.Length);
+        bool pendingSpace = false;
+        foreach (char character in message.Trim())
+        {
+            if (char.IsWhiteSpace(character))
+            {
+                pendingSpace = normalized.Length > 0;
+                continue;
+            }
+
+            if (pendingSpace)
+            {
+                normalized.Append(' ');
+                pendingSpace = false;
+            }
+
+            normalized.Append(character);
+        }
+
+        return normalized.ToString();
+    }
+
+    private static string Encode(params string[] values)
+    {
+        var encoded = new StringBuilder("legacy:");
+        foreach (string value in values)
+        {
+            encoded.Append(value.Length);
+            encoded.Append(':');
+            encoded.Append(value);
+            encoded.Append(';');
+        }
+
+        return encoded.ToString();
+    }
+
+    private void ForwardChanged()
+    {
+        Action? changed = Changed;
+        if (changed is null)
+        {
+            return;
+        }
+
+        foreach (Action subscriber in changed.GetInvocationList().Cast<Action>())
+        {
+            try
+            {
+                subscriber();
+            }
+            catch
+            {
+                // 一个只读订阅者的故障不能影响其他订阅者或事件上报。
+            }
+        }
+    }
+
+    private sealed record LegacyEventMapping(
+        string EventCode,
+        string Title,
+        OperationalEventSeverity Severity,
+        OperationalEventCategory Category);
 }
