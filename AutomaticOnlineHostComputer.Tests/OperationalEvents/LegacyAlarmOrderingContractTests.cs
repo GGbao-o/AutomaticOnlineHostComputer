@@ -157,6 +157,18 @@ public sealed class LegacyAlarmOrderingContractTests
         OperationalEventContext context = Assert.IsType<OperationalEventContext>(reporter.Context);
         Assert.Equal(EvidenceAvailability.Unknown, context.BusinessPaused.Availability);
         Assert.False(context.BusinessPaused.HasValue);
+        Assert.Equal(PhysicalConclusionCode.CommandNotSent, context.PhysicalConclusion.Code);
+        Assert.Equal(EvidenceAvailability.Confirmed, context.PhysicalConclusion.Availability);
+
+        InvokePrivate(
+            engine,
+            "TryReportMoveFinalFailure",
+            "天车", 1, "1号天车", "ST001", "测试阶段", "测试详情", "测试结果",
+            10, 20, 30, true, true, new TimeoutException("测试超时"), OperationalEventSeverity.Error);
+
+        context = Assert.IsType<OperationalEventContext>(reporter.Context);
+        Assert.Equal(PhysicalConclusionCode.CommandResultUnknown, context.PhysicalConclusion.Code);
+        Assert.Equal(EvidenceAvailability.Unknown, context.PhysicalConclusion.Availability);
     }
 
     [Fact]
@@ -248,6 +260,36 @@ public sealed class LegacyAlarmOrderingContractTests
                 "GetOrCreateService(", ".CheckSafetyAsync(", ".SetAbsSpeedAsync(", ".MoveAbsoluteAsync("));
     }
 
+    [Fact]
+    public void Move_catches_distinguish_failures_before_and_after_the_absolute_move_call_boundary()
+    {
+        string source = ReadSource("Service", "FlowEngine", "ProductionFlowEngine.cs");
+        string crane = ExtractMethod(source, "public async Task<bool> MoveCraneToStationAsync");
+        string manipulator = ExtractMethod(source, "public async Task<bool> MoveManipulatorToStationAsync");
+
+        AssertMotionStartEvidence(
+            crane,
+            "await craneSvc.MoveAbsoluteAsync(",
+            expectedCatchReports: 2,
+            "_craneCache.GetOrCreateService(",
+            ".CheckSafetyAsync(",
+            "_cfg.GetCraneSpeed(",
+            ".SetAbsSpeedAsync(",
+            "var before = await craneSvc.ReadStatusAsync(");
+        int craneMove = crane.IndexOf("await craneSvc.MoveAbsoluteAsync(", StringComparison.Ordinal);
+        int craneAfter = crane.IndexOf("var after = await craneSvc.ReadStatusAsync(", StringComparison.Ordinal);
+        Assert.True(craneMove < craneAfter);
+
+        AssertMotionStartEvidence(
+            manipulator,
+            "await svc.MoveAbsoluteAsync(",
+            expectedCatchReports: 1,
+            "_manipulatorCache.GetOrCreateService(",
+            ".CheckSafetyAsync(",
+            "_cfg.GetManipulatorSpeed(",
+            ".SetAbsSpeedAsync(");
+    }
+
     private static void AssertPopupDedupeOrdering(
         string method,
         int expectedPauseCalls,
@@ -308,6 +350,41 @@ public sealed class LegacyAlarmOrderingContractTests
         Assert.True(stage >= 0, $"未找到监控阶段标记：{stageMarker}");
         Assert.True(operation >= 0, $"未找到设备操作：{operationMarker}");
         Assert.True(stage < operation, $"监控阶段必须在设备操作前更新：{stageMarker}");
+    }
+
+    private static void AssertMotionStartEvidence(
+        string method,
+        string moveCall,
+        int expectedCatchReports,
+        params string[] operationsBeforeMove)
+    {
+        const string declaration = "bool monitoringMotionMayHaveStarted = false;";
+        const string assignment = "monitoringMotionMayHaveStarted = true;";
+        int declarationIndex = method.IndexOf(declaration, StringComparison.Ordinal);
+        int assignmentIndex = method.IndexOf(assignment, StringComparison.Ordinal);
+        int moveIndex = method.IndexOf(moveCall, StringComparison.Ordinal);
+
+        Assert.True(declarationIndex >= 0);
+        Assert.Equal(1, Count(method, declaration));
+        Assert.Equal(1, Count(method, assignment));
+        Assert.True(declarationIndex < assignmentIndex);
+        Assert.True(assignmentIndex < moveIndex);
+        Assert.Matches(
+            new Regex($@"{Regex.Escape(assignment)}\s*{Regex.Escape(moveCall)}"),
+            method);
+        Assert.Equal(
+            expectedCatchReports,
+            Count(method, "motionMayHaveStarted: monitoringMotionMayHaveStarted"));
+        Assert.DoesNotMatch(
+            new Regex(@"\b(?:if|while|switch)\s*\([^)]*monitoringMotionMayHaveStarted"),
+            method);
+
+        foreach (string operation in operationsBeforeMove)
+        {
+            int operationIndex = method.IndexOf(operation, StringComparison.Ordinal);
+            Assert.True(operationIndex >= 0, $"未找到原操作：{operation}");
+            Assert.True(operationIndex < assignmentIndex, $"{operation}失败时运动命令证据必须保持false");
+        }
     }
 
     private static string[] OrderedMarkers(string method, params string[] markers) =>

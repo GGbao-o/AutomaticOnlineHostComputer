@@ -270,6 +270,7 @@ public sealed class ProductionFlowEngine : IDisposable
         }
 
         string monitoringStage = "获取天车服务";
+        bool monitoringMotionMayHaveStarted = false;
         try
         {
             var craneSvc = _craneCache.GetOrCreateService(craneNo);
@@ -301,6 +302,7 @@ public sealed class ProductionFlowEngine : IDisposable
 
             // 4. 执行绝对移动（自动等待到位）
             monitoringStage = "执行绝对移动";
+            monitoringMotionMayHaveStarted = true;
             await craneSvc.MoveAbsoluteAsync(xTarget, yTarget, zTarget, ct: ct);
 
             // 5. 读取到位后坐标（确认）
@@ -325,7 +327,8 @@ public sealed class ProductionFlowEngine : IDisposable
                 "天车", craneNo, craneName, stationCode, monitoringStage,
                 $"移动流程在{monitoringStage}阶段发生超时：{ex.Message}",
                 "设备运动结果未知；本次调度返回false。",
-                xTarget, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: true,
+                xTarget, yTarget, zTarget, reservationReleasePending: true,
+                motionMayHaveStarted: monitoringMotionMayHaveStarted,
                 exception: ex);
             return false;
         }
@@ -336,7 +339,8 @@ public sealed class ProductionFlowEngine : IDisposable
                 "天车", craneNo, craneName, stationCode, monitoringStage,
                 $"移动流程在{monitoringStage}阶段发生异常：{ex.Message}",
                 "设备运动结果未知；本次调度返回false。",
-                xTarget, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: true,
+                xTarget, yTarget, zTarget, reservationReleasePending: true,
+                motionMayHaveStarted: monitoringMotionMayHaveStarted,
                 exception: ex,
                 severity: ex is OperationCanceledException
                     ? OperationalEventSeverity.Information
@@ -404,6 +408,7 @@ public sealed class ProductionFlowEngine : IDisposable
         }
 
         string monitoringStage = "获取机械手服务";
+        bool monitoringMotionMayHaveStarted = false;
         try
         {
             var svc = _manipulatorCache.GetOrCreateService(manipulatorNo);
@@ -425,6 +430,7 @@ public sealed class ProductionFlowEngine : IDisposable
             await svc.SetAbsSpeedAsync(mnSpd.X.Speed, mnSpd.X.Accel, mnSpd.X.Decel, mnSpd.Y.Speed, mnSpd.Y.Accel, mnSpd.Y.Decel, mnSpd.Z.Speed, mnSpd.Z.Accel, mnSpd.Z.Decel, ct);
             // 机械手 X 传 -1 跳过 X 轴
             monitoringStage = "执行绝对移动";
+            monitoringMotionMayHaveStarted = true;
             await svc.MoveAbsoluteAsync(-1, yTarget, zTarget, ct: ct);
 
             Console.WriteLine($"[FlowEngine] [{info.Name}] ✔ 机械手自动调度完成，已到达 {station.Name}");
@@ -437,7 +443,8 @@ public sealed class ProductionFlowEngine : IDisposable
                 "机械手", manipulatorNo, info.Name, stationCode, monitoringStage,
                 $"移动流程在{monitoringStage}阶段发生超时：{ex.Message}",
                 "设备运动结果未知；本次调度返回false。",
-                null, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: true,
+                null, yTarget, zTarget, reservationReleasePending: true,
+                motionMayHaveStarted: monitoringMotionMayHaveStarted,
                 exception: ex);
             return false;
         }
