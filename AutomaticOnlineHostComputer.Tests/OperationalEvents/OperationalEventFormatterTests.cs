@@ -161,6 +161,52 @@ public sealed class OperationalEventFormatterTests
         Assert.Contains("TransientStateEvictedCount=4", text, StringComparison.Ordinal);
         Assert.Contains("StageStateEvictedCount=5", text, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(EvidenceAvailability.Confirmed, "已确认无承诺点")]
+    [InlineData(EvidenceAvailability.NotApplicable, "不适用：当前阶段没有物理承诺点")]
+    [InlineData(EvidenceAvailability.Unavailable, "不可用：调用点没有承诺点快照")]
+    public void Empty_physical_commitments_preserve_group_availability(
+        EvidenceAvailability availability,
+        string expected)
+    {
+        OperationalEvent item = OperationalEventFormattingTestFactory.CreateCompleteEvent();
+        string reason = availability switch
+        {
+            EvidenceAvailability.NotApplicable => "当前阶段没有物理承诺点",
+            EvidenceAvailability.Unavailable => "调用点没有承诺点快照",
+            _ => "已取得完整业务快照"
+        };
+        BusinessStateEvidence businessState = EmptyBusinessState(
+            item.FirstEvidence.BusinessState,
+            availability,
+            reason);
+        OperationalEvidence evidence = item.FirstEvidence with { BusinessState = businessState };
+        item = item with { FirstEvidence = evidence, LatestEvidence = evidence };
+
+        string section = new OperationalEventFormatter().FormatSections(item).StateCacheAndCommitments;
+
+        Assert.Contains($"PhysicalCommitments: {expected}", section, StringComparison.Ordinal);
+    }
+
+    private static BusinessStateEvidence EmptyBusinessState(
+        BusinessStateEvidence source,
+        EvidenceAvailability availability,
+        string reason) =>
+        new(
+            availability,
+            reason,
+            source.LastSuccessfulCheckpoint,
+            source.StateBefore,
+            source.StateAfter,
+            source.CacheBefore,
+            source.CacheAfter,
+            source.OwnerBefore,
+            source.OwnerAfter,
+            source.HoldingWorkpiece,
+            source.Placed,
+            source.CacheNotified,
+            []);
 }
 
 internal static class OperationalEventFormattingTestFactory

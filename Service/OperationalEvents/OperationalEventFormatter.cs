@@ -227,7 +227,7 @@ public sealed class OperationalEventFormatter
         Add(builder, "HoldingWorkpiece", FormatEvidenceValue(item.HoldingWorkpiece));
         Add(builder, "Placed", FormatEvidenceValue(item.Placed));
         Add(builder, "CacheNotified", FormatEvidenceValue(item.CacheNotified));
-        Add(builder, "PhysicalCommitments", FormatCommitments(item.PhysicalCommitments, item.Reason));
+        Add(builder, "PhysicalCommitments", FormatCommitments(item.PhysicalCommitments, item.Availability, item.Reason));
     }
 
     private static string FormatPauseLocksAndRecovery(OperationalEvent item)
@@ -332,11 +332,27 @@ public sealed class OperationalEventFormatter
     private static string FormatPhysicalConclusion(PhysicalConclusionEvidence evidence) =>
         $"Code={evidence.Code}; Availability={evidence.Availability}; Summary={NonBlank(evidence.Summary, "未提供结论摘要")}; Basis={NonBlank(evidence.Basis, "未提供结论依据")}";
 
-    private static string FormatCommitments(IReadOnlyList<PhysicalCommitmentEvidence> items, string reason) =>
-        items.Count == 0
-            ? $"不可用：{Reason(reason)}"
-            : string.Join(" | ", items.Select(item =>
+    private static string FormatCommitments(
+        IReadOnlyList<PhysicalCommitmentEvidence> items,
+        EvidenceAvailability availability,
+        string reason)
+    {
+        if (items.Count > 0)
+        {
+            return string.Join(" | ", items.Select(item =>
                 $"Name={NonBlank(item.Name, "未命名承诺点")}; State={FormatEvidenceValue(item.State)}; Detail={NonBlank(item.Detail, "未提供说明")}"));
+        }
+
+        return availability switch
+        {
+            EvidenceAvailability.Confirmed => "已确认无承诺点",
+            EvidenceAvailability.NotApplicable => $"不适用：{Reason(reason)}",
+            EvidenceAvailability.Unavailable => $"不可用：{Reason(reason)}",
+            EvidenceAvailability.Unknown => $"未知：{Reason(reason)}",
+            EvidenceAvailability.Inferred => $"推定无承诺点：{Reason(reason)}",
+            _ => $"未知：{Reason(reason)}"
+        };
+    }
 
     private static IReadOnlyList<string> MergeStable(params IEnumerable<string>[] groups)
     {

@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Infrastructure.Export;
@@ -8,6 +10,7 @@ namespace AutomaticOnlineHostComputer.Infrastructure.Export;
 public static class OperationalEventExporter
 {
     private static readonly UTF8Encoding Utf8WithBom = new(encoderShouldEmitUTF8Identifier: true);
+    private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
     private static readonly IReadOnlyList<CsvColumn> CsvColumns = CreateCsvColumns();
 
     public static byte[] BuildCsv(IReadOnlyList<OperationalEvent> events)
@@ -153,8 +156,11 @@ public static class OperationalEventExporter
         }
         void Conclusion(string name, Func<OperationalEvent, PhysicalConclusionEvidence> selector)
         {
-            Scalar(name + ".Code", item => selector(item).Code);
             Scalar(name + ".Availability", item => selector(item).Availability);
+            Scalar(name + ".HasValue", item => selector(item).Code != PhysicalConclusionCode.Unknown);
+            Scalar(name + ".Value", item => selector(item).Code);
+            Text(name + ".Reason", item => SerializePhysicalConclusionReason(selector(item)));
+            Scalar(name + ".Code", item => selector(item).Code);
             Text(name + ".Summary", item => selector(item).Summary);
             Text(name + ".Basis", item => selector(item).Basis);
         }
@@ -236,6 +242,9 @@ public static class OperationalEventExporter
             string fullName = prefix + "." + name;
             ScalarFull(fullName + ".State", item => select(evidence(item)).State);
             ScalarFull(fullName + ".Availability", item => select(evidence(item)).Availability);
+            ScalarFull(fullName + ".HasValue", item =>
+                select(evidence(item)).State is not DeviceCommandState.Unknown and not DeviceCommandState.Unavailable);
+            ScalarFull(fullName + ".Value", item => select(evidence(item)).State);
             TextFull(fullName + ".Reason", item => select(evidence(item)).Reason);
         }
 
@@ -312,7 +321,7 @@ public static class OperationalEventExporter
         ScalarFull(prefix + ".Recovery.Steps.Count", item => evidence(item).Recovery.Steps.Count);
         TextFull(prefix + ".Recovery.Steps", item => SerializeRecoverySteps(evidence(item).Recovery.Steps));
         ScalarFull(prefix + ".Recovery.PostRecoveryVerification.Count", item => evidence(item).Recovery.PostRecoveryVerification.Count);
-        TextFull(prefix + ".Recovery.PostRecoveryVerification", item => JoinOrMarker(evidence(item).Recovery.PostRecoveryVerification));
+        TextFull(prefix + ".Recovery.PostRecoveryVerification", item => SerializeStringArray(evidence(item).Recovery.PostRecoveryVerification));
         TextFull(prefix + ".Recovery.ResultingBusinessBehavior", item => evidence(item).Recovery.ResultingBusinessBehavior);
 
         ScalarFull(prefix + ".Guidance.Availability", item => evidence(item).Guidance.Availability);
@@ -331,16 +340,19 @@ public static class OperationalEventExporter
     }
 
     private static string SerializeCommitments(IReadOnlyList<PhysicalCommitmentEvidence> items) =>
-        items.Count == 0 ? "<none>" : string.Join(" | ", items.Select(item =>
-            $"Name={NonBlank(item.Name, "未命名")};Availability={item.State.Availability};HasValue={item.State.HasValue};Value={(item.State.HasValue ? FormatScalar(item.State.Value) : $"<{item.State.Availability}>")};Reason={NonBlank(item.State.Reason, "未提供")};Detail={NonBlank(item.Detail, "未提供")}"));
+        JsonSerializer.Serialize(items, JsonOptions);
 
     private static string SerializeLocks(IReadOnlyList<LockItemEvidence> items) =>
-        items.Count == 0 ? "<none>" : string.Join(" | ", items.Select(item =>
-            $"Name={NonBlank(item.Name, "未命名")};Held={FormatEvidence(item.HeldAtFailure)};Released={FormatEvidence(item.ReleasedAfterward)};Manual={NonBlank(item.ManualConfirmation, "未提供")}"));
+        JsonSerializer.Serialize(items, JsonOptions);
 
     private static string SerializeRecoverySteps(IReadOnlyList<RecoveryStepEvidence> items) =>
-        items.Count == 0 ? "<none>" : string.Join(" | ", items.Select(item =>
-            $"Step={NonBlank(item.Step, "未命名")};State={item.State};Detail={NonBlank(item.Detail, "未提供")}"));
+        JsonSerializer.Serialize(items, JsonOptions);
+
+    private static string SerializeStringArray(IReadOnlyList<string> items) =>
+        JsonSerializer.Serialize(items, JsonOptions);
+
+    private static string SerializePhysicalConclusionReason(PhysicalConclusionEvidence evidence) =>
+        JsonSerializer.Serialize(new { evidence.Summary, evidence.Basis }, JsonOptions);
 
     private static string JoinOrMarker(IReadOnlyList<string> items) =>
         items.Count == 0 ? "<none>" : string.Join(" | ", items);
@@ -400,9 +412,6 @@ public static class OperationalEventExporter
         return values.Count == 0 ? "<none>" : string.Join(" | ", values);
     }
 
-    private static string FormatEvidence<T>(EvidenceValue<T> evidence) =>
-        $"Availability={evidence.Availability};HasValue={evidence.HasValue};Value={(evidence.HasValue ? FormatScalar(evidence.Value) : $"<{evidence.Availability}>")};Reason={NonBlank(evidence.Reason, "未提供")}";
-
     private static string FormatScalar(object? value) => value switch
     {
         null => "<null>",
@@ -418,6 +427,16 @@ public static class OperationalEventExporter
 
     private static string NonBlank(string? value, string fallback) =>
         string.IsNullOrEmpty(value) ? fallback : value;
+
+    private static JsonSerializerOptions CreateJsonOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = false
+        };
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
 
     private sealed record CsvColumn(string Name, Func<OperationalEvent, CsvValue> Select);
 

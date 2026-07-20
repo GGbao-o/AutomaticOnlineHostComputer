@@ -16,11 +16,19 @@ public sealed class OperationalEventModelTests
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.AbsX.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.AbsY.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetX.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetY.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetAbsX.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetAbsY.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.DeltaX.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.DeltaY.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.LastSentDisplayTargetX.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.LastSentDisplayTargetY.Availability);
         Assert.Equal(DeviceCommandState.Unavailable, evidence.XFineTuneCommand.State);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.XFineTuneCommand.Availability);
+        Assert.Equal("调用点没有成功坐标快照", evidence.XFineTuneCommand.Reason);
         Assert.Equal(DeviceCommandState.Unavailable, evidence.YFineTuneCommand.State);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.YFineTuneCommand.Availability);
+        Assert.Equal("调用点没有成功坐标快照", evidence.YFineTuneCommand.Reason);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.FailureStage.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.ToleranceX.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.ToleranceY.Availability);
@@ -32,6 +40,21 @@ public sealed class OperationalEventModelTests
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.FineTuneAttemptCount.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.FeedbackRereadCount.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.CapturedAtUtc.Availability);
+        Assert.All(
+            new[]
+            {
+                evidence.DisplayX.Reason, evidence.DisplayY.Reason, evidence.DisplayZ.Reason,
+                evidence.AbsX.Reason, evidence.AbsY.Reason, evidence.TargetX.Reason,
+                evidence.TargetY.Reason, evidence.TargetAbsX.Reason, evidence.TargetAbsY.Reason,
+                evidence.LastSentDisplayTargetX.Reason, evidence.LastSentDisplayTargetY.Reason,
+                evidence.FailureStage.Reason, evidence.DeltaX.Reason, evidence.DeltaY.Reason,
+                evidence.ToleranceX.Reason, evidence.ToleranceY.Reason,
+                evidence.MaximumCorrectionX.Reason, evidence.MaximumCorrectionY.Reason,
+                evidence.StableSampleCount.Reason, evidence.StageReadCount.Reason,
+                evidence.TotalReadCount.Reason, evidence.FineTuneAttemptCount.Reason,
+                evidence.FeedbackRereadCount.Reason, evidence.CapturedAtUtc.Reason
+            },
+            reason => Assert.Equal("调用点没有成功坐标快照", reason));
     }
 
     [Fact]
