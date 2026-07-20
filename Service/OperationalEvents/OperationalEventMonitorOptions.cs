@@ -1,10 +1,17 @@
 using System.Collections.ObjectModel;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("AutomaticOnlineHostComputer.Tests")]
 
 namespace AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 public sealed class OperationalEventMonitorOptions
 {
     public const int MaximumCapacity = 5000;
+
+    private const int DefaultTransientFailureCountThreshold = 3;
+    private static readonly TimeSpan DefaultAggregationWindow = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan DefaultTransientFailureDuration = TimeSpan.FromSeconds(30);
 
     private static readonly IReadOnlyDictionary<string, TimeSpan> DefaultStageThresholds =
         FreezeStageThresholds(new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase)
@@ -49,9 +56,9 @@ public sealed class OperationalEventMonitorOptions
 
     public static OperationalEventMonitorOptions Default => Create(
         MaximumCapacity,
-        TimeSpan.FromMinutes(10),
-        3,
-        TimeSpan.FromSeconds(30),
+        DefaultAggregationWindow,
+        DefaultTransientFailureCountThreshold,
+        DefaultTransientFailureDuration,
         DefaultStageThresholds);
 
     public TimeSpan GetStageThreshold(string? stageCode)
@@ -70,14 +77,43 @@ public sealed class OperationalEventMonitorOptions
         TimeSpan aggregationWindow,
         int transientFailureCountThreshold,
         TimeSpan transientFailureDuration,
-        IReadOnlyDictionary<string, TimeSpan> stageThresholds)
+        IReadOnlyDictionary<string, TimeSpan>? stageThresholds)
     {
+        int validatedCapacity = capacity <= 0
+            ? MaximumCapacity
+            : Math.Min(capacity, MaximumCapacity);
+        TimeSpan validatedAggregationWindow = aggregationWindow > TimeSpan.Zero
+            ? aggregationWindow
+            : DefaultAggregationWindow;
+        int validatedTransientCount = transientFailureCountThreshold > 0
+            ? transientFailureCountThreshold
+            : DefaultTransientFailureCountThreshold;
+        TimeSpan validatedTransientDuration = transientFailureDuration > TimeSpan.Zero
+            ? transientFailureDuration
+            : DefaultTransientFailureDuration;
+
+        var mergedStageThresholds = new Dictionary<string, TimeSpan>(
+            DefaultStageThresholds,
+            StringComparer.OrdinalIgnoreCase);
+        if (stageThresholds is not null)
+        {
+            foreach ((string stageCode, TimeSpan threshold) in stageThresholds)
+            {
+                if (string.IsNullOrWhiteSpace(stageCode) || threshold <= TimeSpan.Zero)
+                {
+                    continue;
+                }
+
+                mergedStageThresholds[stageCode] = threshold;
+            }
+        }
+
         return new OperationalEventMonitorOptions(
-            capacity,
-            aggregationWindow,
-            transientFailureCountThreshold,
-            transientFailureDuration,
-            stageThresholds);
+            validatedCapacity,
+            validatedAggregationWindow,
+            validatedTransientCount,
+            validatedTransientDuration,
+            mergedStageThresholds);
     }
 
     internal static IReadOnlyDictionary<string, TimeSpan> CopyDefaultStageThresholds()

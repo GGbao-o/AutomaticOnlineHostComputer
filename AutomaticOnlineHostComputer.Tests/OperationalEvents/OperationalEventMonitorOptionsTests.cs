@@ -135,6 +135,72 @@ public sealed class OperationalEventMonitorOptionsTests
         Assert.Equal(TimeSpan.FromMinutes(10), options.StageThresholds["DEFAULT_NO_BUSINESS_TIMEOUT"]);
     }
 
+    [Fact]
+    public void Create_enforces_scalar_invariants_without_loader()
+    {
+        OperationalEventMonitorOptions invalid = OperationalEventMonitorOptions.Create(
+            0,
+            TimeSpan.Zero,
+            0,
+            TimeSpan.FromSeconds(-1),
+            new Dictionary<string, TimeSpan>());
+        OperationalEventMonitorOptions oversized = OperationalEventMonitorOptions.Create(
+            9000,
+            TimeSpan.FromSeconds(12),
+            2,
+            TimeSpan.FromSeconds(7),
+            new Dictionary<string, TimeSpan>());
+        OperationalEventMonitorOptions negative = OperationalEventMonitorOptions.Create(
+            -1,
+            TimeSpan.FromSeconds(-2),
+            -3,
+            TimeSpan.Zero,
+            new Dictionary<string, TimeSpan>());
+
+        Assert.Equal(5000, invalid.Capacity);
+        Assert.Equal(TimeSpan.FromMinutes(10), invalid.AggregationWindow);
+        Assert.Equal(3, invalid.TransientFailureCountThreshold);
+        Assert.Equal(TimeSpan.FromSeconds(30), invalid.TransientFailureDuration);
+        Assert.Equal(5000, oversized.Capacity);
+        Assert.Equal(TimeSpan.FromSeconds(12), oversized.AggregationWindow);
+        Assert.Equal(2, oversized.TransientFailureCountThreshold);
+        Assert.Equal(TimeSpan.FromSeconds(7), oversized.TransientFailureDuration);
+        Assert.Equal(5000, negative.Capacity);
+        Assert.Equal(TimeSpan.FromMinutes(10), negative.AggregationWindow);
+        Assert.Equal(3, negative.TransientFailureCountThreshold);
+        Assert.Equal(TimeSpan.FromSeconds(30), negative.TransientFailureDuration);
+    }
+
+    [Fact]
+    public void Create_merges_valid_stage_values_and_rejects_invalid_stage_values()
+    {
+        var input = new Dictionary<string, TimeSpan>(StringComparer.Ordinal)
+        {
+            ["r6101"] = TimeSpan.FromSeconds(-1),
+            ["zone_mt"] = TimeSpan.FromSeconds(9),
+            ["CUSTOM_INVALID"] = TimeSpan.Zero,
+            ["CUSTOM_VALID"] = TimeSpan.FromSeconds(11)
+        };
+
+        OperationalEventMonitorOptions options = OperationalEventMonitorOptions.Create(
+            100,
+            TimeSpan.FromSeconds(20),
+            4,
+            TimeSpan.FromSeconds(8),
+            input);
+        input["zone_mt"] = TimeSpan.FromHours(2);
+        input["R6103"] = TimeSpan.FromSeconds(1);
+
+        Assert.Equal(100, options.Capacity);
+        Assert.Equal(TimeSpan.FromMinutes(10), options.StageThresholds["R6101"]);
+        Assert.Equal(TimeSpan.FromSeconds(9), options.StageThresholds["ZONE_MT"]);
+        Assert.Equal(TimeSpan.FromMinutes(10), options.StageThresholds["R6103"]);
+        Assert.Equal(TimeSpan.FromSeconds(11), options.StageThresholds["custom_valid"]);
+        Assert.False(options.StageThresholds.ContainsKey("CUSTOM_INVALID"));
+        Assert.Throws<NotSupportedException>(() =>
+            ((IDictionary<string, TimeSpan>)options.StageThresholds).Clear());
+    }
+
     private static void AssertDefaults(OperationalEventMonitorOptions options)
     {
         Assert.Equal(5000, options.Capacity);

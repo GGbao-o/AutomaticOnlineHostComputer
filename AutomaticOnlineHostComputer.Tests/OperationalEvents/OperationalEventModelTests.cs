@@ -37,6 +37,39 @@ public sealed class OperationalEventModelTests
     }
 
     [Fact]
+    public void Confirmed_zero_coordinate_is_distinct_from_unknown_coordinate()
+    {
+        EvidenceValue<int> confirmedZero = EvidenceValue<int>.Confirmed(0, "显示坐标已读取为零");
+        EvidenceValue<int> unknown = EvidenceValue<int>.Unknown("坐标读取没有成功");
+
+        Assert.True(confirmedZero.HasValue);
+        Assert.Equal(0, confirmedZero.Value);
+        Assert.Equal(EvidenceAvailability.Confirmed, confirmedZero.Availability);
+        Assert.False(unknown.HasValue);
+        Assert.Equal(EvidenceAvailability.Unknown, unknown.Availability);
+    }
+
+    [Fact]
+    public void Position_snapshot_can_mix_confirmed_and_unavailable_fields()
+    {
+        PositionEvidence position = PositionEvidence.Unavailable("其余坐标未采集") with
+        {
+            DisplayX = EvidenceValue<int>.Confirmed(120, "界面坐标快照"),
+            AbsX = EvidenceValue<int>.Confirmed(1000, "绝对坐标快照"),
+            TargetX = EvidenceValue<int>.Confirmed(125, "动作目标"),
+            DeltaX = EvidenceValue<int>.Confirmed(-5, "调用点已计算"),
+            Tolerance = EvidenceValue<int>.Confirmed(2, "微调参数")
+        };
+
+        Assert.Equal(120, position.DisplayX.Value);
+        Assert.Equal(EvidenceAvailability.Confirmed, position.DisplayX.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, position.DisplayY.Availability);
+        Assert.Equal(EvidenceAvailability.Confirmed, position.AbsX.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, position.AbsY.Availability);
+        Assert.Equal(-5, position.DeltaX.Value);
+    }
+
+    [Fact]
     public void Confirmed_lock_not_held_is_distinct_from_unknown_lock_evidence()
     {
         var notHeld = new LockItemEvidence(
@@ -101,6 +134,24 @@ public sealed class OperationalEventModelTests
         Assert.Throws<NotSupportedException>(() => ((IList<LockItemEvidence>)locks.Items).Clear());
         Assert.Throws<NotSupportedException>(() => ((IList<RecoveryStepEvidence>)recovery.Steps).Clear());
         Assert.Throws<NotSupportedException>(() => ((IList<string>)guidance.RequiredActions).Clear());
+    }
+
+    [Fact]
+    public void Mutating_array_input_does_not_change_frozen_evidence_collection()
+    {
+        var original = new LockItemEvidence(
+            "ZONE_MT",
+            EvidenceValue<bool>.Confirmed(true, "异常时持有"),
+            EvidenceValue<bool>.Confirmed(true, "finally已释放"),
+            "确认天车已离开冲突区");
+        var replacement = original with { Name = "ZONE_TS" };
+        LockItemEvidence[] input = [original];
+
+        var locks = new LockEvidence(input);
+        input[0] = replacement;
+
+        Assert.Equal("ZONE_MT", locks.Items[0].Name);
+        Assert.NotSame(input, locks.Items);
     }
 
     [Fact]
