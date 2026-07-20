@@ -15,10 +15,116 @@ internal static class OperationalEventContextFactory
         EvidenceValue<DateTime> X11ReadAtUtc,
         EvidenceValue<bool> HoldingWorkpiece,
         EvidenceValue<string> LastSuccessfulCheckpoint,
-        string LastConfirmedLocation);
+        string LastConfirmedLocation,
+        EvidenceValue<bool> ZKnownSafe,
+        EvidenceValue<int> SafeZTarget,
+        EvidenceValue<int> SafeZTolerance);
+
+    internal sealed record FineTunePhysicalSnapshot(
+        EvidenceValue<int> X11LastValue,
+        EvidenceValue<bool> X11ReadValid,
+        EvidenceValue<int> X11Attempts,
+        EvidenceValue<DateTime> X11ReadAtUtc,
+        EvidenceValue<bool> ZKnownSafe,
+        EvidenceValue<int> SafeZTarget,
+        EvidenceValue<int> SafeZTolerance);
+
+    /// <summary>只记录流程已经完成的读取/命令结果；所有更新均失败隔离且不参与业务判断。</summary>
+    internal sealed class FineTunePhysicalTracker
+    {
+        private int _x11LastValue;
+        private int _x11Attempts;
+        private bool _x11Valid;
+        private DateTime _x11ReadAtUtc;
+        private bool _zKnownSafe;
+        private int _safeZTarget;
+        private int _safeZTolerance;
+        private string _zReason = "调用点尚未提供Z安全检查点";
+
+        public void TryObserveX11(bool value)
+        {
+            try
+            {
+                _x11LastValue = value ? 1 : 0;
+                _x11Attempts++;
+                _x11Valid = true;
+                _x11ReadAtUtc = DateTime.UtcNow;
+            }
+            catch { }
+        }
+
+        public void TryConfirmSafeZ(int target, int tolerance, string reason)
+        {
+            try
+            {
+                _safeZTarget = target;
+                _safeZTolerance = Math.Max(0, tolerance);
+                _zKnownSafe = true;
+                _zReason = reason;
+            }
+            catch { }
+        }
+
+        public void TryMarkZUnknown(string reason)
+        {
+            try
+            {
+                _zKnownSafe = false;
+                _zReason = string.IsNullOrWhiteSpace(reason) ? "Z安全状态未知" : reason;
+            }
+            catch { }
+        }
+
+        public FineTunePhysicalSnapshot Snapshot()
+        {
+            try
+            {
+                return new FineTunePhysicalSnapshot(
+                    _x11Valid
+                        ? EvidenceValue<int>.Confirmed(_x11LastValue, "复用本物理周期既有X11读取结果")
+                        : EvidenceValue<int>.Unknown("本物理周期尚无有效X11读取"),
+                    _x11Valid
+                        ? EvidenceValue<bool>.Confirmed(true, "既有X11读取成功返回")
+                        : EvidenceValue<bool>.Unknown("本物理周期尚无有效X11读取"),
+                    _x11Attempts > 0
+                        ? EvidenceValue<int>.Confirmed(_x11Attempts, "本物理周期既有X11读取累计次数")
+                        : EvidenceValue<int>.Unknown("本物理周期尚无X11读取尝试"),
+                    _x11Valid
+                        ? EvidenceValue<DateTime>.Confirmed(_x11ReadAtUtc, "上位机成功接收既有X11读取结果的时间")
+                        : EvidenceValue<DateTime>.Unknown("本物理周期没有X11读取时间"),
+                    _zKnownSafe
+                        ? EvidenceValue<bool>.Confirmed(true, _zReason)
+                        : EvidenceValue<bool>.Unknown(_zReason),
+                    _zKnownSafe
+                        ? EvidenceValue<int>.Confirmed(_safeZTarget, _zReason)
+                        : EvidenceValue<int>.Unknown(_zReason),
+                    _zKnownSafe
+                        ? EvidenceValue<int>.Confirmed(_safeZTolerance, _zReason)
+                        : EvidenceValue<int>.Unknown(_zReason));
+            }
+            catch
+            {
+                const string failed = "监控跟踪器快照失败";
+                return new FineTunePhysicalSnapshot(
+                    EvidenceValue<int>.Unknown(failed),
+                    EvidenceValue<bool>.Unknown(failed),
+                    EvidenceValue<int>.Unknown(failed),
+                    EvidenceValue<DateTime>.Unknown(failed),
+                    EvidenceValue<bool>.Unknown(failed),
+                    EvidenceValue<int>.Unknown(failed),
+                    EvidenceValue<int>.Unknown(failed));
+            }
+        }
+    }
 
     public static string NewActionId(string engineCode) =>
         $"{engineCode}-{Guid.NewGuid():N}";
+
+    public static FineTunePhysicalTracker? TryCreatePhysicalTracker()
+    {
+        try { return new FineTunePhysicalTracker(); }
+        catch { return null; }
+    }
 
     public static EvidenceValue<string> ConfirmedLocation(string value, string reason) =>
         string.IsNullOrWhiteSpace(value)
@@ -46,59 +152,61 @@ internal static class OperationalEventContextFactory
     }
 
     public static FineTunePhysicalPhase PickupBeforeZDown(
-        bool x11ConfirmedEmpty,
+        FineTunePhysicalTracker? tracker,
+        bool useTrackedX11,
         string lastSuccessfulCheckpoint,
         string lastConfirmedLocation)
     {
-        EvidenceValue<int> x11 = x11ConfirmedEmpty
-            ? EvidenceValue<int>.Confirmed(0, "本物理周期取料前已有X11=0有效读取")
-            : EvidenceValue<int>.Unknown("本调用点没有可复用的X11前置读数");
-        EvidenceValue<bool> valid = x11ConfirmedEmpty
-            ? EvidenceValue<bool>.Confirmed(true, "X11读取成功")
-            : EvidenceValue<bool>.Unknown("未在此物理周期取得X11证据");
-        EvidenceValue<int> attempts = x11ConfirmedEmpty
-            ? EvidenceValue<int>.Confirmed(1, "调用点已有一次有效读取")
-            : EvidenceValue<int>.Unknown("调用点没有X11尝试次数");
+        FineTunePhysicalSnapshot snapshot = tracker?.Snapshot() ?? EmptyPhysicalSnapshot("调用点没有物理跟踪器");
+        EvidenceValue<int> x11 = useTrackedX11 ? snapshot.X11LastValue : EvidenceValue<int>.Unknown("此取料点没有适用的取料前X11读数");
+        EvidenceValue<bool> valid = useTrackedX11 ? snapshot.X11ReadValid : EvidenceValue<bool>.Unknown("此取料点没有适用的取料前X11读数");
+        EvidenceValue<int> attempts = useTrackedX11 ? snapshot.X11Attempts : EvidenceValue<int>.Unknown("此取料点没有适用的取料前X11尝试次数");
 
         return new FineTunePhysicalPhase(
             new DeviceCommandEvidence(DeviceCommandState.NotSent, EvidenceAvailability.Confirmed, "本次取料充磁尚在微调之后，命令未发送"),
             x11,
             valid,
             attempts,
-            EvidenceValue<DateTime>.Unknown("调用点没有保留X11原始读取时间"),
-            x11ConfirmedEmpty
+            useTrackedX11 ? snapshot.X11ReadAtUtc : EvidenceValue<DateTime>.Unknown("此取料点没有适用的取料前X11读取时间"),
+            useTrackedX11 && x11.HasValue && x11.Value == 0
                 ? EvidenceValue<bool>.Confirmed(false, "X11=0确认天车当前未持件")
                 : EvidenceValue<bool>.Unknown("没有X11=1或holdingWorkpiece证据"),
             Checkpoint(lastSuccessfulCheckpoint),
-            lastConfirmedLocation);
+            lastConfirmedLocation,
+            snapshot.ZKnownSafe,
+            snapshot.SafeZTarget,
+            snapshot.SafeZTolerance);
     }
 
     public static FineTunePhysicalPhase PlacementBeforeZDown(
         bool magnetOnAcknowledged,
         bool holdingWorkpieceConfirmed,
+        FineTunePhysicalTracker? tracker,
         string lastSuccessfulCheckpoint,
         string lastConfirmedLocation)
     {
+        FineTunePhysicalSnapshot snapshot = tracker?.Snapshot() ?? EmptyPhysicalSnapshot("调用点没有物理跟踪器");
         DeviceCommandEvidence magnet = magnetOnAcknowledged
             ? new DeviceCommandEvidence(DeviceCommandState.Acknowledged, EvidenceAvailability.Confirmed, "本物理周期充磁调用已成功返回")
             : new DeviceCommandEvidence(DeviceCommandState.Unknown, EvidenceAvailability.Unknown, "调用点没有充磁成功返回证据");
-        EvidenceValue<bool> holding = holdingWorkpieceConfirmed
+        bool x11ConfirmsHolding = snapshot.X11ReadValid.HasValue && snapshot.X11ReadValid.Value &&
+                                  snapshot.X11LastValue.HasValue && snapshot.X11LastValue.Value == 1;
+        EvidenceValue<bool> holding = holdingWorkpieceConfirmed || x11ConfirmsHolding
             ? EvidenceValue<bool>.Confirmed(true, "调用点holdingWorkpiece或最后有效X11=1")
             : EvidenceValue<bool>.Unknown("充磁返回不能替代X11持件确认");
 
         return new FineTunePhysicalPhase(
             magnet,
-            holdingWorkpieceConfirmed
-                ? EvidenceValue<int>.Confirmed(1, "调用点已有最后有效X11=1/holdingWorkpiece确认")
-                : EvidenceValue<int>.Unknown("调用点没有保留最后有效X11值"),
-            holdingWorkpieceConfirmed
-                ? EvidenceValue<bool>.Confirmed(true, "调用点持件证据有效")
-                : EvidenceValue<bool>.Unknown("调用点没有X11有效性快照"),
-            EvidenceValue<int>.Unknown("调用点没有保留X11尝试次数"),
-            EvidenceValue<DateTime>.Unknown("调用点没有保留X11读取时间"),
+            snapshot.X11LastValue,
+            snapshot.X11ReadValid,
+            snapshot.X11Attempts,
+            snapshot.X11ReadAtUtc,
             holding,
             Checkpoint(lastSuccessfulCheckpoint),
-            lastConfirmedLocation);
+            lastConfirmedLocation,
+            snapshot.ZKnownSafe,
+            snapshot.SafeZTarget,
+            snapshot.SafeZTolerance);
     }
 
     public static OperationalEventContext FineTuneFailure(
@@ -118,7 +226,9 @@ internal static class OperationalEventContextFactory
         OperationalEvidence unavailable = OperationalEvidence.Unavailable("微调调用点没有该组业务证据");
         var motion = new MotionAndMagnetEvidence(
             new DeviceCommandEvidence(DeviceCommandState.NotSent, EvidenceAvailability.Confirmed, pending),
-            EvidenceValue<bool>.Unknown("等待Helper用已有Z状态与安全目标判断"),
+            physicalPhase.ZKnownSafe.HasValue && physicalPhase.ZKnownSafe.Value
+                ? EvidenceValue<bool>.Confirmed(false, $"{physicalPhase.SafeZTarget.Value}±{physicalPhase.SafeZTolerance.Value}安全检查点已成功返回")
+                : EvidenceValue<bool>.Unknown(physicalPhase.ZKnownSafe.Reason),
             physicalPhase.MagnetOnCommand,
             new DeviceCommandEvidence(DeviceCommandState.NotApplicable, EvidenceAvailability.NotApplicable, "微调阶段没有执行退磁"),
             physicalPhase.X11LastValue,
@@ -188,4 +298,13 @@ internal static class OperationalEventContextFactory
         string.IsNullOrWhiteSpace(value)
             ? EvidenceValue<string>.Unknown("调用点没有最后成功检查点")
             : EvidenceValue<string>.Confirmed(value, "调用点已有成功返回");
+
+    private static FineTunePhysicalSnapshot EmptyPhysicalSnapshot(string reason) => new(
+        EvidenceValue<int>.Unknown(reason),
+        EvidenceValue<bool>.Unknown(reason),
+        EvidenceValue<int>.Unknown(reason),
+        EvidenceValue<DateTime>.Unknown(reason),
+        EvidenceValue<bool>.Unknown(reason),
+        EvidenceValue<int>.Unknown(reason),
+        EvidenceValue<int>.Unknown(reason));
 }

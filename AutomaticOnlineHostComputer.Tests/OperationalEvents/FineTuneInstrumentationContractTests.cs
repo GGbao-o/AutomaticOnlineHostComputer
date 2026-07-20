@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using AutomaticOnlineHostComputer.Communication.DeviceServices;
+using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Service;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
@@ -40,6 +42,7 @@ public sealed class FineTuneInstrumentationContractTests
                 Assert.Contains("targetZ:", invocation, StringComparison.Ordinal);
                 Assert.Contains("physicalPhase:", invocation, StringComparison.Ordinal);
                 Assert.Contains("failureContext:", invocation, StringComparison.Ordinal);
+                Assert.Contains("physicalTracker:", invocation, StringComparison.Ordinal);
             }
         }
 
@@ -80,8 +83,8 @@ public sealed class FineTuneInstrumentationContractTests
 
         Assert.Equal(10, Regex.Matches(allCalls, @"physicalPhase:\s*OperationalEventContextFactory\.PickupBeforeZDown\(").Count);
         Assert.Equal(12, Regex.Matches(allCalls, @"physicalPhase:\s*OperationalEventContextFactory\.PlacementBeforeZDown\(").Count);
-        Assert.Equal(8, Regex.Matches(allCalls, @"PickupBeforeZDown\(true,").Count);
-        Assert.Equal(2, Regex.Matches(allCalls, @"PickupBeforeZDown\(false,").Count);
+        Assert.Equal(8, Regex.Matches(allCalls, @"PickupBeforeZDown\(physicalTracker,\s*true,").Count);
+        Assert.Equal(2, Regex.Matches(allCalls, @"PickupBeforeZDown\(physicalTracker,\s*false,").Count);
         Assert.Contains("ST019/ST010分流尚未确定", allCalls, StringComparison.Ordinal);
         Assert.Contains("ST020/ST021分流尚未确定", allCalls, StringComparison.Ordinal);
         Assert.Contains("中转架位置尚未选择", allCalls, StringComparison.Ordinal);
@@ -152,9 +155,9 @@ public sealed class FineTuneInstrumentationContractTests
         };
 
         Assert.All(failureMarkers, marker => Assert.Contains(marker, helper, StringComparison.Ordinal));
-        Assert.Contains("evidence.CommandPrepared(targetX, targetY, movingAxes);", helper, StringComparison.Ordinal);
+        Assert.Contains("evidence?.CommandPrepared(targetX, targetY, movingAxes);", helper, StringComparison.Ordinal);
         Assert.Contains("await crane.MoveAbsoluteAsync(targetX, targetY, -1", helper, StringComparison.Ordinal);
-        Assert.Contains("evidence.CommandAcknowledged(movingAxes);", helper, StringComparison.Ordinal);
+        Assert.Contains("evidence?.CommandAcknowledged(movingAxes);", helper, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -192,6 +195,212 @@ public sealed class FineTuneInstrumentationContractTests
         Assert.DoesNotContain("File.", factory, StringComparison.Ordinal);
         Assert.DoesNotContain("Directory.", factory, StringComparison.Ordinal);
         Assert.DoesNotContain("GetOrCreate", factory, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Throwing_reporter_does_not_replace_original_argument_exception()
+    {
+        var reporter = new CapturingReporter(throwOnReport: true);
+        OperationalEventContext context = CreateFailureContext();
+
+        ArgumentOutOfRangeException original = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                null!, new MotionConfig(), 99, "TEST", "测试负Y偏移",
+                reporter, context, "ACT-NEGATIVE", null, CancellationToken.None,
+                yCenterToPickOffsetMm: -1));
+
+        Assert.Single(reporter.Contexts);
+        Assert.Same(original, reporter.Contexts[0].CapturedException);
+        Assert.Equal("ACT-NEGATIVE", reporter.Contexts[0].ActionId);
+    }
+
+    [Fact]
+    public async Task Pre_cancelled_active_axis_propagates_cancellation_without_reporting()
+    {
+        var reporter = new CapturingReporter();
+        MotionConfig config = ActiveConfig();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                new CraneService("fine-tune-cancel-test", "127.0.0.1", 1),
+                config, 99, "TEST", "测试预取消",
+                reporter, CreateFailureContext(), "ACT-CANCEL", null, cts.Token));
+
+        Assert.Empty(reporter.Contexts);
+    }
+
+    [Fact]
+    public async Task First_status_read_failure_preserves_configured_targets_and_attempt_counts()
+    {
+        var reporter = new CapturingReporter();
+        MotionConfig config = ActiveConfig();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                new CraneService("fine-tune-read-test", "127.0.0.1", 1),
+                config, 99, "TEST", "测试首次读取失败",
+                reporter, CreateFailureContext(), "ACT-READ", null, CancellationToken.None));
+
+        OperationalEventContext reported = Assert.Single(reporter.Contexts);
+        PositionEvidence position = reported.Evidence.Position;
+        Assert.Equal(EvidenceAvailability.Unavailable, position.DisplayX.Availability);
+        Assert.Equal(1000, position.TargetAbsX.Value);
+        Assert.Equal(5, position.ToleranceX.Value);
+        Assert.Equal(50, position.MaximumCorrectionX.Value);
+        Assert.Equal(1, position.StageReadCount.Value);
+        Assert.Equal(1, position.TotalReadCount.Value);
+        Assert.Equal("微调前", position.FailureStage.Value);
+    }
+
+    [Fact]
+    public void Monitoring_does_not_add_or_advance_business_z_formula_evaluation()
+    {
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> expected =
+            new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.Ordinal)
+            {
+                ["Line1FrontFlowEngine.cs"] = FormulaCounts(7, 0, 0, 0),
+                ["Line2FrontFlowEngine.cs"] = FormulaCounts(7, 0, 0, 0),
+                ["Line1RearFlowEngine.cs"] = FormulaCounts(0, 4, 0, 0),
+                ["Line2RearFlowEngine.cs"] = FormulaCounts(0, 4, 0, 0),
+                ["GrindingFlowEngine.cs"] = FormulaCounts(2, 0, 7, 2)
+            };
+
+        foreach ((string fileName, IReadOnlyDictionary<string, int> counts) in expected)
+        {
+            string source = ReadFlowSource(fileName);
+            foreach ((string marker, int count) in counts)
+                Assert.Equal(count, Regex.Matches(source, $@"\b{marker}\(").Count);
+        }
+    }
+
+    [Fact]
+    public void Front_placement_contexts_reuse_confirmed_x11_instead_of_false_placeholder()
+    {
+        string fronts = ReadFlowSource("Line1FrontFlowEngine.cs") + ReadFlowSource("Line2FrontFlowEngine.cs");
+
+        Assert.DoesNotContain("PlacementBeforeZDown(true, false", fronts, StringComparison.Ordinal);
+        Assert.Contains("TryObserveX11", fronts, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Physical_tracker_preserves_last_confirmed_x11_value_attempt_count_and_read_time()
+    {
+        DateTime before = DateTime.UtcNow;
+        OperationalEventContextFactory.FineTunePhysicalTracker tracker =
+            OperationalEventContextFactory.TryCreatePhysicalTracker()!;
+
+        tracker.TryObserveX11(false);
+        tracker.TryObserveX11(true);
+        OperationalEventContextFactory.FineTunePhysicalSnapshot snapshot = tracker.Snapshot();
+
+        Assert.Equal(2, snapshot.X11Attempts.Value);
+        Assert.True(snapshot.X11ReadValid.Value);
+        Assert.Equal(1, snapshot.X11LastValue.Value);
+        Assert.InRange(snapshot.X11ReadAtUtc.Value, before, DateTime.UtcNow);
+    }
+
+    [Fact]
+    public void Placement_phase_reuses_tracker_x11_and_safe_z_checkpoint()
+    {
+        OperationalEventContextFactory.FineTunePhysicalTracker tracker =
+            OperationalEventContextFactory.TryCreatePhysicalTracker()!;
+        tracker.TryObserveX11(true);
+        tracker.TryConfirmSafeZ(0, 5, "测试Z安全位");
+
+        OperationalEventContextFactory.FineTunePhysicalPhase phase =
+            OperationalEventContextFactory.PlacementBeforeZDown(
+                magnetOnAcknowledged: true,
+                holdingWorkpieceConfirmed: true,
+                tracker,
+                lastSuccessfulCheckpoint: "测试检查点",
+                lastConfirmedLocation: "测试工位");
+
+        Assert.Equal(1, phase.X11LastValue.Value);
+        Assert.Equal(1, phase.X11Attempts.Value);
+        Assert.True(phase.ZKnownSafe.Value);
+        Assert.Equal(0, phase.SafeZTarget.Value);
+        Assert.Equal(5, phase.SafeZTolerance.Value);
+    }
+
+    [Fact]
+    public void Report_builds_one_position_snapshot_and_derives_physical_conclusion_from_command_state()
+    {
+        string helper = ReadFlowSource("XAbsFineTuneHelper.cs");
+        string catchBlock = helper[helper.IndexOf("catch (Exception ex) when", StringComparison.Ordinal)..];
+
+        Assert.Single(Regex.Matches(catchBlock, @"ToPositionEvidence\(").Cast<Match>());
+        Assert.Contains("PhysicalConclusion =", catchBlock, StringComparison.Ordinal);
+        Assert.Contains("CommandResultUnknown", helper, StringComparison.Ordinal);
+        Assert.Contains("ManualConfirmationRequired", helper, StringComparison.Ordinal);
+    }
+
+    private static MotionConfig ActiveConfig()
+    {
+        var config = new MotionConfig();
+        config.XAbsFineTune.Enabled = true;
+        config.XAbsFineTune.StationTargets = new Dictionary<int, Dictionary<string, int>>
+        {
+            [99] = new(StringComparer.OrdinalIgnoreCase) { ["TEST"] = 1000 }
+        };
+        config.YAbsFineTune.Enabled = false;
+        return config;
+    }
+
+    private static OperationalEventContext CreateFailureContext() => new()
+    {
+        EventCode = "CRANE_XY_FINE_TUNE_FAILED",
+        Severity = OperationalEventSeverity.Error,
+        Category = OperationalEventCategory.FineTune,
+        Scope = "测试",
+        Engine = "测试引擎",
+        DeviceType = "天车",
+        DeviceNo = "99",
+        Station = "TEST",
+        ActionStage = "测试微调",
+        Title = "测试微调失败",
+        Evidence = OperationalEvidence.Unavailable("测试没有业务证据") with
+        {
+            Position = PositionEvidence.Unavailable("读取尚未开始") with
+            {
+                TargetZ = EvidenceValue<int>.Confirmed(123, "测试已有Z目标")
+            }
+        }
+    };
+
+    private static IReadOnlyDictionary<string, int> FormulaCounts(
+        int computePickupZ,
+        int pz,
+        int applyOffsetZ,
+        int computeUnloadZ) => new Dictionary<string, int>(StringComparer.Ordinal)
+    {
+        ["ComputePickupZ"] = computePickupZ,
+        ["Pz"] = pz,
+        ["ApplyOffsetZ"] = applyOffsetZ,
+        ["ComputeUnloadZ"] = computeUnloadZ
+    };
+
+    private sealed class CapturingReporter : IOperationalEventReporter
+    {
+        private readonly bool _throwOnReport;
+
+        public CapturingReporter(bool throwOnReport = false) => _throwOnReport = throwOnReport;
+
+        public List<OperationalEventContext> Contexts { get; } = new();
+
+        public void Report(OperationalEventContext context)
+        {
+            Contexts.Add(context);
+            if (_throwOnReport)
+                throw new InvalidOperationException("测试Reporter失败");
+        }
+
+        public void ObserveTransientFailure(OperationalFailureObservation observation) { }
+
+        public void ObserveRecovery(OperationalRecoveryObservation observation) { }
+
+        public void ObserveStage(OperationalStageObservation observation) { }
     }
 
     private static string ReadFlowSource(string fileName) =>

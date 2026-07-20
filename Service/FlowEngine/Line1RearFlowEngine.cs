@@ -1259,6 +1259,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     private async Task DoLoad(SkewCtx bed, string rs, CancellationToken ct)
     {
         string actionId = OperationalEventContextFactory.NewActionId("L1-REAR-LOAD");
+        OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         bool transferLocked = false; // 新Zone模型下不再使用_transferRackLock作为中转架业务互斥
         WorkpieceCache wp;
         long rackArrivalSeq;
@@ -1340,11 +1341,13 @@ public sealed class Line1RearFlowEngine : IDisposable
                 crSpd.Z.Speed, crSpd.Z.Accel, crSpd.Z.Decel, ct);
             // 安全: 取料前检查天车磁铁是否已有工件(断电/急停重启后X11不受PLC内存影响)
             bool hasRoller = await cr.ReadXBitAsync(63497, ct);
+            physicalTracker?.TryObserveX11(hasRoller);
             if (hasRoller) throw new InvalidOperationException("后天车X11=1(磁铁已有工件), 拒绝取料防止碰撞,需人工确认");
             Console.WriteLine("│ [取料] step1: Z回原点");
             try
             {
                 await cr.MoveAbsoluteAsync(-1, -1, 0, ct: ct);
+                physicalTracker?.TryConfirmSafeZ(0, _cfg.AbsMove.Tolerance, "中转架取料前Z回原点命令成功返回");
             }
             catch (PressureStopException)
             {
@@ -1362,8 +1365,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                     source: OperationalEventContextFactory.ConfirmedLocation(rs, "本物理周期来源"),
                     target: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "已选斜床目标"),
                     owner: "1号线后天车", targetZ: EvidenceValue<int>.Confirmed(pz + _oz, "已有中转架取料Z公式与偏移"),
-                    physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(true, "Z回原点命令已返回", rs)),
-                actionId: actionId, safeZ: sz, ct: ct);
+                    physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(physicalTracker, true, "Z回原点命令已返回", rs)),
+                actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             Console.WriteLine($"│ [取料] step3: Z下降到{pz + _oz}");
             try
             {
@@ -1406,6 +1409,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 Console.WriteLine("│ [取料] 等3s让X11稳定...");
                 await Task.Delay(_cfg.Grinding.X11StableDelayMs, ct); // X11稳定延时(配置文件)
                 bool x11 = await cr.ReadXBitAsync(63497, ct);
+                physicalTracker?.TryObserveX11(x11);
                 Console.WriteLine($"│ [取料] X11={(x11 ? "1(有版)" : "0(无版)")} (第{retry + 1}次)");
                 if (x11)
                 {
@@ -1413,6 +1417,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     Console.WriteLine($"│ [取料] ✓ X11=1 吸到! Z↑到安全高度{sz}");
                     //x11=1 z回安全位置
                     await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+                    physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "中转架取料后Z升安全命令成功返回");
                     break;
                 }
 
@@ -1453,9 +1458,9 @@ public sealed class Line1RearFlowEngine : IDisposable
                     actionStage: $"{bed.Code}上料放斜床前XY微调", workpiece: wp,
                     source: OperationalEventContextFactory.ConfirmedLocation(rs, "本物理周期来源"),
                     target: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "已选斜床目标"),
-                    owner: "1号线后天车", targetZ: EvidenceValue<int>.Confirmed(Pz(bz, wp.Diameter) + _oz, "已有斜床装料Z公式与偏移"),
-                    physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(true, holdingWorkpiece, "中转架取料X11=1且Z已升安全", "天车/斜床上方")),
-                actionId: actionId, safeZ: sz, ct: ct);
+                    owner: "1号线后天车", targetZ: EvidenceValue<int>.Unavailable("业务在微调后的DoHandshake中计算bz-Round(d/2)+_oz"),
+                    physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(true, holdingWorkpiece, physicalTracker, "中转架取料X11=1且Z已升安全", "天车/斜床上方")),
+                actionId: actionId, physicalTracker: physicalTracker, ct: ct);
 
             // 到这里才绑定斜床工件: X11已确认吸住、Z已升安全、后天车已到目标斜床上方。
             // 在此之前异常按“工件仍在中转架/后天车”处理, 避免Idle斜床残留旧Wp。
@@ -1693,6 +1698,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     private async Task DoUnload(SkewCtx bed, CancellationToken ct)
     {
         string actionId = OperationalEventContextFactory.NewActionId("L1-REAR-UNLOAD");
+        OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         bool magnetOn = false;
         bool holdingWorkpiece = false;       // X11确认有版后才算工件已经在后天车上, 不能只看是否发过充磁命令
         bool placedToDestination = false;    // 退磁放到目标位 + Z升安全 + 必要通知完成后, 才允许斜床Idle并清Wp
@@ -1716,7 +1722,9 @@ public sealed class Line1RearFlowEngine : IDisposable
             }
 
             // 安全: 取料前检查天车磁铁是否已有工件
-            if (await cr.ReadXBitAsync(63497, ct))
+            bool hasExistingWorkpiece = await cr.ReadXBitAsync(63497, ct);
+            physicalTracker?.TryObserveX11(hasExistingWorkpiece);
+            if (hasExistingWorkpiece)
                 throw new InvalidOperationException("后天车X11=1(磁铁已有工件), 拒绝下料取料防止碰撞");
 
             // 仅ST108紧邻中转架-斜床1碰撞区, 下料取料时只需持有ZoneTS。
@@ -1752,6 +1760,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             try
             {
                 await cr.MoveAbsoluteAsync(-1, -1, 0, ct: ct);
+                physicalTracker?.TryConfirmSafeZ(0, _cfg.AbsMove.Tolerance, "斜床取料前Z回原点命令成功返回");
             }
             catch (PressureStopException)
             {
@@ -1774,8 +1783,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                     source: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "本物理周期来源"),
                     target: EvidenceValue<string>.Unknown("ST019/ST010分流尚未确定"),
                     owner: "1号线后天车", targetZ: EvidenceValue<int>.Confirmed(lz + _oz, "已有斜床取料Z公式与偏移"),
-                    physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(true, "Z回原点命令已返回", bed.Code)),
-                actionId: actionId, safeZ: sz, ct: ct,
+                    physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(physicalTracker, true, "Z回原点命令已返回", bed.Code)),
+                actionId: actionId, physicalTracker: physicalTracker, ct: ct,
                 yCenterToPickOffsetMm: yOff);
             //下降取料    加上数据库的偏移值   lz是计算公式算的
             int zDown = lz + _oz;
@@ -1825,6 +1834,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 Console.WriteLine("│ [下料] 等3s让X11稳定...");
                 await Task.Delay(_cfg.Grinding.X11StableDelayMs, ct); // X11稳定延时(配置文件)
                 bool x11 = await cr.ReadXBitAsync(63497, ct);
+                physicalTracker?.TryObserveX11(x11);
                 Console.WriteLine($"│ [下料] X11={(x11 ? "1(有版)" : "0(无版)")} (第{retry + 1}次)");
                 if (x11)
                 {
@@ -1916,6 +1926,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             await cr.MoveAbsoluteAsync(-1, by + _oy, -1, ct: ct);
             //z升安全高度
             await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+            physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "斜床取料后Z升安全命令成功返回");
             zMayBeDown = false; // 正常下料已确认Z安全，保留原提前X退避流程
             Console.WriteLine("│ [下料] 清上一步信号 → 写天车下料完成");
             if (isF) bed.F!.SafeSetMacro(1104, 0); // 清#1104
@@ -2006,9 +2017,9 @@ public sealed class Line1RearFlowEngine : IDisposable
                             actionStage: "ST019动平衡架放料前XY微调", workpiece: wp,
                             source: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "本物理周期来源"),
                             target: OperationalEventContextFactory.ConfirmedLocation("ST019", "分流结果"),
-                            owner: "1号线后天车", targetZ: EvidenceValue<int>.Confirmed(Pz(dz, wp.Diameter) + _oz, "已有ST019放料Z公式与偏移"),
-                            physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, "斜床取料X11=1且分流已完成", "天车/ST019上方")),
-                        actionId: actionId, safeZ: sz, ct: ct);
+                            owner: "1号线后天车", targetZ: EvidenceValue<int>.Unavailable("业务在微调后计算ST019放料dz2"),
+                            physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, physicalTracker, "斜床取料X11=1且分流已完成", "天车/ST019上方")),
+                        actionId: actionId, physicalTracker: physicalTracker, ct: ct);
                     int dz2 = Pz(dz, wp.Diameter);
                     Console.WriteLine($"│   Z下降到{dz2 + _oz}");
                     try
@@ -2049,9 +2060,9 @@ public sealed class Line1RearFlowEngine : IDisposable
                             actionStage: "ST010研磨上料架放料前XY微调", workpiece: wp,
                             source: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "本物理周期来源"),
                             target: OperationalEventContextFactory.ConfirmedLocation("ST010", "分流结果"),
-                            owner: "1号线后天车", targetZ: EvidenceValue<int>.Confirmed(Pz(gz, wp.Diameter) + _oz, "已有ST010放料Z公式与偏移"),
-                            physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, "斜床取料X11=1且分流已完成", "天车/ST010上方")),
-                        actionId: actionId, safeZ: sz, ct: ct);
+                            owner: "1号线后天车", targetZ: EvidenceValue<int>.Unavailable("业务在微调后计算ST010放料gz2"),
+                            physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, physicalTracker, "斜床取料X11=1且分流已完成", "天车/ST010上方")),
+                        actionId: actionId, physicalTracker: physicalTracker, ct: ct);
                     int gz2 = Pz(gz, wp.Diameter);
                     Console.WriteLine($"│   Z下降到{gz2 + _oz}");
                     try
