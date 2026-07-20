@@ -1,0 +1,20 @@
+{
+  "capacity": 5000,
+  "aggregationWindowSeconds": 600,
+  "transientFailureCountThreshold": 3,
+  "transientFailureDurationSeconds": 30,
+  "stageThresholdSeconds": {
+    "SOFTWARE_LOCK": 60,
+    "ZONE_MT": 60,
+    "ZONE_TS": 60,
+    "POSITION_LOCK": 60,
+    "R6101": 600,
+    "R6103": 600,
+    "R6107": 5400,
+    "FORK_RETURN": 300,
+    "CRANE_RETURN": 300,
+    "TRANSFER_RACK_FULL": 600,
+    "MARKER_B_FILE": 1800,
+    "DEFAULT_NO_BUSINESS_TIMEOUT": 600
+  }
+}
