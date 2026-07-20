@@ -7,6 +7,23 @@ namespace AutomaticOnlineHostComputer.Service;
 /// </summary>
 internal static class OperationalEventContextFactory
 {
+    internal sealed record OperationalPhysicalEventSite(
+        string Scope,
+        string Engine,
+        string DeviceType,
+        string DeviceNo,
+        string Station,
+        string ActionStage,
+        string ActionId,
+        string CorrelationKey,
+        WorkpieceCache? Workpiece,
+        string PlannedSource,
+        string PlannedTarget,
+        string Owner,
+        string LastConfirmedLocation,
+        string LastSuccessfulCheckpoint,
+        string LockName = "");
+
     internal sealed record FineTunePhysicalPhase(
         DeviceCommandEvidence MagnetOnCommand,
         EvidenceValue<int> X11LastValue,
@@ -284,6 +301,198 @@ internal static class OperationalEventContextFactory
             }
         };
     }
+
+    /// <summary>
+    /// 物理异常的唯一失败隔离边界。字段复制、目录解析和Report全部在最外层try/catch中；
+    /// 该方法无返回值，失败时不影响原业务异常、catch/finally或设备命令。
+    /// </summary>
+    public static void TryReportPhysical(
+        IOperationalEventReporter reporter,
+        string eventCode,
+        OperationalPhysicalEventSite site,
+        OperationalPhysicalCycleTracker? tracker,
+        Exception? exception,
+        string detail,
+        bool usePlannedWorkpieceEvidence,
+        bool? holdingWorkpiece = null,
+        bool? placed = null,
+        bool? cacheNotified = null,
+        bool? downstreamNotified = null,
+        bool? handoffClosed = null)
+    {
+        try
+        {
+            OperationalEventDefinition definition = OperationalEventCatalog.Default.GetRequired(eventCode);
+            OperationalPhysicalCycleSnapshot snapshot = tracker?.Snapshot() ??
+                OperationalPhysicalCycleSnapshot.Unavailable(site.CorrelationKey, "调用点没有物理周期跟踪器");
+            WorkpieceEvidence workpiece = usePlannedWorkpieceEvidence && site.Workpiece.HasValue
+                ? Workpiece(
+                    site.Workpiece.Value,
+                    ConfirmedLocation(site.PlannedSource, "物理动作计划来源"),
+                    ConfirmedLocation(site.PlannedTarget, "物理动作计划目标"),
+                    site.Owner,
+                    site.LastConfirmedLocation)
+                : UnknownWorkpiece("异常涉及磁铁上既有或未知工件，不能冒充本次计划工件");
+            EvidenceValue<bool> holding = OptionalBool(
+                holdingWorkpiece,
+                "调用点已有holdingWorkpiece/X11=1证据",
+                "调用点没有当前持件结论");
+            EvidenceValue<bool> placedEvidence = OptionalBool(
+                placed,
+                "调用点已有放料承诺点",
+                "调用点没有放料承诺点结果");
+            EvidenceValue<bool> cacheEvidence = OptionalBool(
+                cacheNotified,
+                "调用点已有缓存通知结果",
+                "调用点没有缓存通知结果");
+            EvidenceValue<bool> downstreamEvidence = OptionalBool(
+                downstreamNotified,
+                "调用点已有PLC/CNC通知结果",
+                "调用点没有PLC/CNC通知结果");
+            EvidenceValue<bool> closedEvidence = OptionalBool(
+                handoffClosed,
+                "调用点已有完整交接闭环结果",
+                "调用点没有完整交接闭环结果");
+            var commitments = new[]
+            {
+                new PhysicalCommitmentEvidence("充磁命令调用", CommandReturned(snapshot.MagnetOnCommand), snapshot.MagnetOnCommand.Reason),
+                new PhysicalCommitmentEvidence("X11确认持件", holding, holding.Reason),
+                new PhysicalCommitmentEvidence("退磁命令返回", CommandReturned(snapshot.MagnetOffCommand), snapshot.MagnetOffCommand.Reason),
+                new PhysicalCommitmentEvidence("推定已放料", placedEvidence, placedEvidence.Reason),
+                new PhysicalCommitmentEvidence("缓存通知", cacheEvidence, cacheEvidence.Reason),
+                new PhysicalCommitmentEvidence("PLC/CNC通知", downstreamEvidence, downstreamEvidence.Reason),
+                new PhysicalCommitmentEvidence("完整物理交接闭环", closedEvidence, closedEvidence.Reason)
+            };
+            OperationalEvidence unavailable = OperationalEvidence.Unavailable("物理异常调用点没有该组证据");
+            var motion = new MotionAndMagnetEvidence(
+                snapshot.ZDownCommand,
+                snapshot.ZMayStillBeLow,
+                snapshot.MagnetOnCommand,
+                snapshot.MagnetOffCommand,
+                snapshot.X11LastValue,
+                snapshot.X11ReadValid,
+                snapshot.X11Attempts,
+                snapshot.X11ReadAtUtc);
+            var business = new BusinessStateEvidence(
+                EvidenceAvailability.Inferred,
+                "仅复制异常调用点已经掌握的物理承诺点",
+                snapshot.LastSuccessfulCheckpoint.HasValue
+                    ? snapshot.LastSuccessfulCheckpoint
+                    : Checkpoint(site.LastSuccessfulCheckpoint),
+                EvidenceValue<string>.Unknown("调用点没有状态机修改前值"),
+                EvidenceValue<string>.NotApplicable("监控不修改状态机"),
+                EvidenceValue<string>.Unknown("调用点没有缓存修改前值"),
+                EvidenceValue<string>.NotApplicable("监控不修改缓存"),
+                Text(site.Owner, "物理动作所有者参数"),
+                EvidenceValue<string>.NotApplicable("监控不修改工件所有权"),
+                holding,
+                placedEvidence,
+                cacheEvidence,
+                commitments);
+            LockEvidence locks = string.IsNullOrWhiteSpace(site.LockName)
+                ? new LockEvidence(EvidenceAvailability.Unknown, "调用点没有锁证据", Array.Empty<LockItemEvidence>())
+                : new LockEvidence(
+                    EvidenceAvailability.Unknown,
+                    "异常发生在业务try/catch内，finally尚未完成，不能提前断言锁已释放",
+                    new[]
+                    {
+                        new LockItemEvidence(
+                            site.LockName,
+                            EvidenceValue<bool>.Unknown("catch时可能仍持有或正在等待finally"),
+                            EvidenceValue<bool>.Unknown("finally尚未执行完成，释放结果未知"),
+                            "确认相关设备和工件已离开碰撞区域后，再核对锁最终状态")
+                    });
+            OperatorGuidance guidance = new(
+                EvidenceAvailability.Confirmed,
+                "来自稳定事件目录",
+                definition.RequiredActions,
+                definition.ForbiddenActions,
+                definition.ContinueCondition);
+            PhysicalConclusionEvidence conclusion = Conclusion(eventCode, detail);
+
+            reporter.Report(new OperationalEventContext
+            {
+                EventCode = eventCode,
+                Severity = definition.DefaultSeverity,
+                Category = definition.DefaultCategory,
+                Scope = site.Scope,
+                Engine = site.Engine,
+                DeviceType = site.DeviceType,
+                DeviceNo = site.DeviceNo,
+                Station = site.Station,
+                ActionStage = site.ActionStage,
+                Title = definition.Title,
+                Source = nameof(OperationalEventContextFactory),
+                ActionId = site.ActionId,
+                CorrelationKey = site.CorrelationKey,
+                IndependentAction = true,
+                DetailMessage = detail,
+                Result = exception is null ? "原业务路径继续执行既有分支" : "原异常路径保持不变",
+                CapturedException = exception,
+                PhysicalConclusion = conclusion,
+                BusinessPaused = EvidenceValue<bool>.Unknown("调用点不为监控额外读取或修改暂停状态"),
+                Evidence = unavailable with
+                {
+                    Workpiece = workpiece,
+                    MotionAndMagnet = motion,
+                    BusinessState = business,
+                    Locks = locks,
+                    Guidance = guidance
+                }
+            });
+        }
+        catch
+        {
+            // 证据构造、目录和Reporter任何失败都不得影响生产流程。
+        }
+    }
+
+    private static PhysicalConclusionEvidence Conclusion(string eventCode, string detail) => eventCode switch
+    {
+        "CRANE_X11_UNEXPECTED_WORKPIECE" => new(
+            PhysicalConclusionCode.WorkpieceConfirmedHeld,
+            EvidenceAvailability.Confirmed,
+            "X11=1确认磁铁上存在工件，但身份未知",
+            "取料前既有X11读取成功返回1；不得绑定本次计划工件"),
+        "CRANE_X11_NOT_CONFIRMED" => new(
+            PhysicalConclusionCode.ManualConfirmationRequired,
+            EvidenceAvailability.Confirmed,
+            "X11连续有效读取仍未确认持件",
+            "只能确认X11未确认持件，不能推断工件仍在来源位"),
+        "PHYSICAL_HANDOFF_NOT_CLOSED" => new(
+            PhysicalConclusionCode.ManualConfirmationRequired,
+            EvidenceAvailability.Unknown,
+            "退磁或放料后的通知闭环不完整",
+            detail),
+        _ => new(
+            PhysicalConclusionCode.CommandResultUnknown,
+            EvidenceAvailability.Unknown,
+            "设备命令或传感器结果未知",
+            detail)
+    };
+
+    private static WorkpieceEvidence UnknownWorkpiece(string reason) => new(
+        EvidenceValue<string>.Unknown(reason),
+        EvidenceValue<string>.Unknown(reason),
+        EvidenceValue<double>.Unknown(reason),
+        EvidenceValue<double>.Unknown(reason),
+        EvidenceValue<string>.Unknown(reason),
+        EvidenceValue<string>.Unknown(reason),
+        EvidenceValue<string>.Unknown(reason),
+        EvidenceValue<string>.Unknown(reason),
+        reason);
+
+    private static EvidenceValue<bool> OptionalBool(bool? value, string confirmedReason, string unknownReason) =>
+        value.HasValue
+            ? EvidenceValue<bool>.Confirmed(value.Value, confirmedReason)
+            : EvidenceValue<bool>.Unknown(unknownReason);
+
+    private static EvidenceValue<bool> CommandReturned(DeviceCommandEvidence command) =>
+        command.State == DeviceCommandState.Acknowledged
+            ? EvidenceValue<bool>.Confirmed(true, command.Reason)
+            : command.State == DeviceCommandState.NotSent
+                ? EvidenceValue<bool>.Confirmed(false, command.Reason)
+                : EvidenceValue<bool>.Unknown(command.Reason);
 
     private static EvidenceValue<string> Text(string? value, string source) =>
         string.IsNullOrWhiteSpace(value)
