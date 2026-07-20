@@ -269,11 +269,13 @@ public sealed class ProductionFlowEngine : IDisposable
             }
         }
 
+        string monitoringStage = "获取天车服务";
         try
         {
             var craneSvc = _craneCache.GetOrCreateService(craneNo);
 
             // 1. 安全检查
+            monitoringStage = "移动前安全检查";
             var safety = await craneSvc.CheckSafetyAsync(ct);
             if (!safety.AllPassed)
             {
@@ -287,18 +289,22 @@ public sealed class ProductionFlowEngine : IDisposable
             }
 
             // 2. 设置绝对速度
+            monitoringStage = "设置绝对速度";
             var crSpd = _cfg.GetCraneSpeed(craneNo);
             await craneSvc.SetAbsSpeedAsync(crSpd.X.Speed, crSpd.X.Accel, crSpd.X.Decel, crSpd.Y.Speed, crSpd.Y.Accel, crSpd.Y.Decel, crSpd.Z.Speed, crSpd.Z.Accel, crSpd.Z.Decel, ct);
 
             // 3. 读取天车当前坐标（日志用）
+            monitoringStage = "读取移动前坐标";
             var before = await craneSvc.ReadStatusAsync(ct);
             if (before != null)
                 Console.WriteLine($"[FlowEngine] [{craneName}] 当前坐标 X={before.XPos} Y={before.YPos} Z={before.ZPos}");
 
             // 4. 执行绝对移动（自动等待到位）
+            monitoringStage = "执行绝对移动";
             await craneSvc.MoveAbsoluteAsync(xTarget, yTarget, zTarget, ct: ct);
 
             // 5. 读取到位后坐标（确认）
+            monitoringStage = "读取移动后坐标";
             var after = await craneSvc.ReadStatusAsync(ct);
             if (after != null)
             {
@@ -316,8 +322,8 @@ public sealed class ProductionFlowEngine : IDisposable
         {
             Console.WriteLine($"[FlowEngine] [{craneName}] ✘ 移动超时：{ex.Message}");
             TryReportMoveFinalFailure(
-                "天车", craneNo, craneName, stationCode, "绝对移动执行",
-                $"移动流程发生超时：{ex.Message}",
+                "天车", craneNo, craneName, stationCode, monitoringStage,
+                $"移动流程在{monitoringStage}阶段发生超时：{ex.Message}",
                 "设备运动结果未知；本次调度返回false。",
                 xTarget, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: true,
                 exception: ex);
@@ -327,8 +333,8 @@ public sealed class ProductionFlowEngine : IDisposable
         {
             Console.WriteLine($"[FlowEngine] [{craneName}] ✘ 移动异常：{ex.Message}");
             TryReportMoveFinalFailure(
-                "天车", craneNo, craneName, stationCode, "绝对移动执行",
-                $"移动流程发生异常：{ex.Message}",
+                "天车", craneNo, craneName, stationCode, monitoringStage,
+                $"移动流程在{monitoringStage}阶段发生异常：{ex.Message}",
                 "设备运动结果未知；本次调度返回false。",
                 xTarget, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: true,
                 exception: ex,
@@ -397,9 +403,11 @@ public sealed class ProductionFlowEngine : IDisposable
             }
         }
 
+        string monitoringStage = "获取机械手服务";
         try
         {
             var svc = _manipulatorCache.GetOrCreateService(manipulatorNo);
+            monitoringStage = "移动前安全检查";
             var safety = await svc.CheckSafetyAsync(ct);
             if (!safety.AllPassed)
             {
@@ -412,9 +420,11 @@ public sealed class ProductionFlowEngine : IDisposable
                 return false;
             }
 
+            monitoringStage = "设置绝对速度";
             var mnSpd = _cfg.GetManipulatorSpeed(manipulatorNo);
             await svc.SetAbsSpeedAsync(mnSpd.X.Speed, mnSpd.X.Accel, mnSpd.X.Decel, mnSpd.Y.Speed, mnSpd.Y.Accel, mnSpd.Y.Decel, mnSpd.Z.Speed, mnSpd.Z.Accel, mnSpd.Z.Decel, ct);
             // 机械手 X 传 -1 跳过 X 轴
+            monitoringStage = "执行绝对移动";
             await svc.MoveAbsoluteAsync(-1, yTarget, zTarget, ct: ct);
 
             Console.WriteLine($"[FlowEngine] [{info.Name}] ✔ 机械手自动调度完成，已到达 {station.Name}");
@@ -424,8 +434,8 @@ public sealed class ProductionFlowEngine : IDisposable
         {
             Console.WriteLine($"[FlowEngine] [{info.Name}] ✘ 移动超时：{ex.Message}");
             TryReportMoveFinalFailure(
-                "机械手", manipulatorNo, info.Name, stationCode, "绝对移动执行",
-                $"移动流程发生超时：{ex.Message}",
+                "机械手", manipulatorNo, info.Name, stationCode, monitoringStage,
+                $"移动流程在{monitoringStage}阶段发生超时：{ex.Message}",
                 "设备运动结果未知；本次调度返回false。",
                 null, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: true,
                 exception: ex);
@@ -522,7 +532,7 @@ public sealed class ProductionFlowEngine : IDisposable
                 Result = result,
                 CapturedException = exception,
                 PhysicalConclusion = physicalConclusion,
-                BusinessPaused = EvidenceValue<bool>.Confirmed(false, "公共移动入口没有执行引擎暂停"),
+                BusinessPaused = EvidenceValue<bool>.Unknown("公共移动入口不知道调用方或全局引擎是否已暂停"),
                 Evidence = unavailable with
                 {
                     Position = unavailable.Position with
@@ -612,10 +622,18 @@ public sealed class ProductionFlowEngine : IDisposable
                 Evidence = unavailable with
                 {
                     Workpiece = new WorkpieceEvidence(
-                        EvidenceValue<string>.Confirmed(ctx.PlateNo, "来自WorkpieceContext"),
-                        EvidenceValue<string>.Confirmed(ctx.Sequence, "来自WorkpieceContext"),
-                        EvidenceValue<double>.Confirmed(ctx.Diameter, "来自WorkpieceContext"),
-                        EvidenceValue<double>.Confirmed(ctx.Length, "来自WorkpieceContext"),
+                        string.IsNullOrWhiteSpace(ctx.PlateNo)
+                            ? EvidenceValue<string>.Unknown("WorkpieceContext.PlateNo为空")
+                            : EvidenceValue<string>.Confirmed(ctx.PlateNo, "来自WorkpieceContext"),
+                        string.IsNullOrWhiteSpace(ctx.Sequence)
+                            ? EvidenceValue<string>.Unknown("WorkpieceContext.Sequence为空")
+                            : EvidenceValue<string>.Confirmed(ctx.Sequence, "来自WorkpieceContext"),
+                        ctx.Diameter > 0
+                            ? EvidenceValue<double>.Confirmed(ctx.Diameter, "来自WorkpieceContext")
+                            : EvidenceValue<double>.Unknown("WorkpieceContext.Diameter未提供有效正值"),
+                        ctx.Length > 0
+                            ? EvidenceValue<double>.Confirmed(ctx.Length, "来自WorkpieceContext")
+                            : EvidenceValue<double>.Unknown("WorkpieceContext.Length未提供有效正值"),
                         string.IsNullOrWhiteSpace(ctx.LoadMethod)
                             ? EvidenceValue<string>.Unknown("尚未分配或调用点没有来源")
                             : EvidenceValue<string>.Confirmed(ctx.LoadMethod, "来自WorkpieceContext.LoadMethod"),

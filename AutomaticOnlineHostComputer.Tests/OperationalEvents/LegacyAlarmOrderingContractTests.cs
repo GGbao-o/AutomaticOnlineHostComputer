@@ -1,4 +1,9 @@
 using System.Text.RegularExpressions;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using AutomaticOnlineHostComputer.Domain.Models;
+using AutomaticOnlineHostComputer.Service;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Tests.OperationalEvents;
 
@@ -137,6 +142,112 @@ public sealed class LegacyAlarmOrderingContractTests
         Assert.Contains("CapturedException = exception", engineHelper, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Move_reporting_does_not_claim_to_know_the_callers_global_pause_state()
+    {
+        var reporter = new CapturingReporter();
+        ProductionFlowEngine engine = CreateUninitializedEngine(reporter);
+
+        InvokePrivate(
+            engine,
+            "TryReportMoveFinalFailure",
+            "天车", 1, "1号天车", "ST001", "测试阶段", "测试详情", "测试结果",
+            10, 20, 30, false, false, null, OperationalEventSeverity.Error);
+
+        OperationalEventContext context = Assert.IsType<OperationalEventContext>(reporter.Context);
+        Assert.Equal(EvidenceAvailability.Unknown, context.BusinessPaused.Availability);
+        Assert.False(context.BusinessPaused.HasValue);
+    }
+
+    [Fact]
+    public void Engine_reporting_marks_empty_identity_and_nonpositive_dimensions_as_unknown()
+    {
+        var reporter = new CapturingReporter();
+        ProductionFlowEngine engine = CreateUninitializedEngine(reporter);
+        var workpiece = new WorkpieceContext
+        {
+            PlateNo = " ",
+            Sequence = string.Empty,
+            Diameter = 0,
+            Length = -1,
+            CurrentStage = FlowStage.Loading
+        };
+
+        InvokePrivate(
+            engine,
+            "TryReportEngineFinalFailure",
+            workpiece, FlowStage.Loading, OperationalEventSeverity.Error,
+            "测试", "测试详情", new InvalidOperationException("测试异常"));
+
+        WorkpieceEvidence evidence = Assert.IsType<OperationalEventContext>(reporter.Context).Evidence.Workpiece;
+        AssertUnknown(evidence.PlateNo);
+        AssertUnknown(evidence.Sequence);
+        AssertUnknown(evidence.Diameter);
+        AssertUnknown(evidence.Length);
+    }
+
+    [Fact]
+    public void Engine_reporting_confirms_only_present_identity_and_positive_dimensions()
+    {
+        var reporter = new CapturingReporter();
+        ProductionFlowEngine engine = CreateUninitializedEngine(reporter);
+        var workpiece = new WorkpieceContext
+        {
+            PlateNo = "PLATE-01",
+            Sequence = "SEQ-02",
+            Diameter = 123.45,
+            Length = 678.9,
+            CurrentStage = FlowStage.Boring
+        };
+
+        InvokePrivate(
+            engine,
+            "TryReportEngineFinalFailure",
+            workpiece, FlowStage.Boring, OperationalEventSeverity.Error,
+            "测试", "测试详情", new InvalidOperationException("测试异常"));
+
+        WorkpieceEvidence evidence = Assert.IsType<OperationalEventContext>(reporter.Context).Evidence.Workpiece;
+        AssertConfirmed(evidence.PlateNo, "PLATE-01");
+        AssertConfirmed(evidence.Sequence, "SEQ-02");
+        AssertConfirmed(evidence.Diameter, 123.45);
+        AssertConfirmed(evidence.Length, 678.9);
+    }
+
+    [Fact]
+    public void Move_catch_stage_markers_precede_existing_device_operations_without_changing_their_order()
+    {
+        string source = ReadSource("Service", "FlowEngine", "ProductionFlowEngine.cs");
+        string crane = ExtractMethod(source, "public async Task<bool> MoveCraneToStationAsync");
+        string manipulator = ExtractMethod(source, "public async Task<bool> MoveManipulatorToStationAsync");
+
+        AssertStageBefore(crane, "string monitoringStage = \"获取天车服务\";", "_craneCache.GetOrCreateService(");
+        AssertStageBefore(crane, "monitoringStage = \"移动前安全检查\";", ".CheckSafetyAsync(");
+        AssertStageBefore(crane, "monitoringStage = \"设置绝对速度\";", "_cfg.GetCraneSpeed(");
+        AssertStageBefore(crane, "monitoringStage = \"设置绝对速度\";", ".SetAbsSpeedAsync(");
+        AssertStageBefore(crane, "monitoringStage = \"读取移动前坐标\";", "var before = await craneSvc.ReadStatusAsync(");
+        AssertStageBefore(crane, "monitoringStage = \"执行绝对移动\";", ".MoveAbsoluteAsync(");
+        AssertStageBefore(crane, "monitoringStage = \"读取移动后坐标\";", "var after = await craneSvc.ReadStatusAsync(");
+        Assert.Equal(2, Count(crane, "craneName, stationCode, monitoringStage,"));
+
+        AssertStageBefore(manipulator, "string monitoringStage = \"获取机械手服务\";", "_manipulatorCache.GetOrCreateService(");
+        AssertStageBefore(manipulator, "monitoringStage = \"移动前安全检查\";", ".CheckSafetyAsync(");
+        AssertStageBefore(manipulator, "monitoringStage = \"设置绝对速度\";", "_cfg.GetManipulatorSpeed(");
+        AssertStageBefore(manipulator, "monitoringStage = \"设置绝对速度\";", ".SetAbsSpeedAsync(");
+        AssertStageBefore(manipulator, "monitoringStage = \"执行绝对移动\";", ".MoveAbsoluteAsync(");
+        Assert.Equal(1, Count(manipulator, "info.Name, stationCode, monitoringStage,"));
+
+        Assert.Equal(
+            new[] { "GetOrCreateService(", ".CheckSafetyAsync(", ".SetAbsSpeedAsync(", "var before = await craneSvc.ReadStatusAsync(", ".MoveAbsoluteAsync(", "var after = await craneSvc.ReadStatusAsync(" },
+            OrderedMarkers(crane,
+                "GetOrCreateService(", ".CheckSafetyAsync(", ".SetAbsSpeedAsync(",
+                "var before = await craneSvc.ReadStatusAsync(", ".MoveAbsoluteAsync(",
+                "var after = await craneSvc.ReadStatusAsync("));
+        Assert.Equal(
+            new[] { "GetOrCreateService(", ".CheckSafetyAsync(", ".SetAbsSpeedAsync(", ".MoveAbsoluteAsync(" },
+            OrderedMarkers(manipulator,
+                "GetOrCreateService(", ".CheckSafetyAsync(", ".SetAbsSpeedAsync(", ".MoveAbsoluteAsync("));
+    }
+
     private static void AssertPopupDedupeOrdering(
         string method,
         int expectedPauseCalls,
@@ -187,7 +298,56 @@ public sealed class LegacyAlarmOrderingContractTests
         Assert.Equal(1, Count(method, "\"等待工位预约\","));
         Assert.Equal(1, Count(method, "\"重新预约工位\","));
         Assert.Equal(1, Count(method, "\"移动前安全检查\","));
-        Assert.Equal(absoluteMoveFailureCount, Count(method, "\"绝对移动执行\","));
+        Assert.Equal(absoluteMoveFailureCount, Count(method, "stationCode, monitoringStage,"));
+    }
+
+    private static void AssertStageBefore(string method, string stageMarker, string operationMarker)
+    {
+        int stage = method.IndexOf(stageMarker, StringComparison.Ordinal);
+        int operation = method.IndexOf(operationMarker, StringComparison.Ordinal);
+        Assert.True(stage >= 0, $"未找到监控阶段标记：{stageMarker}");
+        Assert.True(operation >= 0, $"未找到设备操作：{operationMarker}");
+        Assert.True(stage < operation, $"监控阶段必须在设备操作前更新：{stageMarker}");
+    }
+
+    private static string[] OrderedMarkers(string method, params string[] markers) =>
+        markers
+            .Select(marker => (Marker: marker, Index: method.IndexOf(marker, StringComparison.Ordinal)))
+            .OrderBy(item => item.Index)
+            .Select(item => item.Marker)
+            .ToArray();
+
+    private static ProductionFlowEngine CreateUninitializedEngine(IOperationalEventReporter reporter)
+    {
+        var engine = (ProductionFlowEngine)RuntimeHelpers.GetUninitializedObject(typeof(ProductionFlowEngine));
+        FieldInfo? reporterField = typeof(ProductionFlowEngine).GetField(
+            "_exceptionReporter",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(reporterField);
+        reporterField.SetValue(engine, reporter);
+        return engine;
+    }
+
+    private static void InvokePrivate(ProductionFlowEngine engine, string methodName, params object?[] arguments)
+    {
+        MethodInfo? method = typeof(ProductionFlowEngine).GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method.Invoke(engine, arguments);
+    }
+
+    private static void AssertUnknown<T>(EvidenceValue<T> evidence)
+    {
+        Assert.Equal(EvidenceAvailability.Unknown, evidence.Availability);
+        Assert.False(evidence.HasValue);
+    }
+
+    private static void AssertConfirmed<T>(EvidenceValue<T> evidence, T expected)
+    {
+        Assert.Equal(EvidenceAvailability.Confirmed, evidence.Availability);
+        Assert.True(evidence.HasValue);
+        Assert.Equal(expected, evidence.Value);
     }
 
     private static void AssertIsolatedReporterHelper(string method)
@@ -292,5 +452,18 @@ public sealed class LegacyAlarmOrderingContractTests
         for (int current = index - 1; current >= 0 && source[current] == '\\'; current--)
             slashCount++;
         return slashCount % 2 != 0;
+    }
+
+    private sealed class CapturingReporter : IOperationalEventReporter
+    {
+        public OperationalEventContext? Context { get; private set; }
+
+        public void Report(OperationalEventContext context) => Context = context;
+
+        public void ObserveTransientFailure(OperationalFailureObservation observation) { }
+
+        public void ObserveRecovery(OperationalRecoveryObservation observation) { }
+
+        public void ObserveStage(OperationalStageObservation observation) { }
     }
 }
