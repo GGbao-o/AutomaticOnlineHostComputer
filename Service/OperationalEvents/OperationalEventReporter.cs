@@ -177,6 +177,7 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
             ArgumentNullException.ThrowIfNull(observation);
             ArgumentNullException.ThrowIfNull(observation.Context);
             DateTime occurredAtUtc = ResolveOccurredAt(observation.Context);
+            OperationalEventContext frozenObservationContext = NormalizeAndFreeze(observation.Context);
             string stateKey = BuildStageStateKey(observation);
             OperationalEventContext? contextToRecord = null;
             bool stateEvicted = false;
@@ -192,7 +193,15 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
                             : _options.GetStageThreshold(observation.StageCode);
                         if (!_stageCycles.TryGetValue(stateKey, out StageCycle? cycle))
                         {
-                            cycle = new StageCycle(occurredAtUtc, sequence, observedThreshold, false, sequence);
+                            cycle = new StageCycle(
+                                occurredAtUtc,
+                                sequence,
+                                observedThreshold,
+                                false,
+                                sequence,
+                                occurredAtUtc,
+                                sequence,
+                                frozenObservationContext);
                         }
 
                         bool replaceStart = IsEarlier(
@@ -203,20 +212,42 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
                         DateTime startedAtUtc = replaceStart ? occurredAtUtc : cycle.StartedAtUtc;
                         long startSequence = replaceStart ? sequence : cycle.StartSequence;
                         TimeSpan threshold = replaceStart ? observedThreshold : cycle.Threshold;
-                        bool thresholdReached = occurredAtUtc >= startedAtUtc &&
-                            occurredAtUtc - startedAtUtc >= threshold;
+                        bool replaceLatest = IsLater(
+                            occurredAtUtc,
+                            sequence,
+                            cycle.LatestOccurredAtUtc,
+                            cycle.LatestSequence);
+                        DateTime latestOccurredAtUtc = replaceLatest
+                            ? occurredAtUtc
+                            : cycle.LatestOccurredAtUtc;
+                        long latestSequence = replaceLatest ? sequence : cycle.LatestSequence;
+                        OperationalEventContext latestContext = replaceLatest
+                            ? frozenObservationContext
+                            : cycle.LatestContext;
+                        bool thresholdReached = latestOccurredAtUtc >= startedAtUtc &&
+                            latestOccurredAtUtc - startedAtUtc >= threshold;
                         bool reportNow = thresholdReached && !cycle.Reported;
-                        _stageCycles[stateKey] = cycle with
+                        var updated = cycle with
                         {
                             StartedAtUtc = startedAtUtc,
                             StartSequence = startSequence,
                             Threshold = threshold,
                             Reported = cycle.Reported || thresholdReached,
-                            LastTouchedSequence = Math.Max(cycle.LastTouchedSequence, sequence)
+                            LastTouchedSequence = Math.Max(cycle.LastTouchedSequence, sequence),
+                            LatestOccurredAtUtc = latestOccurredAtUtc,
+                            LatestSequence = latestSequence,
+                            LatestContext = latestContext
                         };
+                        _stageCycles[stateKey] = updated;
                         if (reportNow)
                         {
-                            contextToRecord = WithElapsed(observation.Context, startedAtUtc, occurredAtUtc, "阶段滞留");
+                            contextToRecord = WithElapsed(
+                                updated.LatestContext,
+                                updated.StartedAtUtc,
+                                updated.LatestOccurredAtUtc,
+                                "阶段滞留");
+                            occurredAtUtc = updated.LatestOccurredAtUtc;
+                            sequence = updated.LatestSequence;
                         }
 
                         stateEvicted = TrimOldest(_stageCycles, stateKey);
@@ -226,7 +257,12 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
                     {
                         if (_stageCycles.Remove(stateKey, out StageCycle? completed) && completed.Reported)
                         {
-                            contextToRecord = WithElapsed(observation.Context, completed.StartedAtUtc, occurredAtUtc, "阶段已恢复");
+                            occurredAtUtc = Max(occurredAtUtc, completed.LatestOccurredAtUtc);
+                            contextToRecord = WithElapsed(
+                                frozenObservationContext,
+                                completed.StartedAtUtc,
+                                occurredAtUtc,
+                                "阶段已恢复");
                         }
 
                         break;
@@ -235,7 +271,12 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
                     {
                         if (_stageCycles.Remove(stateKey, out StageCycle? aborted) && aborted.Reported)
                         {
-                            contextToRecord = WithElapsed(observation.Context, aborted.StartedAtUtc, occurredAtUtc, "阶段跟踪已中止");
+                            occurredAtUtc = Max(occurredAtUtc, aborted.LatestOccurredAtUtc);
+                            contextToRecord = WithElapsed(
+                                frozenObservationContext,
+                                aborted.StartedAtUtc,
+                                occurredAtUtc,
+                                "阶段跟踪已中止");
                         }
 
                         break;
@@ -569,6 +610,8 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
         candidateTime > currentTime ||
         (candidateTime == currentTime && candidateSequence > currentSequence);
 
+    private static DateTime Max(DateTime left, DateTime right) => left >= right ? left : right;
+
     private static OperationalEvidence FreezeEvidence(OperationalEvidence evidence)
     {
         BusinessStateEvidence business = evidence.BusinessState;
@@ -637,5 +680,8 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
         long StartSequence,
         TimeSpan Threshold,
         bool Reported,
-        long LastTouchedSequence) : ITrackerCycle;
+        long LastTouchedSequence,
+        DateTime LatestOccurredAtUtc,
+        long LatestSequence,
+        OperationalEventContext LatestContext) : ITrackerCycle;
 }

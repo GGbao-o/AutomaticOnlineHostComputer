@@ -305,6 +305,114 @@ public sealed class OperationalEventReporterTests
     }
 
     [Fact]
+    public async Task Reordered_stage_span_reports_stall_with_true_latest_context_and_non_regressing_close()
+    {
+        var clock = new InterleavingClock(
+            DateTime.UnixEpoch,
+            DateTime.UnixEpoch.AddSeconds(20));
+        OperationalEventMonitorOptions options = TestEventFactory.Options(
+            stages: new Dictionary<string, TimeSpan> { ["TEST_STAGE"] = TimeSpan.FromSeconds(10) });
+        var store = new OperationalEventStore(options);
+        var reporter = new OperationalEventReporter(store, options, clock);
+
+        Task earlierSequence = Task.Run(() => reporter.ObserveStage(new(
+            "reordered-complete",
+            "TEST_STAGE",
+            "complete-action",
+            OperationalStageObservationState.Active,
+            null,
+            TestEventFactory.Context(
+                eventCode: "STALL-COMPLETE",
+                actionId: "complete-action",
+                detail: "earlier-time-context"))));
+        Assert.True(clock.WaitUntilFirstCallBlocks());
+        Task laterSequence = Task.Run(() => reporter.ObserveStage(new(
+            "reordered-complete",
+            "TEST_STAGE",
+            "complete-action",
+            OperationalStageObservationState.Active,
+            null,
+            TestEventFactory.Context(
+                eventCode: "STALL-COMPLETE",
+                actionId: "complete-action",
+                detail: "true-latest-context"))));
+        await laterSequence;
+        clock.ReleaseFirstCall();
+        await earlierSequence;
+
+        OperationalEvent stall = Assert.Single(store.Snapshot().Events);
+        Assert.Contains("true-latest-context", stall.LatestDetailMessage);
+        Assert.Equal(DateTime.UnixEpoch.AddSeconds(20), stall.LastOccurredAtUtc);
+
+        reporter.ObserveStage(new(
+            "reordered-complete",
+            "TEST_STAGE",
+            "complete-action",
+            OperationalStageObservationState.Completed,
+            null,
+            TestEventFactory.Context(
+                eventCode: "RECOVER-COMPLETE",
+                actionId: "complete-action",
+                detail: "completion",
+                occurredAt: DateTime.UnixEpoch.AddSeconds(5))));
+
+        OperationalEvent recovery = Assert.Single(
+            store.Snapshot().Events,
+            item => item.EventCode == "RECOVER-COMPLETE");
+        Assert.Equal(DateTime.UnixEpoch.AddSeconds(20), recovery.LastOccurredAtUtc);
+        Assert.Contains("00:00:20", recovery.LatestDetailMessage);
+
+        reporter.ObserveStage(new(
+            "reordered-abort",
+            "TEST_STAGE",
+            "abort-action",
+            OperationalStageObservationState.Active,
+            null,
+            TestEventFactory.Context(
+                eventCode: "STALL-ABORT",
+                actionId: "abort-action",
+                detail: "abort-latest",
+                occurredAt: DateTime.UnixEpoch.AddSeconds(20))));
+        reporter.ObserveStage(new(
+            "reordered-abort",
+            "TEST_STAGE",
+            "abort-action",
+            OperationalStageObservationState.Active,
+            null,
+            TestEventFactory.Context(
+                eventCode: "STALL-ABORT",
+                actionId: "abort-action",
+                detail: "abort-earliest",
+                occurredAt: DateTime.UnixEpoch)));
+        reporter.ObserveStage(new(
+            "reordered-abort",
+            "TEST_STAGE",
+            "abort-action",
+            OperationalStageObservationState.Aborted,
+            null,
+            TestEventFactory.Context(
+                eventCode: "ABORTED",
+                actionId: "abort-action",
+                detail: "abort",
+                occurredAt: DateTime.UnixEpoch.AddSeconds(5))));
+        reporter.ObserveStage(new(
+            "reordered-abort",
+            "TEST_STAGE",
+            "abort-action",
+            OperationalStageObservationState.Completed,
+            null,
+            TestEventFactory.Context(
+                eventCode: "FALSE-RECOVERY",
+                actionId: "abort-action",
+                occurredAt: DateTime.UnixEpoch.AddSeconds(30))));
+
+        OperationalEvent aborted = Assert.Single(store.Snapshot().Events, item => item.EventCode == "ABORTED");
+        Assert.Equal(DateTime.UnixEpoch.AddSeconds(20), aborted.LastOccurredAtUtc);
+        Assert.Contains("中止", aborted.LatestResult);
+        Assert.DoesNotContain(store.Snapshot().Events, item => item.EventCode == "FALSE-RECOVERY");
+    }
+
+    [Fact]
     public void State_eviction_diagnostic_failure_does_not_skip_threshold_event()
     {
         OperationalEventMonitorOptions options = TestEventFactory.Options(capacity: 1, failureCount: 1);
@@ -437,7 +545,20 @@ public sealed class OperationalEventReporterTests
     {
         private readonly ManualResetEventSlim _firstBlocked = new(false);
         private readonly ManualResetEventSlim _releaseFirst = new(false);
+        private readonly DateTime _firstTime;
+        private readonly DateTime _secondTime;
         private int _calls;
+
+        public InterleavingClock()
+            : this(DateTime.UnixEpoch.AddSeconds(1), DateTime.UnixEpoch.AddSeconds(2))
+        {
+        }
+
+        public InterleavingClock(DateTime firstTime, DateTime secondTime)
+        {
+            _firstTime = firstTime;
+            _secondTime = secondTime;
+        }
 
         public DateTime UtcNow
         {
@@ -452,10 +573,10 @@ public sealed class OperationalEventReporterTests
                         throw new TimeoutException("test did not release first clock call");
                     }
 
-                    return DateTime.UnixEpoch.AddSeconds(1);
+                    return _firstTime;
                 }
 
-                return DateTime.UnixEpoch.AddSeconds(2);
+                return _secondTime;
             }
         }
 
