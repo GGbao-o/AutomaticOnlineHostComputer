@@ -971,15 +971,16 @@ public sealed class BalancingFlowEngine : IDisposable
         bool mag = false;
         bool holdingWorkpiece = false; // X11确认吸住后才算工件真的在机械手2上
         bool placedOnM710 = false;
+        bool operationalPlacementCommitted = false; // 仅供旁路证据：退磁成功即成立，不参与业务判断
         bool m711Notified = false;
         bool keepDisplayForManualConfirmation = false; // 只控制页面证据清理，不参与任何动作判断
         WorkpieceCache? displayWorkpiece = null;
         string operationalActionId = $"BAL-M2-{actionVersion}";
-        var operationalTracker = new OperationalPhysicalCycleTracker(operationalActionId);
-        var operationalSite = new OperationalEventContextFactory.OperationalPhysicalEventSite(
+        var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled(operationalActionId);
+        var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
             "动平衡", "动平衡引擎", "机械手", "M2", "来源未确定",
             "M2取料并放到ST008/M710", operationalActionId, $"{operationalActionId}:pending", null,
-            "来源未确定", "ST008/M710", "机械手2", "来源未确定", "动作已创建", "M817/M818位置锁");
+            "来源未确定", "ST008/M710", "机械手2", "来源未确定", "动作已创建", "M817/M818位置锁"));
         void ReleaseM2RackLocks(string reason)
         {
             // M2可能同时拿M817+M818: M817是来源架, M818是M817→M710路径保护锁。
@@ -1063,6 +1064,9 @@ public sealed class BalancingFlowEngine : IDisposable
                 LastConfirmedLocation = pickCode,
                 LastSuccessfulCheckpoint = "来源缓存和直径已取得"
             };
+            operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheMutation, pickReg);
+            operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M711");
+            operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M2-ST008/M710完整交接");
             // 仅记录页面展示身份；不参与后续直径、坐标、X11或任何放行判断。
             SetM2Display(actionVersion, trackedWorkpiece, $"准备从{pickReg}取料");
             Console.WriteLine($"[平衡引擎] [M2] ① 取料 {trackedWorkpiece.IdentityText} 工件直径d={d}");
@@ -1074,6 +1078,7 @@ public sealed class BalancingFlowEngine : IDisposable
             int pzDown = Pz(pickZ, d), safeZ = _cfg.Grinding.SafeZHeight;
             // Console.WriteLine($"[平衡引擎] ");
             // ①.0 安全: 取料前检查磁铁是否已有工件(断电重启后X11不受PLC内存影响)
+            operationalTracker.BeginX11Stage("取料前残留检查");
             operationalTracker.BeginX11Attempt();
             bool unexpectedWorkpiece;
             try
@@ -1102,7 +1107,7 @@ public sealed class BalancingFlowEngine : IDisposable
             Console.WriteLine($"[平衡引擎] [M2] ① 取料 {pickReg}({pickCode}) {trackedWorkpiece.IdentityText} Y={pickY} Z={pzDown}");
             // 先Y移到取料位(机械手只移YZ轴)
             await _m2.MoveAbsoluteAsync(-1, pickY, -1, ct: ct);
-            operationalTracker.BeginZDown();
+            operationalTracker.BeginZDown(pzDown);
             try
             {
                 //再Z下降取料
@@ -1117,6 +1122,7 @@ public sealed class BalancingFlowEngine : IDisposable
 
             // X11检测: 充磁→等3s→查X11→没吸到就退磁→Z↓5mm→充磁→再查, 最多2次(与后天车一致)
             Console.WriteLine("[平衡引擎] [M2] 充磁→等3s→X11检测");
+            operationalTracker.BeginX11Stage("充磁后持件确认");
             int curZ = pzDown;
             for (int retry = 0; retry <= 2; retry++)
             {
@@ -1129,7 +1135,7 @@ public sealed class BalancingFlowEngine : IDisposable
                         await _m2.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex)
                     {
                         operationalTracker.FailMagnetOn();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
@@ -1149,7 +1155,7 @@ public sealed class BalancingFlowEngine : IDisposable
                         await _m2.MagnetOffAsync(ct);
                         operationalTracker.CompleteMagnetOff();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex)
                     {
                         operationalTracker.FailMagnetOff();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
@@ -1173,7 +1179,7 @@ public sealed class BalancingFlowEngine : IDisposable
                         await _m2.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex)
                     {
                         operationalTracker.FailMagnetOn();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
@@ -1237,30 +1243,41 @@ public sealed class BalancingFlowEngine : IDisposable
             await _m2.MoveAbsoluteAsync(-1, destY, -1, ct: ct);
             int placeZ = Pz(destZ, d);
             Console.WriteLine($"[平衡引擎] [M2]   放料Z公式: {destZ} - Round(...) = {placeZ}");
+            operationalTracker.BeginZDown(placeZ);
             try
             {
                 await _m2.MoveAbsoluteAsync(-1, -1, placeZ, ct: ct);
+                operationalTracker.CompleteZDown();
             }
             catch (PressureStopException)
             {
+                operationalTracker.MarkZUnknown("ST008/M710放料Z下降触发下压保护，恢复后实际位置需人工确认");
                 await _m2.RecoverFromPressureStopAsync(ct);
+            }
+            catch (Exception)
+            {
+                operationalTracker.MarkZUnknown("ST008/M710放料Z下降异常，当前Z位置未知");
+                throw;
             }
 
             //退磁
-            operationalTracker.BeginMagnetOff();
+            operationalTracker.BeginPlacementMagnetOff("ST008/M710");
             try
             {
                 await _m2.MagnetOffAsync(ct);
-                operationalTracker.CompleteMagnetOff();
+                operationalTracker.CompletePlacementMagnetOff("ST008/M710");
+                operationalPlacementCommitted = true;
+                operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M2-ST008/M710完整交接",
+                    "目标位退磁成功返回，放料推定成立；等待Z安全回升、来源缓存移除和M711通知");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
                 operationalTracker.FailMagnetOff();
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
                     operationalSite with { Station = "ST008", ActionStage = "ST008/M710目标位退磁放料" }, operationalTracker, ex,
                     "目标位退磁方法异常，工件是否释放未知", true,
-                    holdingWorkpiece: holdingWorkpiece, placed: false, cacheNotified: false,
-                    downstreamNotified: false, handoffClosed: false);
+                    holdingWorkpiece: null, placed: null, cacheNotified: null,
+                    downstreamNotified: null, handoffClosed: null);
                 throw;
             }
             mag = false;
@@ -1270,14 +1287,19 @@ public sealed class BalancingFlowEngine : IDisposable
             ReleaseM2RackLocks("M710退磁完成");
             //退磁完成回安全位置
             await _m2.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
+            operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST008/M710放料后Z升安全命令成功返回");
             placedOnM710 = true; // 工件已物理放到ST008, 后续M711失败必须暂停人工确认
             holdingWorkpiece = false;
             SetM2Display(actionVersion, trackedWorkpiece, "已放到ST008/M710，等待M711确认");
             // ── 放料成功, 清理缓存 (工件已安全放到ST008, 不怕异常) ──
+            operationalTracker.BeginCacheMutation(pickReg, $"{pickReg}=存在({trackedWorkpiece.IdentityText})",
+                $"开始移除来源缓存键{pickReg}");
             lock (_balWpsLock)
             {
                 _balWps.Remove(pickReg);
             }
+            operationalTracker.CompleteCacheMutation(pickReg, $"{pickReg}=存在({trackedWorkpiece.IdentityText})",
+                $"{pickReg}=已移除", $"来源缓存键{pickReg}移除完成");
             Console.WriteLine($"[平衡引擎#{EngineId}] [M2] 缓存已清理 {pickReg} Keys=[{CacheKeysText}]");
 
             // ── 写M711=1: 通知PLC工件已送到ST008动平衡料架1(M300→M711) ──
@@ -1285,8 +1307,14 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 try
                 {
+                    operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M711",
+                        "M711写入调用已开始，PLC是否收到结果未知");
                     await _mc65.WriteMBitInWordAsync(700, 11, true, ct);
+                    operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M711",
+                        "M711写入成功返回，PLC放料通知已确认");
                     m711Notified = true;
+                    operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M2-ST008/M710完整交接",
+                        "退磁、Z安全回升、来源缓存移除及M711通知均成功返回");
                     trackedWorkpiece.ReportStage("动平衡加工中 ST008/M710");
                     SetM2Display(actionVersion, trackedWorkpiece, "M711已确认，机械手2返回安全位");
                     Console.WriteLine($"[平衡引擎] [M2] M711=1 送工件完成 ✓ {trackedWorkpiece.IdentityText}");
@@ -1313,14 +1341,14 @@ public sealed class BalancingFlowEngine : IDisposable
         {
             // holdingWorkpiece=true: X11已确认工件在机械手上; 未放到目的位前必须暂停, 防止释放busy后继续派发。
             Console.WriteLine($"[平衡引擎] [M2] ✘ 异常: {ex.Message}");
-            if (placedOnM710 && !m711Notified)
+            if (operationalPlacementCommitted && !m711Notified)
             {
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PHYSICAL_HANDOFF_NOT_CLOSED",
                     operationalSite with { Station = "ST008", ActionStage = "ST008/M710退磁放料后M711未闭环" },
                     operationalTracker, ex,
-                    "工件已退磁放到ST008/M710并回升，但M711通知未确认", true,
-                    holdingWorkpiece: false, placed: true, cacheNotified: true,
-                    downstreamNotified: false, handoffClosed: false);
+                    "目标位退磁已成功返回并推定工件位于ST008/M710，但Z安全回升、来源缓存移除或M711通知未完整确认", true,
+                    holdingWorkpiece: null, placed: null, cacheNotified: null,
+                    downstreamNotified: null, handoffClosed: null);
             }
             if (!IsM2ActionCurrent(actionVersion))
             {
@@ -1400,16 +1428,18 @@ public sealed class BalancingFlowEngine : IDisposable
         bool mag = false;
         bool holdingWorkpiece = false; // X11确认吸住后才算工件真的在机械手3上
         bool placedOnM720 = false;
+        bool operationalPlacementCommitted = false; // 仅供旁路证据：退磁成功即成立，不参与业务判断
+        bool operationalSourceCacheClosed = false; // 仅供旁路证据
         bool m721Notified = false;
         bool grindingCacheNotified = false; // M720物理放料后, 研磨FIFO缓存必须写入成功
         bool keepDisplayForManualConfirmation = false; // 只控制页面证据清理，不参与任何动作判断
         WorkpieceCache? displayWorkpiece = null;
         string operationalActionId = $"BAL-M3-{actionVersion}";
-        var operationalTracker = new OperationalPhysicalCycleTracker(operationalActionId);
-        var operationalSite = new OperationalEventContextFactory.OperationalPhysicalEventSite(
+        var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled(operationalActionId);
+        var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
             "动平衡", "动平衡引擎", "机械手", "M3", "来源未确定",
             "M3取料并放到ST010/M720", operationalActionId, $"{operationalActionId}:pending", null,
-            "来源未确定", "ST010/M720", "机械手3", "来源未确定", "动作已创建", "M821/M720位置锁");
+            "来源未确定", "ST010/M720", "机械手3", "来源未确定", "动作已创建", "M821/M720位置锁"));
         try
         {
             if (_lockM821 != null)
@@ -1514,6 +1544,11 @@ public sealed class BalancingFlowEngine : IDisposable
                 LastConfirmedLocation = pickCode,
                 LastSuccessfulCheckpoint = useM700 ? "D100直径已读取，工件身份未知" : "M821来源缓存已取得"
             };
+            operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721");
+            operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheNotification, "OnGrindingRackPlaced");
+            operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M3-ST010/M720完整交接");
+            if (!useM700)
+                operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheMutation, "M821");
             SetM3Display(actionVersion, m3DisplayWorkpiece, $"准备从{pickReg}取料");
             
             // 取料YZ: GetArmCoord自动判断配置→ 一般不从数据库读取 从配置文件 数据库的不适用机械手
@@ -1522,6 +1557,7 @@ public sealed class BalancingFlowEngine : IDisposable
             int pzDown = Pz(pickZ, d), safeZ = _cfg.Grinding.SafeZHeight;
 
             // ①.0 安全: 取料前检查磁铁是否已有工件(断电重启后X11不受PLC内存影响)
+            operationalTracker.BeginX11Stage("取料前残留检查");
             operationalTracker.BeginX11Attempt();
             bool unexpectedWorkpiece;
             try
@@ -1550,7 +1586,7 @@ public sealed class BalancingFlowEngine : IDisposable
             Console.WriteLine($"[平衡引擎] [M3] ① 取料 {pickReg}({pickCode}) {sourceIdentity} Y={pickY} Z={pzDown}");
             // 先Y移到取料位(机械手只移YZ轴)
             await _m3.MoveAbsoluteAsync(-1, pickY, -1, ct: ct);
-            operationalTracker.BeginZDown();
+            operationalTracker.BeginZDown(pzDown);
             try
             {
                 //再Z下降取料
@@ -1565,6 +1601,7 @@ public sealed class BalancingFlowEngine : IDisposable
 
             // X11检测: 充磁→等3s→查X11→没吸到就退磁→Z↓5mm→充磁→再查, 最多2次(与后天车一致)
             Console.WriteLine("[平衡引擎] [M3] 充磁→等3s→X11检测");
+            operationalTracker.BeginX11Stage("充磁后持件确认");
             int curZ = pzDown;
             for (int retry = 0; retry <= 2; retry++)
             {
@@ -1577,7 +1614,7 @@ public sealed class BalancingFlowEngine : IDisposable
                         await _m3.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex)
                     {
                         operationalTracker.FailMagnetOn();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
@@ -1597,7 +1634,7 @@ public sealed class BalancingFlowEngine : IDisposable
                         await _m3.MagnetOffAsync(ct);
                         operationalTracker.CompleteMagnetOff();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex)
                     {
                         operationalTracker.FailMagnetOff();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
@@ -1621,7 +1658,7 @@ public sealed class BalancingFlowEngine : IDisposable
                         await _m3.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex)
                     {
                         operationalTracker.FailMagnetOn();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
@@ -1708,35 +1745,47 @@ public sealed class BalancingFlowEngine : IDisposable
             await _m3.MoveAbsoluteAsync(-1, destY, -1, ct: ct);
             int placeZ = Pz(destZ, d);
             Console.WriteLine($"[平衡引擎] [M3]   放料Z公式: {destZ} - Round(...) = {placeZ}");
+            operationalTracker.BeginZDown(placeZ);
             try
             {
                 //移动z
                 await _m3.MoveAbsoluteAsync(-1, -1, placeZ, ct: ct);
+                operationalTracker.CompleteZDown();
             }
             catch (PressureStopException)
             {
+                operationalTracker.MarkZUnknown("ST010/M720放料Z下降触发下压保护，恢复后实际位置需人工确认");
                 await _m3.RecoverFromPressureStopAsync(ct);
             }
+            catch (Exception)
+            {
+                operationalTracker.MarkZUnknown("ST010/M720放料Z下降异常，当前Z位置未知");
+                throw;
+            }
             
-            operationalTracker.BeginMagnetOff();
+            operationalTracker.BeginPlacementMagnetOff("ST010/M720");
             try
             {
                 await _m3.MagnetOffAsync(ct);
-                operationalTracker.CompleteMagnetOff();
+                operationalTracker.CompletePlacementMagnetOff("ST010/M720");
+                operationalPlacementCommitted = true;
+                operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M3-ST010/M720完整交接",
+                    "目标位退磁成功返回，放料推定成立；等待Z安全回升、M721、研磨缓存和来源缓存闭环");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
                 operationalTracker.FailMagnetOff();
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
                     operationalSite with { Station = "ST010", ActionStage = "ST010/M720目标位退磁放料" }, operationalTracker, ex,
                     "目标位退磁方法异常，工件是否释放未知", true,
-                    holdingWorkpiece: holdingWorkpiece, placed: false, cacheNotified: false,
-                    downstreamNotified: false, handoffClosed: false);
+                    holdingWorkpiece: null, placed: null, cacheNotified: null,
+                    downstreamNotified: null, handoffClosed: null);
                 throw;
             }
             mag = false;
             Console.WriteLine("[平衡引擎] [M3] 退磁 ✓");
             await _m3.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
+            operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST010/M720放料后Z升安全命令成功返回");
             placedOnM720 = true; // 工件已物理放到研磨上料位并且Z已离开, 后续信号失败需人工补确认
             holdingWorkpiece = false;
             SetM3Display(actionVersion, m3DisplayWorkpiece, "已放到ST010/M720，等待M721及研磨缓存确认");
@@ -1746,7 +1795,11 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 try
                 {
+                    operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721",
+                        "M721写入调用已开始，PLC是否收到结果未知");
                     await _mc65.WriteMBitInWordAsync(720, 1, true, ct); 
+                    operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721",
+                        "M721写入成功返回，PLC放料通知已确认");
                     m721Notified = true;
                     Console.WriteLine($"[平衡引擎] [M3] M721=1 通知PLC放料完成 {sourceIdentity}");
                 }
@@ -1780,7 +1833,11 @@ public sealed class BalancingFlowEngine : IDisposable
             // 工件已物理放到M720且M721已通知PLC, 研磨FIFO缓存是后续取料生命线, 不能静默跳过。
             if (OnGrindingRackPlaced == null)
                 throw new InvalidOperationException("M3已放到M720/ST010, 但研磨缓存回调未绑定");
+            operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.CacheNotification, "OnGrindingRackPlaced",
+                "研磨缓存回调调用已开始，回调副作用结果未知");
             OnGrindingRackPlaced.Invoke(grindingWp);
+            operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.CacheNotification, "OnGrindingRackPlaced",
+                "研磨缓存回调成功返回，目标缓存通知已确认");
             grindingCacheNotified = true;
             grindingWp.ReportStage("研磨上料架 ST010/M720");
             SetM3Display(actionVersion, grindingWp, "已写入研磨缓存，机械手3返回安全位");
@@ -1789,12 +1846,19 @@ public sealed class BalancingFlowEngine : IDisposable
             // ── 放料成功, 清理M821来源的缓存 (工件已安全放到ST010) ──
             if (!useM700) // M821来源走缓存, M820来源走D200无需清
             {
+                operationalTracker.BeginCacheMutation("M821", $"M821=存在({m3DisplayWorkpiece.IdentityText})",
+                    "开始移除来源缓存键M821");
                 lock (_balWpsLock)
                 {
                     _balWps.Remove("M821");
                 }
+                operationalTracker.CompleteCacheMutation("M821", $"M821=存在({m3DisplayWorkpiece.IdentityText})",
+                    "M821=已移除", "来源缓存键M821移除完成");
                 Console.WriteLine($"[平衡引擎#{EngineId}] [M3] 缓存已清理 M821 Keys=[{CacheKeysText}]");
             }
+            operationalSourceCacheClosed = true;
+            operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M3-ST010/M720完整交接",
+                "退磁、Z安全回升、M721、研磨缓存及适用的来源缓存移除均成功返回");
 
             // ── ③ 回安全位: Y→配置文件manipulator3SafeY ──
             int safeY = _cfg.SkewBed.Manipulator3SafeY;
@@ -1806,15 +1870,14 @@ public sealed class BalancingFlowEngine : IDisposable
         {
             // holdingWorkpiece=true: X11已确认工件在机械手上; 未放到目的位前必须暂停, 防止释放busy后继续派发。
             Console.WriteLine($"[平衡引擎] [M3] ✘ 异常: {ex.Message}");
-            if (placedOnM720 && (!m721Notified || !grindingCacheNotified))
+            if (operationalPlacementCommitted && (!m721Notified || !grindingCacheNotified || !operationalSourceCacheClosed))
             {
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PHYSICAL_HANDOFF_NOT_CLOSED",
                     operationalSite with { Station = "ST010", ActionStage = "ST010/M720退磁放料后通知未闭环" },
                     operationalTracker, ex,
                     "工件已退磁放到ST010/M720，但M721或研磨缓存通知未完整成功", true,
-                    holdingWorkpiece: false, placed: true, cacheNotified: grindingCacheNotified,
-                    downstreamNotified: m721Notified,
-                    handoffClosed: m721Notified && grindingCacheNotified);
+                    holdingWorkpiece: null, placed: null, cacheNotified: null,
+                    downstreamNotified: null, handoffClosed: null);
             }
             if (!IsM3ActionCurrent(actionVersion))
             {

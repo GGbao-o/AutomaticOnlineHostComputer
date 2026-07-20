@@ -1659,14 +1659,15 @@ public sealed class Line1FrontFlowEngine : IDisposable
     private async Task ProcessManipulatorPickupAsync(WorkpieceCache wp, CancellationToken ct)
     {
         string operationalActionId = OperationalEventContextFactory.NewActionId("L1-MANIPULATOR-ST007");
-        var operationalTracker = new OperationalPhysicalCycleTracker($"{operationalActionId}:st007");
-        var operationalSite = new OperationalEventContextFactory.OperationalPhysicalEventSite(
+        var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled($"{operationalActionId}:st007");
+        var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
             "1号线", "前端引擎", "机械手", "1", "ST007", "ST007取料并放到ST711",
             operationalActionId, $"{operationalActionId}:st007", wp, "ST007", "ST711", "1号线机械手1", "ST007",
-            "机械手取料任务已开始", "机械手锁");
+            "机械手取料任务已开始", "机械手锁"));
         bool magnetOn = false;          // 磁铁命令是否打开过
         bool holdingWorkpiece = false;  // X11确认吸住后才算工件真的在机械手上
         bool placedOnFork = false;      // 退磁放到货叉后, 才允许货叉状态机接管
+        operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M801取料完成通知");
         try
         {
             Console.WriteLine($"[Line1Front] [机械手1] ═══ 取料送叉 {wp.IdentityText} d={wp.Diameter} L={wp.Length} ═══");
@@ -1675,6 +1676,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
             // ①.0 安全: 取料前检查磁铁是否已有工件(断电/急停重启后X11不受PLC内存影响)
             if (_manipulator1?.IsConnected == true)
             {
+                operationalTracker.BeginX11Stage("取料前残留检查");
                 operationalTracker.BeginX11Attempt();
                 bool hasUnexpectedWorkpiece;
                 try
@@ -1726,19 +1728,21 @@ public sealed class Line1FrontFlowEngine : IDisposable
             // ②a~②c. XY→料架公式Z, 充磁后用X11确认; X11=0最多下探2次
             int pickupZ = formulaZ;
             Console.WriteLine($"[Line1Front] [机械手1] ②a XY→ST007 Z→公式位{pickupZ}");
+            operationalTracker.BeginX11Stage("充磁后持件确认");
             for (int retry = 0; retry <= 2; retry++)
             {
-                operationalTracker.BeginZDown();
                 try
                 {
                     if (retry == 0)
                     {
+                        operationalTracker.BeginZDown(pickupZ);
                         await _manipulator1!.MoveAbsoluteAsync(rx, ry, pickupZ, ct: ct);
                     }
                     else
                     {
                         pickupZ += 5;
                         Console.WriteLine($"[Line1Front] [机械手1]   X11=0 → 退磁后Z下探第{retry}次 → {pickupZ}");
+                        operationalTracker.BeginZDown(pickupZ);
                         await _manipulator1!.MoveAbsoluteAsync(-1, -1, pickupZ, timeoutMs: 10_000, ct: ct);
                     }
                     operationalTracker.CompleteZDown();
@@ -1757,7 +1761,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     await _manipulator1!.MagnetOnAsync(ct);
                     operationalTracker.CompleteMagnetOn();
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex)
                 {
                     operationalTracker.FailMagnetOn();
                     OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
@@ -1793,7 +1797,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     await _manipulator1.MagnetOffAsync(ct);
                     operationalTracker.CompleteMagnetOff();
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex)
                 {
                     operationalTracker.FailMagnetOff();
                     OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
@@ -1846,27 +1850,32 @@ public sealed class Line1FrontFlowEngine : IDisposable
             Console.WriteLine($"[Line1Front] [机械手1] ③ 送叉 ST711({f1x},{f1y},{f1z}) 放料Z={forkPlaceZ}");
 
             // ③a. XY→叉位公式Z; 下压触发视为异常保护
-            operationalTracker.BeginZDown();
+            operationalTracker.BeginZDown(forkPlaceZ);
             try
             {
                 await _manipulator1!.MoveAbsoluteAsync(f1x, f1y, forkPlaceZ, timeoutMs: 240_000, ct: ct);
                 operationalTracker.CompleteZDown();
             }
-            catch (PressureStopException ex)
-            {
-                operationalTracker.MarkZUnknown("ST711放料Z下降触发下压保护，恢复后实际位置需人工确认");
-                await RecoverFromPressureStopAsync(ct);
-                throw new InvalidOperationException($"机械手1 ST711公式放料触发下压信号, Z={forkPlaceZ}, 已停止流程", ex);
-            }
+                catch (PressureStopException ex)
+                {
+                    operationalTracker.MarkZUnknown("ST711放料Z下降触发下压保护，恢复后实际位置需人工确认");
+                    await RecoverFromPressureStopAsync(ct);
+                    throw new InvalidOperationException($"机械手1 ST711公式放料触发下压信号, Z={forkPlaceZ}, 已停止流程", ex);
+                }
+                catch (Exception)
+                {
+                    operationalTracker.MarkZUnknown("ST711放料Z下降调用异常，实际Z位置需人工确认");
+                    throw;
+                }
 
             // ③c. 退磁放下
-            operationalTracker.BeginMagnetOff();
+            operationalTracker.BeginPlacementMagnetOff("ST711货叉");
             try
             {
                 await _manipulator1!.MagnetOffAsync(ct);
-                operationalTracker.CompleteMagnetOff();
+                operationalTracker.CompletePlacementMagnetOff("ST711货叉");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
                 operationalTracker.FailMagnetOff();
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
@@ -1910,7 +1919,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
 
             if (_rackSvc == null)
                 throw new InvalidOperationException("总上料架服务为空，M801未写入，禁止放行货叉");
+            operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M801取料完成通知", "M801取料完成通知调用已开始，PLC写入结果未知");
             await _rackSvc.SetPickupDoneAsync(ct);
+            operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M801取料完成通知", "M801取料完成通知成功返回");
             Console.WriteLine($"[Line1Front] [机械手1] ④ M801=1→0 取料完成 ✓ {wp.IdentityText}");
 
             // 门闩必须放在M801成功之后；主循环可能与本方法并行，提前置位会让货叉在M801失败时误启动。
@@ -1945,7 +1956,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         operationalTracker, ex,
                         "退磁成功返回并推定工件已放到货叉，但Z回0、机械手安全Y或M801通知未完整成功", true,
                         holdingWorkpiece: false, placed: true,
-                        downstreamNotified: false, handoffClosed: false);
+                        handoffClosed: false);
                     _paused = true;
                     Console.WriteLine("[Line1Front] ⚠ 工件已放在货叉，但机械手安全退出/M801未完整完成；货叉门闩保持关闭");
                     OnSafetyAlarm?.Invoke($"1号线机械手1已将{wp.IdentityText}放到货叉，但Z回0、Y到货叉释放安全点或M801通知未完整完成。货叉未启动，引擎已暂停，请人工确认。异常：{ex.Message}");
@@ -1967,7 +1978,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         await _manipulator1!.MagnetOffAsync(ct);
                         operationalTracker.CompleteMagnetOff();
                     }
-                    catch (Exception offEx) when (offEx is not OperationCanceledException)
+                    catch (Exception offEx)
                     {
                         operationalTracker.FailMagnetOff();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
@@ -1975,7 +1986,6 @@ public sealed class Line1FrontFlowEngine : IDisposable
                             "停机前尽力退磁异常，实际退磁结果未知；保持原吞错路径", true,
                             holdingWorkpiece: holdingWorkpiece);
                     }
-                    catch (OperationCanceledException) { /* 保持原catch-all吞掉取消异常 */ }
                 }
                 lock (_wpLock) { _currentWp = null; }
                 RequeueFrontCache(wp);
@@ -2078,16 +2088,16 @@ public sealed class Line1FrontFlowEngine : IDisposable
     {
         string actionId = OperationalEventContextFactory.NewActionId("L1-FRONT");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
-        var pos3OperationalTracker = new OperationalPhysicalCycleTracker($"{actionId}:pos3");
-        var pos3OperationalSite = new OperationalEventContextFactory.OperationalPhysicalEventSite(
+        var pos3OperationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled($"{actionId}:pos3");
+        var pos3OperationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
             "1号线", "前端引擎", "前天车", CraneFront1No.ToString(), "ST713", "货叉Pos3取料并放到打号机",
             actionId, $"{actionId}:pos3", wp, "ST713", "ST107", "1号线前天车", "ST713",
-            "前天车任务已开始", "前天车锁/ZoneMT");
-        var markerOperationalTracker = new OperationalPhysicalCycleTracker($"{actionId}:marker-pickup");
-        var markerOperationalSite = new OperationalEventContextFactory.OperationalPhysicalEventSite(
+            "前天车任务已开始", "前天车锁/ZoneMT"));
+        var markerOperationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled($"{actionId}:marker-pickup");
+        var markerOperationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
             "1号线", "前端引擎", "前天车", CraneFront1No.ToString(), "ST107", "打号机取回并放到中转架",
             actionId, $"{actionId}:marker-pickup", wp, "ST107", "中转架", "1号线前天车", "ST107",
-            "打号机工件等待取回", "前天车锁/ZoneMT/ZoneTS");
+            "打号机工件等待取回", "前天车锁/ZoneMT/ZoneTS"));
         bool magnetOn = false;
         try
         {
@@ -2109,6 +2119,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
 
             // ①.5 安全: 检查天车磁铁上是否已有工件(断电重启后可能残留)
             // 用X11物理线圈(63497)而非D5029: PLC断电重启后D5029可能清零, X11不受影响
+            pos3OperationalTracker.BeginX11Stage("取料前残留检查");
             pos3OperationalTracker.BeginX11Attempt();
             bool hasRoller;
             try
@@ -2163,7 +2174,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     owner: "1号线前天车", targetZ: EvidenceValue<int>.Confirmed(f2zOff, "已有取料Z公式与偏移"),
                     physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(physicalTracker, true, "XY已到ST713上方", "ST713")),
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
-            pos3OperationalTracker.BeginZDown();
+            pos3OperationalTracker.BeginZDown(f2zOff);
             try
             {
                 await crane.MoveAbsoluteAsync(-1, -1, f2zOff, ct: ct);
@@ -2179,6 +2190,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
             // X11检测: 充磁→等3s→查X11(63497)→没吸到就退磁→Z↓5mm→充磁→再查, 最多2次
             Console.WriteLine("[Line1Front] [前天车]   充磁→等3s→X11检测");
             int f2PickZ = f2zOff;
+            pos3OperationalTracker.BeginX11Stage("充磁后持件确认");
             for (int retry = 0; retry <= 2; retry++)
             {
                 if (retry == 0)
@@ -2190,7 +2202,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         await crane.MagnetOnAsync(ct);
                         pos3OperationalTracker.CompleteMagnetOn();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex)
                     {
                         pos3OperationalTracker.FailMagnetOn();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
@@ -2209,7 +2221,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         await crane.MagnetOffAsync(ct);
                         pos3OperationalTracker.CompleteMagnetOff();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex)
                     {
                         pos3OperationalTracker.FailMagnetOff();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
@@ -2218,7 +2230,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         throw;
                     }
                     magnetOn = false;
-                    pos3OperationalTracker.BeginZDown();
+                    pos3OperationalTracker.BeginZDown(f2PickZ);
                     try
                     {
                         await crane.MoveAbsoluteAsync(-1, -1, f2PickZ, ct: ct);
@@ -2236,7 +2248,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         await crane.MagnetOnAsync(ct);
                         pos3OperationalTracker.CompleteMagnetOn();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex)
                     {
                         pos3OperationalTracker.FailMagnetOn();
                         OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
@@ -2428,6 +2440,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
         OperationalEventContextFactory.OperationalPhysicalEventSite markerOperationalSite,
         CancellationToken ct)
     {
+        int markerZUp = 0;
+        string fileB = string.Empty;
         if (!TryGetStationCoords("ST107", out int mx, out int my, out int mz)) throw new InvalidOperationException("数据库未找到 ST107");
         Console.WriteLine($"[Line1Front] [打号机] ④ ST107({mx},{my},{mz})");
 
@@ -2447,7 +2461,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 owner: "1号线前天车", targetZ: EvidenceValue<int>.Confirmed(mzOff, "已有打号机放料Z公式与偏移"),
                 physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(true, true, physicalTracker, "ST713取料X11=1且充磁已返回", "天车/路径中")),
             actionId: actionId, physicalTracker: physicalTracker, ct: ct);
-        pos3OperationalTracker.BeginZDown();
+        pos3OperationalTracker.BeginZDown(mzOff);
         try
         {
             await crane.MoveAbsoluteAsync(-1, -1, mzOff, ct: ct);
@@ -2459,13 +2473,18 @@ public sealed class Line1FrontFlowEngine : IDisposable
             Console.WriteLine("[Line1Front] [打号机] ⚡ 下压触发(已接触)→恢复"); 
             await crane.RecoverFromPressureStopAsync(ct);
         }
-        pos3OperationalTracker.BeginMagnetOff();
+        catch (Exception)
+        {
+            pos3OperationalTracker.MarkZUnknown("打号机放料Z下降调用异常，实际Z位置需人工确认");
+            throw;
+        }
+        pos3OperationalTracker.BeginPlacementMagnetOff("ST107打号机");
         try
         {
             await crane.MagnetOffAsync(ct);
-            pos3OperationalTracker.CompleteMagnetOff();
+            pos3OperationalTracker.CompletePlacementMagnetOff("ST107打号机");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             pos3OperationalTracker.FailMagnetOff();
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
@@ -2473,6 +2492,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 "退磁方法异常，实际退磁结果未知", true, holdingWorkpiece: true);
             throw;
         }
+        pos3OperationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.FileHandshake, "ST107打号机文件握手");
+        try
+        {
         Console.WriteLine($"[Line1Front] [打号机] 退磁完成 ✓ {wp.IdentityText}");
 
         // ── ④b. 退磁后立即启动: Z升安全(并发) + 打号机文件握手 ──
@@ -2501,18 +2523,19 @@ public sealed class Line1FrontFlowEngine : IDisposable
 
         var file3 = Path.Combine(markerDir, "3.txt");
         var fileA = Path.Combine(markerDir, "A.txt");
-        var fileB = Path.Combine(markerDir, "B.txt");
+        fileB = Path.Combine(markerDir, "B.txt");
         string content = $"{wp.MarkingContent}\r\n{wp.Diameter}";
 
         // 清旧B.txt(防上次残留导致打号失败)
         if (File.Exists(fileB)) { File.Delete(fileB); Console.WriteLine("[Line1Front] [打号机] ⚠ 发现旧B.txt已删除"); }
 
         // Z升+写A.txt 并发启动
-        int markerZUp = markerZ - 300 + _craneOffsetZ; // 上升目标Z = 取料位-200+天车偏移
+        markerZUp = markerZ - 300 + _craneOffsetZ; // 上升目标Z = 取料位-200+天车偏移
         var zUpTask = crane.MoveAbsoluteAsync(-1, -1, markerZUp, ct: ct);
         Console.WriteLine($"[Line1Front] [打号机] Z升+写A.txt 并发启动... Z升目标={markerZUp}");
         // 写A.txt立即启动(不等Z升) → 打号机开始打标
         Console.WriteLine($"[Line1Front] [打号机] 写A.txt: '{content.Replace("\n", " | ")}'");
+        pos3OperationalTracker.BeginMonitorStep(OperationalMonitorStepKind.FileHandshake, "ST107打号机文件握手", "打号机A文件写入与B文件完成回执等待已开始，结果未知");
         var writeATask = File.WriteAllTextAsync(fileA, content, Encoding.ASCII, ct);
         await Task.WhenAll(zUpTask, writeATask);  // 等Z升+写A都完成
         pos3OperationalTracker.ConfirmSafeZ(markerZUp, _cfg.AbsMove.Tolerance, "打号机放料后Z升与文件写入均成功返回");
@@ -2531,7 +2554,18 @@ public sealed class Line1FrontFlowEngine : IDisposable
             if (pollCount % 20 == 0) Console.WriteLine($"[Line1Front] [打号机]   轮询中...({pollCount * 500 / 1000}s)");
         }
         if (!File.Exists(fileB)) throw new TimeoutException("打标机超时：1小时(3600s)未生成 B.txt");
+        pos3OperationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.FileHandshake, "ST107打号机文件握手", "打号机B文件已出现，文件握手成功返回");
         Console.WriteLine($"[Line1Front] [打号机] B.txt已生成 ✓ {wp.IdentityText}");
+        }
+        catch (Exception ex)
+        {
+            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PHYSICAL_HANDOFF_NOT_CLOSED",
+                pos3OperationalSite with { Station = "ST107", ActionStage = "ST107退磁放料后、取回前交接未闭环", LastConfirmedLocation = "ST107" },
+                pos3OperationalTracker, ex,
+                "ST107退磁成功返回后、后续取回尚未开始时发生异常；工件位置推定为ST107，需人工确认", true,
+                holdingWorkpiece: false, placed: true, handoffClosed: false);
+            throw;
+        }
 
         // Z降充磁取料→X11检测→Z升→删B.txt
         int markerZPickup = markerZ + _craneOffsetZ; // 取料Z = 公式Z + 天车偏移
@@ -2547,7 +2581,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 owner: "1号线前天车", targetZ: EvidenceValue<int>.Confirmed(markerZPickup, "已有打号机取料Z公式与偏移"),
                 physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(physicalTracker, false, "打号机B文件已生成", "ST107")),
             actionId: actionId, physicalTracker: physicalTracker, ct: ct);
-        markerOperationalTracker.BeginZDown();
+        markerOperationalTracker.BeginZDown(markerZPickup);
         try
         {
             await crane.MoveAbsoluteAsync(-1, -1, markerZPickup, ct: ct);
@@ -2563,6 +2597,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
         // X11检测: 充磁→等3s→查X11, 没吸到就退磁→Z↓5mm→充磁→再查, 最多2次
         Console.WriteLine("[Line1Front] [打号机] 充磁→等3s→X11检测");
         int mPickZ = markerZPickup;
+        markerOperationalTracker.BeginX11Stage("充磁后持件确认");
         for (int retry = 0; retry <= 2; retry++)
         {
             if (retry == 0)
@@ -2574,7 +2609,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     await crane.MagnetOnAsync(ct);
                     markerOperationalTracker.CompleteMagnetOn();
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex)
                 {
                     markerOperationalTracker.FailMagnetOn();
                     OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
@@ -2592,7 +2627,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     await crane.MagnetOffAsync(ct);
                     markerOperationalTracker.CompleteMagnetOff();
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex)
                 {
                     markerOperationalTracker.FailMagnetOff();
                     OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
@@ -2600,7 +2635,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         "退磁方法异常，实际退磁结果未知", true);
                     throw;
                 }
-                markerOperationalTracker.BeginZDown();
+                markerOperationalTracker.BeginZDown(mPickZ);
                 try
                 {
                     await crane.MoveAbsoluteAsync(-1, -1, mPickZ, ct: ct);
@@ -2617,7 +2652,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     await crane.MagnetOnAsync(ct);
                     markerOperationalTracker.CompleteMagnetOn();
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex)
                 {
                     markerOperationalTracker.FailMagnetOn();
                     OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
@@ -2680,6 +2715,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
     {
         bool placedOnRack = false;
         bool rackCacheNotified = false;
+        operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheNotification, "OnRackPlaced中转架缓存通知");
         string? notifiedRackStation = null;
         try
         {
@@ -2718,7 +2754,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             int rackZ = ComputePickupZ(rz, wp.Diameter) + _craneOffsetZ; // Z公式 + 天车Z偏移
             Console.WriteLine($"[Line1Front] [前天车] Z降={rackZ}(公式+偏移{_craneOffsetZ}) 退磁放下");
-            operationalTracker.BeginZDown();
+            operationalTracker.BeginZDown(rackZ);
             try
             {
                 await crane.MoveAbsoluteAsync(-1, -1, rackZ, ct: ct);
@@ -2730,14 +2766,19 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 Console.WriteLine("[Line1Front] [中转架] ⚡ 下压触发(已接触)→恢复");
                 await crane.RecoverFromPressureStopAsync(ct);
             }
+            catch (Exception)
+            {
+                operationalTracker.MarkZUnknown("中转架放料Z下降调用异常，实际Z位置需人工确认");
+                throw;
+            }
 
-            operationalTracker.BeginMagnetOff();
+            operationalTracker.BeginPlacementMagnetOff(rackStation);
             try
             {
                 await crane.MagnetOffAsync(ct);
-                operationalTracker.CompleteMagnetOff();
+                operationalTracker.CompletePlacementMagnetOff(rackStation);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
                 operationalTracker.FailMagnetOff();
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
@@ -2756,7 +2797,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
             // 工件已经物理放到中转架, 软件缓存写入是生命线: 未绑定或写入失败都必须进入异常处理。
             if (OnRackPlaced == null)
                 throw new InvalidOperationException($"前天车已放到{rackStation}, 但中转架缓存回调未绑定");
+            operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.CacheNotification, "OnRackPlaced中转架缓存通知", $"OnRackPlaced({rackStation})调用已开始，缓存写入结果未知");
             OnRackPlaced.Invoke(rackStation, wp);
+            operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.CacheNotification, "OnRackPlaced中转架缓存通知", $"OnRackPlaced({rackStation})成功返回");
             rackCacheNotified = true;
             wp.ReportStage($"1号线 中转架 {rackStation}");
             // 物理放料和缓存通知已经完成, 先更新本地快照, 避免PLC有版信号下一轮才刷新导致后端暂时看不到。
@@ -2778,7 +2821,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     operationalTracker, ex,
                     "退磁成功返回并推定工件已放到中转架，但OnRackPlaced缓存通知未确认", true,
                     holdingWorkpiece: false, placed: true,
-                    cacheNotified: false, handoffClosed: false);
+                    handoffClosed: false);
                 // 物理已放下但后端_wps没有确认写入, 继续运行会形成“架上有板但无缓存”的危险状态。
                 _paused = true;
                 Console.WriteLine($"[Line1Front] ⚠ 工件已放到中转架{notifiedRackStation ?? "(未知)"}但后端缓存未确认, 前端引擎已暂停, 需人工补缓存/确认现场; 异常={ex.Message}");

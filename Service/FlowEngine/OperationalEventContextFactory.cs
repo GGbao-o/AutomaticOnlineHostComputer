@@ -22,7 +22,29 @@ internal static class OperationalEventContextFactory
         string Owner,
         string LastConfirmedLocation,
         string LastSuccessfulCheckpoint,
-        string LockName = "");
+        string LockName = "")
+    {
+        public bool MonitoringAvailable { get; init; } = true;
+    }
+
+    private static readonly OperationalPhysicalEventSite DisabledPhysicalSite = new(
+        Scope: "物理异常监控不可用",
+        Engine: "物理异常监控不可用",
+        DeviceType: "未知",
+        DeviceNo: "未知",
+        Station: "未知",
+        ActionStage: "监控初始化失败",
+        ActionId: string.Empty,
+        CorrelationKey: string.Empty,
+        Workpiece: null,
+        PlannedSource: string.Empty,
+        PlannedTarget: string.Empty,
+        Owner: string.Empty,
+        LastConfirmedLocation: string.Empty,
+        LastSuccessfulCheckpoint: string.Empty)
+    {
+        MonitoringAvailable = false
+    };
 
     internal sealed record FineTunePhysicalPhase(
         DeviceCommandEvidence MagnetOnCommand,
@@ -135,7 +157,44 @@ internal static class OperationalEventContextFactory
     }
 
     public static string NewActionId(string engineCode) =>
-        $"{engineCode}-{Guid.NewGuid():N}";
+        TryNewActionId(engineCode);
+
+    public static string TryNewActionId(string engineCode)
+    {
+        try { return $"{engineCode}-{Guid.NewGuid():N}"; }
+        catch { return string.Empty; }
+    }
+
+    public static OperationalPhysicalCycleTracker? TryCreatePhysicalCycleTracker(string cycleId)
+    {
+        try { return new OperationalPhysicalCycleTracker(cycleId); }
+        catch { return null; }
+    }
+
+    public static OperationalPhysicalCycleTracker CreatePhysicalCycleTrackerOrDisabled(
+        string cycleId,
+        Func<string, OperationalPhysicalCycleTracker>? factory = null)
+    {
+        try
+        {
+            Func<string, OperationalPhysicalCycleTracker> create =
+                factory ?? (id => new OperationalPhysicalCycleTracker(id));
+            return create(cycleId) ?? OperationalPhysicalCycleTracker.Disabled;
+        }
+        catch { return OperationalPhysicalCycleTracker.Disabled; }
+    }
+
+    public static OperationalPhysicalEventSite? TryCreatePhysicalSite(Func<OperationalPhysicalEventSite> factory)
+    {
+        try { return factory(); }
+        catch { return null; }
+    }
+
+    public static OperationalPhysicalEventSite CreatePhysicalSiteOrEmpty(Func<OperationalPhysicalEventSite> factory)
+    {
+        try { return factory() ?? DisabledPhysicalSite; }
+        catch { return DisabledPhysicalSite; }
+    }
 
     public static FineTunePhysicalTracker? TryCreatePhysicalTracker()
     {
@@ -153,7 +212,15 @@ internal static class OperationalEventContextFactory
         EvidenceValue<string> source,
         EvidenceValue<string> target,
         string owner,
-        string lastConfirmedLocation)
+        string lastConfirmedLocation) =>
+        Workpiece(wp, source, target, owner, Text(lastConfirmedLocation, "调用点最后确认位置"));
+
+    public static WorkpieceEvidence Workpiece(
+        WorkpieceCache wp,
+        EvidenceValue<string> source,
+        EvidenceValue<string> target,
+        string owner,
+        EvidenceValue<string> lastConfirmedLocation)
     {
         const string local = "流程调用点已有WorkpieceCache局部副本";
         return new WorkpieceEvidence(
@@ -164,7 +231,7 @@ internal static class OperationalEventContextFactory
             source,
             target,
             Text(owner, "动作所有者参数"),
-            Text(lastConfirmedLocation, "调用点最后确认位置"),
+            lastConfirmedLocation,
             local);
     }
 
@@ -309,7 +376,7 @@ internal static class OperationalEventContextFactory
     public static void TryReportPhysical(
         IOperationalEventReporter reporter,
         string eventCode,
-        OperationalPhysicalEventSite site,
+        OperationalPhysicalEventSite? site,
         OperationalPhysicalCycleTracker? tracker,
         Exception? exception,
         string detail,
@@ -322,38 +389,45 @@ internal static class OperationalEventContextFactory
     {
         try
         {
+            if (site is null || !site.MonitoringAvailable)
+                return;
             OperationalEventDefinition definition = OperationalEventCatalog.Default.GetRequired(eventCode);
             OperationalPhysicalCycleSnapshot snapshot = tracker?.Snapshot() ??
                 OperationalPhysicalCycleSnapshot.Unavailable(site.CorrelationKey, "调用点没有物理周期跟踪器");
+            bool magnetOffResultUnknown = snapshot.MagnetOffCommand.State == DeviceCommandState.Unknown;
+            EvidenceValue<bool> holding = magnetOffResultUnknown || snapshot.HoldingWorkpiece.HasValue
+                ? snapshot.HoldingWorkpiece
+                : OptionalBool(
+                    holdingWorkpiece,
+                    "调用点已有holdingWorkpiece/X11=1证据",
+                    "调用点没有当前持件结论");
+            EvidenceValue<bool> placedEvidence = magnetOffResultUnknown || snapshot.Placed.HasValue
+                ? snapshot.Placed
+                : OptionalBool(
+                    placed,
+                    "调用点已有放料承诺点",
+                    "调用点没有放料承诺点结果");
+            EvidenceValue<string> lastLocation = magnetOffResultUnknown || snapshot.LastConfirmedLocation.HasValue
+                ? snapshot.LastConfirmedLocation
+                : Text(site.LastConfirmedLocation, "调用点最后确认位置");
             WorkpieceEvidence workpiece = usePlannedWorkpieceEvidence && site.Workpiece.HasValue
                 ? Workpiece(
                     site.Workpiece.Value,
                     ConfirmedLocation(site.PlannedSource, "物理动作计划来源"),
                     ConfirmedLocation(site.PlannedTarget, "物理动作计划目标"),
                     site.Owner,
-                    site.LastConfirmedLocation)
+                    lastLocation)
                 : UnknownWorkpiece("异常涉及磁铁上既有或未知工件，不能冒充本次计划工件");
-            EvidenceValue<bool> holding = OptionalBool(
-                holdingWorkpiece,
-                "调用点已有holdingWorkpiece/X11=1证据",
-                "调用点没有当前持件结论");
-            EvidenceValue<bool> placedEvidence = OptionalBool(
-                placed,
-                "调用点已有放料承诺点",
-                "调用点没有放料承诺点结果");
-            EvidenceValue<bool> cacheEvidence = OptionalBool(
-                cacheNotified,
-                "调用点已有缓存通知结果",
-                "调用点没有缓存通知结果");
-            EvidenceValue<bool> downstreamEvidence = OptionalBool(
-                downstreamNotified,
-                "调用点已有PLC/CNC通知结果",
-                "调用点没有PLC/CNC通知结果");
-            EvidenceValue<bool> closedEvidence = OptionalBool(
-                handoffClosed,
-                "调用点已有完整交接闭环结果",
-                "调用点没有完整交接闭环结果");
-            var commitments = new[]
+            EvidenceValue<bool> cacheEvidence = MonitorStepState(
+                snapshot.MonitorSteps, OperationalMonitorStepKind.CacheNotification,
+                cacheNotified, "缓存通知");
+            EvidenceValue<bool> downstreamEvidence = MonitorStepState(
+                snapshot.MonitorSteps, OperationalMonitorStepKind.DownstreamNotification,
+                downstreamNotified, "PLC/CNC通知");
+            EvidenceValue<bool> closedEvidence = MonitorStepState(
+                snapshot.MonitorSteps, OperationalMonitorStepKind.PhysicalHandoff,
+                handoffClosed, "完整物理交接闭环");
+            var commitments = new List<PhysicalCommitmentEvidence>
             {
                 new PhysicalCommitmentEvidence("充磁命令调用", CommandReturned(snapshot.MagnetOnCommand), snapshot.MagnetOnCommand.Reason),
                 new PhysicalCommitmentEvidence("X11确认持件", holding, holding.Reason),
@@ -363,6 +437,10 @@ internal static class OperationalEventContextFactory
                 new PhysicalCommitmentEvidence("PLC/CNC通知", downstreamEvidence, downstreamEvidence.Reason),
                 new PhysicalCommitmentEvidence("完整物理交接闭环", closedEvidence, closedEvidence.Reason)
             };
+            commitments.AddRange(snapshot.MonitorSteps.Select(step => new PhysicalCommitmentEvidence(
+                $"{step.Kind}:{step.Name}",
+                StepState(step),
+                step.Detail)));
             OperationalEvidence unavailable = OperationalEvidence.Unavailable("物理异常调用点没有该组证据");
             var motion = new MotionAndMagnetEvidence(
                 snapshot.ZDownCommand,
@@ -381,8 +459,8 @@ internal static class OperationalEventContextFactory
                     : Checkpoint(site.LastSuccessfulCheckpoint),
                 EvidenceValue<string>.Unknown("调用点没有状态机修改前值"),
                 EvidenceValue<string>.NotApplicable("监控不修改状态机"),
-                EvidenceValue<string>.Unknown("调用点没有缓存修改前值"),
-                EvidenceValue<string>.NotApplicable("监控不修改缓存"),
+                snapshot.CacheBefore,
+                snapshot.CacheAfter,
                 Text(site.Owner, "物理动作所有者参数"),
                 EvidenceValue<string>.NotApplicable("监控不修改工件所有权"),
                 holding,
@@ -434,6 +512,7 @@ internal static class OperationalEventContextFactory
                 Evidence = unavailable with
                 {
                     Workpiece = workpiece,
+                    Position = unavailable.Position with { TargetZ = snapshot.TargetZ },
                     MotionAndMagnet = motion,
                     BusinessState = business,
                     Locks = locks,
@@ -493,6 +572,29 @@ internal static class OperationalEventContextFactory
             : command.State == DeviceCommandState.NotSent
                 ? EvidenceValue<bool>.Confirmed(false, command.Reason)
                 : EvidenceValue<bool>.Unknown(command.Reason);
+
+    private static EvidenceValue<bool> MonitorStepState(
+        IReadOnlyList<OperationalMonitorStepEvidence> steps,
+        OperationalMonitorStepKind kind,
+        bool? legacyValue,
+        string label)
+    {
+        OperationalMonitorStepEvidence[] matching = steps.Where(step => step.Kind == kind).ToArray();
+        if (matching.Length == 0)
+            return OptionalBool(legacyValue, $"调用点已有{label}结果", $"调用点没有{label}结果");
+        if (matching.Any(step => step.State == OperationalMonitorStepState.StartedResultUnknown))
+            return EvidenceValue<bool>.Unknown($"{label}调用已开始但未取得成功返回：{string.Join("；", matching.Select(step => $"{step.Name}={step.Detail}"))}");
+        if (matching.All(step => step.State == OperationalMonitorStepState.Succeeded))
+            return EvidenceValue<bool>.Confirmed(true, $"{label}全部成功返回：{string.Join("；", matching.Select(step => step.Name))}");
+        return EvidenceValue<bool>.Confirmed(false, $"{label}尚未开始：{string.Join("；", matching.Where(step => step.State == OperationalMonitorStepState.NotStarted).Select(step => step.Name))}");
+    }
+
+    private static EvidenceValue<bool> StepState(OperationalMonitorStepEvidence step) => step.State switch
+    {
+        OperationalMonitorStepState.Succeeded => EvidenceValue<bool>.Confirmed(true, step.Detail),
+        OperationalMonitorStepState.StartedResultUnknown => EvidenceValue<bool>.Unknown(step.Detail),
+        _ => EvidenceValue<bool>.Confirmed(false, step.Detail)
+    };
 
     private static EvidenceValue<string> Text(string? value, string source) =>
         string.IsNullOrWhiteSpace(value)
