@@ -178,6 +178,26 @@ public sealed class OperationalEventStoreTests
         Assert.Throws<NotSupportedException>(() => ((IList<OperationalEvent>)first.Events).Clear());
         Assert.Single(store.Snapshot().Events[0].LatestEvidence.BusinessState.PhysicalCommitments);
     }
+
+    [Fact]
+    public void Snapshot_source_keeps_deep_copy_and_sort_outside_store_lock()
+    {
+        string sourcePath = Path.Combine(
+            RepositoryRoot.Find(),
+            "Service",
+            "OperationalEvents",
+            "OperationalEventStore.cs");
+        string source = File.ReadAllText(sourcePath);
+        int captureStart = source.IndexOf("private SnapshotCapture CaptureSnapshot()", StringComparison.Ordinal);
+        int freezeStart = source.IndexOf("private static OperationalEvent[] FreezeAndSort", StringComparison.Ordinal);
+
+        Assert.True(captureStart >= 0);
+        Assert.True(freezeStart > captureStart);
+        string captureMethod = source[captureStart..freezeStart];
+        Assert.Contains("lock (_gate)", captureMethod);
+        Assert.DoesNotContain("FreezeEvent", captureMethod);
+        Assert.DoesNotContain("OrderBy", captureMethod);
+    }
 }
 
 internal static class TestEventFactory

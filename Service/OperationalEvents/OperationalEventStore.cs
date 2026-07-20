@@ -125,13 +125,17 @@ public sealed class OperationalEventStore : IOperationalEventStore
 
     public OperationalEventStoreSnapshot Snapshot()
     {
+        SnapshotCapture capture = CaptureSnapshot();
+        OperationalEvent[] events = FreezeAndSort(capture.Entries);
+        return new OperationalEventStoreSnapshot(capture.Version, events, capture.Diagnostics);
+    }
+
+    private SnapshotCapture CaptureSnapshot()
+    {
         lock (_gate)
         {
-            OperationalEvent[] events = _events
-                .Select(stored => (Event: FreezeEvent(stored.Event), stored.LatestSequence))
-                .OrderByDescending(entry => entry.Event.LastOccurredAtUtc)
-                .ThenByDescending(entry => entry.LatestSequence)
-                .Select(entry => entry.Event)
+            SnapshotEntry[] entries = _events
+                .Select(stored => new SnapshotEntry(stored.Event, stored.LatestSequence))
                 .ToArray();
             var diagnostics = new OperationalEventDiagnostics(
                 _totalReceived,
@@ -142,9 +146,17 @@ public sealed class OperationalEventStore : IOperationalEventStore
                 _lastReporterFailureReason,
                 _transientStateEvictedCount,
                 _stageStateEvictedCount);
-            return new OperationalEventStoreSnapshot(_version, events, diagnostics);
+            return new SnapshotCapture(_version, entries, diagnostics);
         }
     }
+
+    private static OperationalEvent[] FreezeAndSort(IReadOnlyList<SnapshotEntry> entries) =>
+        entries
+            .Select(entry => new SnapshotEntry(FreezeEvent(entry.Event), entry.LatestSequence))
+            .OrderByDescending(entry => entry.Event.LastOccurredAtUtc)
+            .ThenByDescending(entry => entry.LatestSequence)
+            .Select(entry => entry.Event)
+            .ToArray();
 
     private bool IsWithinAggregationWindow(OperationalEvent current, DateTime occurredAtUtc)
     {
@@ -314,4 +326,11 @@ public sealed class OperationalEventStore : IOperationalEventStore
         string Fingerprint,
         long FirstSequence,
         long LatestSequence);
+
+    private sealed record SnapshotEntry(OperationalEvent Event, long LatestSequence);
+
+    private sealed record SnapshotCapture(
+        long Version,
+        IReadOnlyList<SnapshotEntry> Entries,
+        OperationalEventDiagnostics Diagnostics);
 }

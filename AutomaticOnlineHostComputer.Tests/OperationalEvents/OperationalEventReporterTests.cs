@@ -85,6 +85,20 @@ public sealed class OperationalEventReporterTests
     }
 
     [Fact]
+    public void Real_action_id_has_priority_over_correlation_key()
+    {
+        var store = new OperationalEventStore(TestEventFactory.Options());
+        var reporter = new OperationalEventReporter(store, TestEventFactory.Options(), new FakeClock());
+
+        reporter.Report(TestEventFactory.Context(
+            plateNo: "", sequence: "", actionId: "action-a", correlationKey: "shared-legacy-key"));
+        reporter.Report(TestEventFactory.Context(
+            plateNo: "", sequence: "", actionId: "action-b", correlationKey: "shared-legacy-key"));
+
+        Assert.Equal(2, store.Snapshot().Events.Count);
+    }
+
+    [Fact]
     public void Known_workpiece_independent_actions_use_action_id()
     {
         var store = new OperationalEventStore(TestEventFactory.Options());
@@ -244,6 +258,87 @@ public sealed class OperationalEventReporterTests
     }
 
     [Fact]
+    public async Task Interleaved_failure_observations_keep_monotonic_touch_and_latest_context()
+    {
+        var clock = new InterleavingClock();
+        OperationalEventMonitorOptions options = TestEventFactory.Options(failureCount: 2);
+        var store = new OperationalEventStore(options);
+        var reporter = new OperationalEventReporter(store, options, clock);
+
+        Task first = Task.Run(() => reporter.ObserveTransientFailure(new(
+            "MC65",
+            TestEventFactory.Context(eventCode: "FAIL", detail: "sequence-one"))));
+        Assert.True(clock.WaitUntilFirstCallBlocks());
+        Task second = Task.Run(() => reporter.ObserveTransientFailure(new(
+            "MC65",
+            TestEventFactory.Context(eventCode: "FAIL", detail: "sequence-two"))));
+        await second;
+        clock.ReleaseFirstCall();
+        await first;
+
+        OperationalEvent item = Assert.Single(store.Snapshot().Events);
+        Assert.Contains("sequence-two", item.LatestDetailMessage);
+        Assert.Equal(DateTime.UnixEpoch.AddSeconds(2), item.LastOccurredAtUtc);
+        Assert.Equal(2L, GetTrackerSequence(reporter, "_failureCycles", "LastTouchedSequence"));
+    }
+
+    [Fact]
+    public async Task Interleaved_stage_observations_keep_monotonic_touch_and_earliest_start()
+    {
+        var clock = new InterleavingClock();
+        OperationalEventMonitorOptions options = TestEventFactory.Options(
+            stages: new Dictionary<string, TimeSpan> { ["TEST_STAGE"] = TimeSpan.FromMinutes(1) });
+        var reporter = new OperationalEventReporter(new OperationalEventStore(options), options, clock);
+
+        Task first = Task.Run(() => reporter.ObserveStage(Stage(
+            OperationalStageObservationState.Active, "same-stage", "STALL")));
+        Assert.True(clock.WaitUntilFirstCallBlocks());
+        Task second = Task.Run(() => reporter.ObserveStage(Stage(
+            OperationalStageObservationState.Active, "same-stage", "STALL")));
+        await second;
+        clock.ReleaseFirstCall();
+        await first;
+
+        Assert.Equal(2L, GetTrackerSequence(reporter, "_stageCycles", "LastTouchedSequence"));
+        Assert.Equal(DateTime.UnixEpoch.AddSeconds(1),
+            GetTrackerValue<DateTime>(reporter, "_stageCycles", "StartedAtUtc"));
+    }
+
+    [Fact]
+    public void State_eviction_diagnostic_failure_does_not_skip_threshold_event()
+    {
+        OperationalEventMonitorOptions options = TestEventFactory.Options(capacity: 1, failureCount: 1);
+        var store = new EvictionThrowingStore();
+        var reporter = new OperationalEventReporter(store, options, new FakeClock());
+
+        reporter.ObserveTransientFailure(new("first", TestEventFactory.Context(eventCode: "FIRST")));
+        reporter.ObserveTransientFailure(new("second", TestEventFactory.Context(eventCode: "SECOND")));
+
+        Assert.Equal(new[] { "FIRST", "SECOND" }, store.RecordedEventCodes);
+        Assert.Equal(1, store.ReporterFailureCount);
+    }
+
+    [Fact]
+    public void Stage_eviction_diagnostic_failure_does_not_skip_stall_event()
+    {
+        OperationalEventMonitorOptions options = TestEventFactory.Options(
+            capacity: 1,
+            stages: new Dictionary<string, TimeSpan> { ["TEST_STAGE"] = TimeSpan.FromTicks(1) });
+        var store = new EvictionThrowingStore();
+        var clock = new FakeClock();
+        var reporter = new OperationalEventReporter(store, options, clock);
+
+        reporter.ObserveStage(Stage(OperationalStageObservationState.Active, "first", "FIRST"));
+        clock.Advance(TimeSpan.FromTicks(1));
+        reporter.ObserveStage(Stage(OperationalStageObservationState.Active, "second", "SECOND"));
+        clock.Advance(TimeSpan.FromTicks(1));
+        reporter.ObserveStage(Stage(OperationalStageObservationState.Active, "second", "SECOND"));
+
+        Assert.Equal(new[] { "SECOND" }, store.RecordedEventCodes);
+        Assert.Equal(1, store.ReporterFailureCount);
+    }
+
+    [Fact]
     public void All_four_entrypoints_and_secondary_failure_reporting_never_throw()
     {
         var reporter = new OperationalEventReporter(new ThrowingStore(), TestEventFactory.Options(), new ThrowingClock());
@@ -311,10 +406,62 @@ public sealed class OperationalEventReporterTests
             null,
             TestEventFactory.Context(eventCode: eventCode, actionId: key));
 
+    private static long GetTrackerSequence(
+        OperationalEventReporter reporter,
+        string dictionaryField,
+        string propertyName) =>
+        GetTrackerValue<long>(reporter, dictionaryField, propertyName);
+
+    private static T GetTrackerValue<T>(
+        OperationalEventReporter reporter,
+        string dictionaryField,
+        string propertyName)
+    {
+        object dictionary = typeof(OperationalEventReporter)
+            .GetField(dictionaryField, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(reporter)!;
+        object cycle = ((System.Collections.IEnumerable)dictionary)
+            .Cast<object>()
+            .Select(entry => entry.GetType().GetProperty("Value")!.GetValue(entry)!)
+            .Single();
+        return (T)cycle.GetType().GetProperty(propertyName)!.GetValue(cycle)!;
+    }
+
     private sealed class FakeClock : IOperationalEventClock
     {
         public DateTime UtcNow { get; private set; } = DateTime.UnixEpoch;
         public void Advance(TimeSpan duration) => UtcNow = UtcNow.Add(duration);
+    }
+
+    private sealed class InterleavingClock : IOperationalEventClock
+    {
+        private readonly ManualResetEventSlim _firstBlocked = new(false);
+        private readonly ManualResetEventSlim _releaseFirst = new(false);
+        private int _calls;
+
+        public DateTime UtcNow
+        {
+            get
+            {
+                int call = Interlocked.Increment(ref _calls);
+                if (call == 1)
+                {
+                    _firstBlocked.Set();
+                    if (!_releaseFirst.Wait(TimeSpan.FromSeconds(5)))
+                    {
+                        throw new TimeoutException("test did not release first clock call");
+                    }
+
+                    return DateTime.UnixEpoch.AddSeconds(1);
+                }
+
+                return DateTime.UnixEpoch.AddSeconds(2);
+            }
+        }
+
+        public bool WaitUntilFirstCallBlocks() => _firstBlocked.Wait(TimeSpan.FromSeconds(5));
+
+        public void ReleaseFirstCall() => _releaseFirst.Set();
     }
 
     private sealed class ThrowingClock : IOperationalEventClock
@@ -374,6 +521,27 @@ public sealed class OperationalEventReporterTests
             _inner.RecordStateEviction(trackerKind, occurredAtUtc);
 
         public OperationalEventStoreSnapshot Snapshot() => _inner.Snapshot();
+    }
+
+    private sealed class EvictionThrowingStore : IOperationalEventStore
+    {
+        private readonly List<string> _eventCodes = new();
+
+        public IReadOnlyList<string> RecordedEventCodes => _eventCodes;
+
+        public int ReporterFailureCount { get; private set; }
+
+        public event Action? Changed { add { } remove { } }
+
+        public void Record(OperationalEventContext context, DateTime occurredAtUtc, long observationSequence, string fingerprint) =>
+            _eventCodes.Add(context.EventCode);
+
+        public void RecordReporterFailure(DateTime occurredAtUtc, string reason) => ReporterFailureCount++;
+
+        public void RecordStateEviction(OperationalEventTrackerKind trackerKind, DateTime occurredAtUtc) =>
+            throw new InvalidOperationException("state eviction diagnostic failed");
+
+        public OperationalEventStoreSnapshot Snapshot() => throw new NotSupportedException();
     }
 
     private sealed class ThrowingMessageException : Exception

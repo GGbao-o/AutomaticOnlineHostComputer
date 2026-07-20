@@ -54,29 +54,67 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
             {
                 if (!_failureCycles.TryGetValue(stateKey, out FailureCycle? cycle))
                 {
-                    cycle = new FailureCycle(occurredAtUtc, 0, false, sequence, frozenObservationContext);
+                    cycle = new FailureCycle(
+                        occurredAtUtc,
+                        sequence,
+                        0,
+                        false,
+                        sequence,
+                        occurredAtUtc,
+                        sequence,
+                        frozenObservationContext);
                 }
 
                 int count = checked(cycle.Count + 1);
-                bool durationReached = occurredAtUtc >= cycle.FirstFailureAtUtc &&
-                    occurredAtUtc - cycle.FirstFailureAtUtc >= _options.TransientFailureDuration;
+                bool replaceFirst = IsEarlier(
+                    occurredAtUtc,
+                    sequence,
+                    cycle.FirstFailureAtUtc,
+                    cycle.FirstSequence);
+                bool replaceLatest = IsLater(
+                    occurredAtUtc,
+                    sequence,
+                    cycle.LatestOccurredAtUtc,
+                    cycle.LatestSequence);
+                DateTime firstFailureAtUtc = replaceFirst ? occurredAtUtc : cycle.FirstFailureAtUtc;
+                long firstSequence = replaceFirst ? sequence : cycle.FirstSequence;
+                DateTime latestOccurredAtUtc = replaceLatest ? occurredAtUtc : cycle.LatestOccurredAtUtc;
+                long latestSequence = replaceLatest ? sequence : cycle.LatestSequence;
+                OperationalEventContext latestContext = replaceLatest
+                    ? frozenObservationContext
+                    : cycle.LatestContext;
+                bool durationReached = latestOccurredAtUtc >= firstFailureAtUtc &&
+                    latestOccurredAtUtc - firstFailureAtUtc >= _options.TransientFailureDuration;
                 bool thresholdReached = count >= _options.TransientFailureCountThreshold || durationReached;
                 var updated = cycle with
                 {
+                    FirstFailureAtUtc = firstFailureAtUtc,
+                    FirstSequence = firstSequence,
                     Count = count,
                     Reported = cycle.Reported || thresholdReached,
-                    LastTouchedSequence = sequence,
-                    LatestContext = frozenObservationContext
+                    LastTouchedSequence = Math.Max(cycle.LastTouchedSequence, sequence),
+                    LatestOccurredAtUtc = latestOccurredAtUtc,
+                    LatestSequence = latestSequence,
+                    LatestContext = latestContext
                 };
                 _failureCycles[stateKey] = updated;
                 if (thresholdReached)
                 {
+                    bool firstThresholdEmission = !cycle.Reported;
+                    OperationalEventContext eventContext = firstThresholdEmission
+                        ? updated.LatestContext
+                        : frozenObservationContext;
+                    DateTime eventOccurredAtUtc = firstThresholdEmission
+                        ? updated.LatestOccurredAtUtc
+                        : occurredAtUtc;
                     contextToRecord = WithFailureCycle(
-                        frozenObservationContext,
-                        cycle.FirstFailureAtUtc,
-                        occurredAtUtc,
+                        eventContext,
+                        updated.FirstFailureAtUtc,
+                        eventOccurredAtUtc,
                         count,
                         "连续失败达到记录阈值");
+                    occurredAtUtc = eventOccurredAtUtc;
+                    sequence = firstThresholdEmission ? updated.LatestSequence : sequence;
                 }
 
                 stateEvicted = TrimOldest(_failureCycles, stateKey);
@@ -84,7 +122,7 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
 
             if (stateEvicted)
             {
-                _store.RecordStateEviction(OperationalEventTrackerKind.TransientFailure, occurredAtUtc);
+                RecordStateEvictionSafely(OperationalEventTrackerKind.TransientFailure, occurredAtUtc);
             }
 
             if (contextToRecord is not null)
@@ -149,25 +187,36 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
                 {
                     case OperationalStageObservationState.Active:
                     {
+                        TimeSpan observedThreshold = observation.ThresholdOverride is { } value && value > TimeSpan.Zero
+                            ? value
+                            : _options.GetStageThreshold(observation.StageCode);
                         if (!_stageCycles.TryGetValue(stateKey, out StageCycle? cycle))
                         {
-                            TimeSpan threshold = observation.ThresholdOverride is { } value && value > TimeSpan.Zero
-                                ? value
-                                : _options.GetStageThreshold(observation.StageCode);
-                            cycle = new StageCycle(occurredAtUtc, threshold, false, sequence);
+                            cycle = new StageCycle(occurredAtUtc, sequence, observedThreshold, false, sequence);
                         }
 
-                        bool thresholdReached = occurredAtUtc >= cycle.StartedAtUtc &&
-                            occurredAtUtc - cycle.StartedAtUtc >= cycle.Threshold;
+                        bool replaceStart = IsEarlier(
+                            occurredAtUtc,
+                            sequence,
+                            cycle.StartedAtUtc,
+                            cycle.StartSequence);
+                        DateTime startedAtUtc = replaceStart ? occurredAtUtc : cycle.StartedAtUtc;
+                        long startSequence = replaceStart ? sequence : cycle.StartSequence;
+                        TimeSpan threshold = replaceStart ? observedThreshold : cycle.Threshold;
+                        bool thresholdReached = occurredAtUtc >= startedAtUtc &&
+                            occurredAtUtc - startedAtUtc >= threshold;
                         bool reportNow = thresholdReached && !cycle.Reported;
                         _stageCycles[stateKey] = cycle with
                         {
+                            StartedAtUtc = startedAtUtc,
+                            StartSequence = startSequence,
+                            Threshold = threshold,
                             Reported = cycle.Reported || thresholdReached,
-                            LastTouchedSequence = sequence
+                            LastTouchedSequence = Math.Max(cycle.LastTouchedSequence, sequence)
                         };
                         if (reportNow)
                         {
-                            contextToRecord = WithElapsed(observation.Context, cycle.StartedAtUtc, occurredAtUtc, "阶段滞留");
+                            contextToRecord = WithElapsed(observation.Context, startedAtUtc, occurredAtUtc, "阶段滞留");
                         }
 
                         stateEvicted = TrimOldest(_stageCycles, stateKey);
@@ -198,7 +247,7 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
 
             if (stateEvicted)
             {
-                _store.RecordStateEviction(OperationalEventTrackerKind.Stage, occurredAtUtc);
+                RecordStateEvictionSafely(OperationalEventTrackerKind.Stage, occurredAtUtc);
             }
 
             if (contextToRecord is not null)
@@ -317,11 +366,7 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
         bool unknownWorkpiece = string.IsNullOrEmpty(workpieceIdentity);
         if (context.IndependentAction || unknownWorkpiece)
         {
-            if (unknownWorkpiece && !string.IsNullOrWhiteSpace(context.CorrelationKey))
-            {
-                actionCorrelation = context.CorrelationKey;
-            }
-            else if (!string.IsNullOrWhiteSpace(context.ActionId))
+            if (!string.IsNullOrWhiteSpace(context.ActionId))
             {
                 actionCorrelation = context.ActionId;
             }
@@ -485,6 +530,45 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
         }
     }
 
+    private void RecordStateEvictionSafely(
+        OperationalEventTrackerKind trackerKind,
+        DateTime occurredAtUtc)
+    {
+        try
+        {
+            _store.RecordStateEviction(trackerKind, occurredAtUtc);
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                _store.RecordReporterFailure(
+                    occurredAtUtc,
+                    $"{exception.GetType().FullName}: {SafeRead(() => exception.Message)}");
+            }
+            catch
+            {
+                // Diagnostic failure is isolated from the formal event write that follows.
+            }
+        }
+    }
+
+    private static bool IsEarlier(
+        DateTime candidateTime,
+        long candidateSequence,
+        DateTime currentTime,
+        long currentSequence) =>
+        candidateTime < currentTime ||
+        (candidateTime == currentTime && candidateSequence < currentSequence);
+
+    private static bool IsLater(
+        DateTime candidateTime,
+        long candidateSequence,
+        DateTime currentTime,
+        long currentSequence) =>
+        candidateTime > currentTime ||
+        (candidateTime == currentTime && candidateSequence > currentSequence);
+
     private static OperationalEvidence FreezeEvidence(OperationalEvidence evidence)
     {
         BusinessStateEvidence business = evidence.BusinessState;
@@ -540,13 +624,17 @@ public sealed class OperationalEventReporter : IOperationalEventReporter
 
     private sealed record FailureCycle(
         DateTime FirstFailureAtUtc,
+        long FirstSequence,
         int Count,
         bool Reported,
         long LastTouchedSequence,
+        DateTime LatestOccurredAtUtc,
+        long LatestSequence,
         OperationalEventContext LatestContext) : ITrackerCycle;
 
     private sealed record StageCycle(
         DateTime StartedAtUtc,
+        long StartSequence,
         TimeSpan Threshold,
         bool Reported,
         long LastTouchedSequence) : ITrackerCycle;
