@@ -1896,22 +1896,25 @@ public sealed class HomeViewModel : ObservableObject
             _line2RearEngine?.Pause();
         }
 
-        // 同一次停机可能由内层catch、外层catch和finally分别报告；整线恢复前只显示第一条。
+        // 同一次停机可能由内层catch、外层catch和finally分别报告；所有异常均记录，仅弹窗去重。
+        bool popupAlreadyShown;
         lock (_lineSafetyPopupLock)
         {
             if (line == 1)
             {
-                if (_line1SafetyPopupShown) return;
-                _line1SafetyPopupShown = true;
+                popupAlreadyShown = _line1SafetyPopupShown;
+                if (!popupAlreadyShown) _line1SafetyPopupShown = true;
             }
             else if (line == 2)
             {
-                if (_line2SafetyPopupShown) return;
-                _line2SafetyPopupShown = true;
+                popupAlreadyShown = _line2SafetyPopupShown;
+                if (!popupAlreadyShown) _line2SafetyPopupShown = true;
             }
+            else popupAlreadyShown = false;
         }
 
         _attentionEvents.Record(AttentionEventKind.SafetyAlarm, $"{line}号线", source, message);
+        if (popupAlreadyShown) return;
 
         void UpdateUiAndShowAlarm()
         {
@@ -1979,21 +1982,25 @@ public sealed class HomeViewModel : ObservableObject
         if (engine == "动平衡") _line1BalancingEngine?.Pause();
         else if (engine == "研磨") _grindingEngine?.PauseForCraneZeroPosition();
 
+        // 所有异常均记录，仅弹窗去重。
+        bool popupAlreadyShown;
         lock (_lineSafetyPopupLock)
         {
             if (engine == "动平衡")
             {
-                if (_balancingSafetyPopupShown) return;
-                _balancingSafetyPopupShown = true;
+                popupAlreadyShown = _balancingSafetyPopupShown;
+                if (!popupAlreadyShown) _balancingSafetyPopupShown = true;
             }
             else if (engine == "研磨")
             {
-                if (_grindingSafetyPopupShown) return;
-                _grindingSafetyPopupShown = true;
+                popupAlreadyShown = _grindingSafetyPopupShown;
+                if (!popupAlreadyShown) _grindingSafetyPopupShown = true;
             }
+            else popupAlreadyShown = false;
         }
 
         _attentionEvents.Record(AttentionEventKind.SafetyAlarm, engine, $"{engine}流程安全异常", message);
+        if (popupAlreadyShown) return;
 
         void ShowAlarm()
         {

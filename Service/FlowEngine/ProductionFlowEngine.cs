@@ -223,6 +223,11 @@ public sealed class ProductionFlowEngine : IDisposable
         if (!_stationCoords.TryGetValue(stationCode, out var station))
         {
             Console.WriteLine($"[FlowEngine] [{craneName}] ✘ 站号 {stationCode} 不在坐标缓存中");
+            TryReportMoveFinalFailure(
+                "天车", craneNo, craneName, stationCode, "坐标解析",
+                $"站号 {stationCode} 不在坐标缓存中，无法取得目标XYZ。",
+                "绝对移动命令未发送；本调用未确认设备实际位置。",
+                null, null, null, reservationReleasePending: false, motionMayHaveStarted: false);
             return false;
         }
 
@@ -244,12 +249,22 @@ public sealed class ProductionFlowEngine : IDisposable
             if (!await WaitForStationAsync(stationCode, craneName, ct: ct))
             {
                 Console.WriteLine($"[FlowEngine] [{craneName}] ✘ 工位 {stationCode} 超时未释放，放弃调度");
+                TryReportMoveFinalFailure(
+                    "天车", craneNo, craneName, stationCode, "等待工位预约",
+                    $"等待工位 {stationCode} 释放超时，未取得本次预约。",
+                    "绝对移动命令未发送；本次调度返回false。",
+                    xTarget, yTarget, zTarget, reservationReleasePending: false, motionMayHaveStarted: false);
                 return false;
             }
             // 等到释放，立刻抢预约
             if (!ReserveStation(stationCode, craneName))
             {
                 Console.WriteLine($"[FlowEngine] [{craneName}] ✘ 工位 {stationCode} 被其他等待者抢走");
+                TryReportMoveFinalFailure(
+                    "天车", craneNo, craneName, stationCode, "重新预约工位",
+                    $"工位 {stationCode} 释放后重新预约失败，可能已被其他等待者取得。",
+                    "绝对移动命令未发送；本次调度返回false。",
+                    xTarget, yTarget, zTarget, reservationReleasePending: false, motionMayHaveStarted: false);
                 return false;
             }
         }
@@ -263,6 +278,11 @@ public sealed class ProductionFlowEngine : IDisposable
             if (!safety.AllPassed)
             {
                 Console.WriteLine($"[FlowEngine] [{craneName}] ✘ 安全检查未通过：{safety.FailReason}");
+                TryReportMoveFinalFailure(
+                    "天车", craneNo, craneName, stationCode, "移动前安全检查",
+                    $"安全检查未通过：{safety.FailReason}",
+                    "绝对移动命令未发送；本次调度返回false。",
+                    xTarget, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: false);
                 return false;
             }
 
@@ -295,11 +315,26 @@ public sealed class ProductionFlowEngine : IDisposable
         catch (TimeoutException ex)
         {
             Console.WriteLine($"[FlowEngine] [{craneName}] ✘ 移动超时：{ex.Message}");
+            TryReportMoveFinalFailure(
+                "天车", craneNo, craneName, stationCode, "绝对移动执行",
+                $"移动流程发生超时：{ex.Message}",
+                "设备运动结果未知；本次调度返回false。",
+                xTarget, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: true,
+                exception: ex);
             return false;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[FlowEngine] [{craneName}] ✘ 移动异常：{ex.Message}");
+            TryReportMoveFinalFailure(
+                "天车", craneNo, craneName, stationCode, "绝对移动执行",
+                $"移动流程发生异常：{ex.Message}",
+                "设备运动结果未知；本次调度返回false。",
+                xTarget, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: true,
+                exception: ex,
+                severity: ex is OperationCanceledException
+                    ? OperationalEventSeverity.Information
+                    : OperationalEventSeverity.Error);
             return false;
         }
         finally
@@ -319,6 +354,11 @@ public sealed class ProductionFlowEngine : IDisposable
         if (!_stationCoords.TryGetValue(stationCode, out var station))
         {
             Console.WriteLine($"[FlowEngine] [{info.Name}] ✘ 站号 {stationCode} 不在坐标缓存中");
+            TryReportMoveFinalFailure(
+                "机械手", manipulatorNo, info.Name, stationCode, "坐标解析",
+                $"站号 {stationCode} 不在坐标缓存中，无法取得目标YZ。",
+                "绝对移动命令未发送；本调用未确认设备实际位置。",
+                null, null, null, reservationReleasePending: false, motionMayHaveStarted: false);
             return false;
         }
 
@@ -338,11 +378,21 @@ public sealed class ProductionFlowEngine : IDisposable
             if (!await WaitForStationAsync(stationCode, info.Name, ct: ct))
             {
                 Console.WriteLine($"[FlowEngine] [{info.Name}] ✘ 工位 {stationCode} 超时未释放");
+                TryReportMoveFinalFailure(
+                    "机械手", manipulatorNo, info.Name, stationCode, "等待工位预约",
+                    $"等待工位 {stationCode} 释放超时，未取得本次预约。",
+                    "绝对移动命令未发送；本次调度返回false。",
+                    null, yTarget, zTarget, reservationReleasePending: false, motionMayHaveStarted: false);
                 return false;
             }
             if (!ReserveStation(stationCode, info.Name))
             {
                 Console.WriteLine($"[FlowEngine] [{info.Name}] ✘ 工位被抢");
+                TryReportMoveFinalFailure(
+                    "机械手", manipulatorNo, info.Name, stationCode, "重新预约工位",
+                    $"工位 {stationCode} 释放后重新预约失败，可能已被其他等待者取得。",
+                    "绝对移动命令未发送；本次调度返回false。",
+                    null, yTarget, zTarget, reservationReleasePending: false, motionMayHaveStarted: false);
                 return false;
             }
         }
@@ -354,6 +404,11 @@ public sealed class ProductionFlowEngine : IDisposable
             if (!safety.AllPassed)
             {
                 Console.WriteLine($"[FlowEngine] [{info.Name}] ✘ 安全检查未通过：{safety.FailReason}");
+                TryReportMoveFinalFailure(
+                    "机械手", manipulatorNo, info.Name, stationCode, "移动前安全检查",
+                    $"安全检查未通过：{safety.FailReason}",
+                    "绝对移动命令未发送；本次调度返回false。",
+                    null, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: false);
                 return false;
             }
 
@@ -368,12 +423,243 @@ public sealed class ProductionFlowEngine : IDisposable
         catch (TimeoutException ex)
         {
             Console.WriteLine($"[FlowEngine] [{info.Name}] ✘ 移动超时：{ex.Message}");
+            TryReportMoveFinalFailure(
+                "机械手", manipulatorNo, info.Name, stationCode, "绝对移动执行",
+                $"移动流程发生超时：{ex.Message}",
+                "设备运动结果未知；本次调度返回false。",
+                null, yTarget, zTarget, reservationReleasePending: true, motionMayHaveStarted: true,
+                exception: ex);
             return false;
         }
         finally
         {
             ReleaseStation(stationCode, info.Name);
         }
+    }
+
+    /// <summary>
+    /// 旁路记录公共移动入口的最终失败。只复制调用点已有数据；任何监控异常均被隔离。
+    /// </summary>
+    private void TryReportMoveFinalFailure(
+        string deviceType,
+        int deviceNo,
+        string deviceName,
+        string stationCode,
+        string actionStage,
+        string detailMessage,
+        string result,
+        int? targetX,
+        int? targetY,
+        int? targetZ,
+        bool reservationReleasePending,
+        bool motionMayHaveStarted,
+        Exception? exception = null,
+        OperationalEventSeverity severity = OperationalEventSeverity.Error)
+    {
+        try
+        {
+            const string contextReason = "公共移动入口未接收工件上下文";
+            OperationalEvidence unavailable = OperationalEvidence.Unavailable(contextReason);
+            EvidenceValue<int> targetXEvidence = targetX.HasValue
+                ? EvidenceValue<int>.Confirmed(targetX.Value, "来自已加载工位坐标")
+                : deviceType == "机械手"
+                    ? EvidenceValue<int>.NotApplicable("机械手绝对移动不使用X轴")
+                    : EvidenceValue<int>.Unavailable("目标工位坐标未取得");
+            EvidenceValue<int> targetYEvidence = targetY.HasValue
+                ? EvidenceValue<int>.Confirmed(targetY.Value, "来自已加载工位坐标")
+                : EvidenceValue<int>.Unavailable("目标工位坐标未取得");
+            string reservationReason = reservationReleasePending
+                ? "上报时工位预约当前可能仍持有；原finally将尝试释放；结果尚未确认"
+                : "失败发生在取得本次工位预约之前，本次没有预约待释放";
+            var reservation = new LockItemEvidence(
+                $"工位预约:{stationCode}",
+                reservationReleasePending
+                    ? EvidenceValue<bool>.Unknown(reservationReason)
+                    : EvidenceValue<bool>.Confirmed(false, reservationReason),
+                reservationReleasePending
+                    ? EvidenceValue<bool>.Unknown(reservationReason)
+                    : EvidenceValue<bool>.NotApplicable(reservationReason),
+                reservationReleasePending
+                    ? "原finally执行结果未知，人工处置前需确认预约和设备实际位置。"
+                    : "本次调用未持有目标工位预约。");
+            ExceptionEvidence exceptionEvidence = exception == null
+                ? unavailable.Exception
+                : new ExceptionEvidence(
+                    exception.GetType().FullName ?? exception.GetType().Name,
+                    exception.Message,
+                    exception.InnerException?.ToString() ?? string.Empty,
+                    $"{deviceName}调度至{stationCode}，阶段={actionStage}",
+                    exception.StackTrace ?? string.Empty);
+            var physicalConclusion = motionMayHaveStarted
+                ? new PhysicalConclusionEvidence(
+                    PhysicalConclusionCode.CommandResultUnknown,
+                    EvidenceAvailability.Unknown,
+                    "设备运动物理结果未知",
+                    "异常可能发生在运动命令发送前后，调用点没有最终位置确认")
+                : new PhysicalConclusionEvidence(
+                    PhysicalConclusionCode.CommandNotSent,
+                    EvidenceAvailability.Confirmed,
+                    "绝对移动命令未发送",
+                    "失败出口位于执行绝对移动步骤之前");
+
+            _exceptionReporter.Report(new OperationalEventContext
+            {
+                EventCode = "ENGINE_FINAL_FAILURE",
+                Severity = severity,
+                Category = OperationalEventCategory.FinalFailure,
+                Scope = "未提供线路",
+                Engine = nameof(ProductionFlowEngine),
+                DeviceType = deviceType,
+                DeviceNo = deviceNo.ToString(),
+                Station = stationCode,
+                ActionStage = actionStage,
+                Title = $"{deviceName}公共移动最终失败",
+                Source = deviceType == "天车"
+                    ? "ProductionFlowEngine.MoveCraneToStationAsync"
+                    : "ProductionFlowEngine.MoveManipulatorToStationAsync",
+                CorrelationKey = $"ProductionFlowEngine.Move:{deviceType}:{deviceNo}:{stationCode}:{actionStage}",
+                DetailMessage = $"{detailMessage} 目标坐标：X={targetX?.ToString() ?? "未知"}，Y={targetY?.ToString() ?? "未知"}，Z={targetZ?.ToString() ?? "未知"}。{reservationReason}",
+                Result = result,
+                CapturedException = exception,
+                PhysicalConclusion = physicalConclusion,
+                BusinessPaused = EvidenceValue<bool>.Confirmed(false, "公共移动入口没有执行引擎暂停"),
+                Evidence = unavailable with
+                {
+                    Position = unavailable.Position with
+                    {
+                        TargetX = targetXEvidence,
+                        TargetY = targetYEvidence,
+                        FailureStage = EvidenceValue<string>.Confirmed(actionStage, "调用点失败分支")
+                    },
+                    Locks = new LockEvidence(
+                        reservationReleasePending ? EvidenceAvailability.Unknown : EvidenceAvailability.Confirmed,
+                        reservationReason,
+                        new[] { reservation }),
+                    Recovery = new RecoveryEvidence(
+                        reservationReleasePending ? EvidenceAvailability.Unknown : EvidenceAvailability.NotApplicable,
+                        reservationReason,
+                        reservationReleasePending
+                            ? EvidenceValue<bool>.Unknown(reservationReason)
+                            : EvidenceValue<bool>.NotApplicable(reservationReason),
+                        reservationReleasePending
+                            ? EvidenceValue<bool>.Unknown(reservationReason)
+                            : EvidenceValue<bool>.NotApplicable(reservationReason),
+                        reservationReleasePending
+                            ? new[] { new RecoveryStepEvidence("原finally释放工位预约", RecoveryStepState.Unknown, reservationReason) }
+                            : Array.Empty<RecoveryStepEvidence>(),
+                        Array.Empty<string>(),
+                        reservationReason),
+                    Guidance = new OperatorGuidance(
+                        new[]
+                        {
+                            $"确认{deviceName}当前实际XYZ和目标工位{stationCode}是否安全。",
+                            reservationReleasePending ? "确认原finally是否已释放目标工位预约。" : "确认目标工位当前占用者。"
+                        },
+                        new[] { "禁止在设备实际位置未确认时直接重发绝对移动命令。" },
+                        "设备位置、工位占用和安全条件全部人工确认后方可重新调度。"),
+                    Exception = exceptionEvidence
+                }
+            });
+        }
+        catch { }
+    }
+
+    /// <summary>旁路记录旧生产主循环的最终失败，不参与状态机判断。</summary>
+    private void TryReportEngineFinalFailure(
+        WorkpieceContext ctx,
+        FlowStage failedStage,
+        OperationalEventSeverity severity,
+        string title,
+        string detailMessage,
+        Exception exception)
+    {
+        try
+        {
+            const string unavailableReason = "旧生产主循环调用点没有该项证据";
+            OperationalEvidence unavailable = OperationalEvidence.Unavailable(unavailableReason);
+            string line = ctx.AssignedLine.HasValue ? $"{ctx.AssignedLine.Value}号线" : "未分配线路";
+            string stage = failedStage.ToString();
+            var exceptionEvidence = new ExceptionEvidence(
+                exception.GetType().FullName ?? exception.GetType().Name,
+                exception.Message,
+                exception.InnerException?.ToString() ?? string.Empty,
+                $"工件={ctx.PlateNo}/{ctx.Sequence}，失败阶段={stage}",
+                exception.StackTrace ?? string.Empty);
+
+            _exceptionReporter.Report(new OperationalEventContext
+            {
+                EventCode = "ENGINE_FINAL_FAILURE",
+                Severity = severity,
+                Category = OperationalEventCategory.FinalFailure,
+                Scope = line,
+                Engine = nameof(ProductionFlowEngine),
+                DeviceType = "流程引擎",
+                DeviceNo = line,
+                Station = stage,
+                ActionStage = stage,
+                Title = title,
+                Source = "ProductionFlowEngine.EngineLoopAsync",
+                CorrelationKey = $"ProductionFlowEngine:{ctx.PlateNo}:{ctx.Sequence}:{stage}",
+                DetailMessage = detailMessage,
+                Result = "上报后原catch按既有逻辑把CurrentStage复位为Idle；工件不会自动重新入队。",
+                CapturedException = exception,
+                PhysicalConclusion = new PhysicalConclusionEvidence(
+                    PhysicalConclusionCode.Unknown,
+                    EvidenceAvailability.Unknown,
+                    "工件和设备物理状态未知",
+                    "旧主循环上下文没有设备动作结果证据"),
+                BusinessPaused = EvidenceValue<bool>.Confirmed(false, "该catch没有暂停引擎"),
+                Evidence = unavailable with
+                {
+                    Workpiece = new WorkpieceEvidence(
+                        EvidenceValue<string>.Confirmed(ctx.PlateNo, "来自WorkpieceContext"),
+                        EvidenceValue<string>.Confirmed(ctx.Sequence, "来自WorkpieceContext"),
+                        EvidenceValue<double>.Confirmed(ctx.Diameter, "来自WorkpieceContext"),
+                        EvidenceValue<double>.Confirmed(ctx.Length, "来自WorkpieceContext"),
+                        string.IsNullOrWhiteSpace(ctx.LoadMethod)
+                            ? EvidenceValue<string>.Unknown("尚未分配或调用点没有来源")
+                            : EvidenceValue<string>.Confirmed(ctx.LoadMethod, "来自WorkpieceContext.LoadMethod"),
+                        EvidenceValue<string>.Confirmed(ctx.CurrentStepText, "来自失败前CurrentStage"),
+                        EvidenceValue<string>.Inferred(nameof(ProductionFlowEngine), "工件由旧生产主循环出队处理"),
+                        EvidenceValue<string>.Unknown("调用点没有最后确认物理位置"),
+                        "EngineLoopAsync捕获异常前的WorkpieceContext"),
+                    BusinessState = new BusinessStateEvidence(
+                        EvidenceAvailability.Confirmed,
+                        "已保存失败前状态；Idle复位在上报之后执行",
+                        EvidenceValue<string>.Unknown("调用点没有独立保存最后成功检查点"),
+                        EvidenceValue<string>.Confirmed(stage, "异常捕获后、复位前保存"),
+                        EvidenceValue<string>.Unknown("原catch将在上报后尝试复位Idle，当前尚未执行"),
+                        EvidenceValue<string>.Unavailable("旧主循环没有缓存快照"),
+                        EvidenceValue<string>.Unavailable("旧主循环没有缓存快照"),
+                        EvidenceValue<string>.Inferred(nameof(ProductionFlowEngine), "工件由旧生产主循环出队处理"),
+                        EvidenceValue<string>.Unknown("失败后软件所有权没有显式转移"),
+                        EvidenceValue<bool>.Unknown("调用点没有持件传感器证据"),
+                        EvidenceValue<bool>.Unknown("调用点没有放料确认"),
+                        EvidenceValue<bool>.Unavailable("旧主循环没有缓存通知证据"),
+                        Array.Empty<PhysicalCommitmentEvidence>()),
+                    Recovery = new RecoveryEvidence(
+                        EvidenceValue<bool>.Confirmed(false, "catch内没有自动恢复动作"),
+                        EvidenceValue<bool>.Confirmed(false, "catch内没有自动恢复动作"),
+                        Array.Empty<RecoveryStepEvidence>(),
+                        Array.Empty<string>(),
+                        "原catch将在上报后复位Idle；该工件不会自动重新入队。"),
+                    Guidance = new OperatorGuidance(
+                        new[]
+                        {
+                            "核对异常阶段涉及设备的实际位置、持件和工件落点。",
+                            "确认工件身份与现场一致后，再决定是否人工重新入队。"
+                        },
+                        new[]
+                        {
+                            "禁止在物理状态未确认时直接重新入队。",
+                            "禁止仅根据软件Idle状态判断设备和工件已经安全。"
+                        },
+                        "物理位置、工件身份和设备安全条件全部确认后方可继续。"),
+                    Exception = exceptionEvidence
+                }
+            });
+        }
+        catch { }
     }
 
     /// <summary>引擎启动后持续运行，从队列取任务处理。</summary>
@@ -430,15 +716,27 @@ public sealed class ProductionFlowEngine : IDisposable
                 {
                     await ProcessWorkpieceAsync(ctx, ct);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException ex)
                 {
                     Console.WriteLine($"[FlowEngine] ⚠ 工件处理被取消：{ctx.PlateNo}");
+                    FlowStage failedStage = ctx.CurrentStage;
+                    TryReportEngineFinalFailure(
+                        ctx, failedStage, OperationalEventSeverity.Information,
+                        "工件流程被取消",
+                        $"工件 {ctx.PlateNo} 在 {failedStage} 阶段收到取消。",
+                        ex);
                     ctx.CurrentStage = FlowStage.Idle;
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[FlowEngine] ✘ 工件处理异常：{ctx.PlateNo} — {ex.Message}");
                     Console.WriteLine($"[FlowEngine]    {ex.GetType().Name}: {ex.Message}");
+                    FlowStage failedStage = ctx.CurrentStage;
+                    TryReportEngineFinalFailure(
+                        ctx, failedStage, OperationalEventSeverity.Error,
+                        "工件流程最终失败",
+                        $"工件 {ctx.PlateNo} 在 {failedStage} 阶段发生未处理异常：{ex.Message}",
+                        ex);
                     ctx.CurrentStage = FlowStage.Idle; // 异常后回到空闲，可重新入队
                 }
 
