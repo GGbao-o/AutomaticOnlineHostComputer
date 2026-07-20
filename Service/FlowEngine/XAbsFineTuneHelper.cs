@@ -31,19 +31,25 @@ internal static class XAbsFineTuneHelper
         MotionConfig.AxisAbsFineTuneSection Settings,
         Func<CraneStatus, int> DisplayPosition,
         Func<CraneStatus, int> AbsoluteEncoder,
-        int AbsolutePerDisplayDirection);
+        int DefaultAbsolutePerDisplayDirection);
 
-    private sealed record ActiveAxisFineTune(AxisFineTune Axis, int BaseTargetAbs, int TargetAbs)
+    private sealed record ActiveAxisFineTune(
+        AxisFineTune Axis,
+        int BaseTargetAbs,
+        int TargetAbs,
+        int AbsolutePerDisplayDirection)
     {
         public string Name => Axis.Name;
         public int Tolerance => Math.Max(0, Axis.Settings.ToleranceMm);
         public int MaxAdjust => Math.Max(Tolerance, Axis.Settings.MaxAdjustMm);
         public int DisplayPosition(CraneStatus status) => Axis.DisplayPosition(status);
         public int AbsoluteEncoder(CraneStatus status) => Axis.AbsoluteEncoder(status);
-        public int AbsolutePerDisplayDirection => Axis.AbsolutePerDisplayDirection;
         public int TargetAbsOffset => TargetAbs - BaseTargetAbs;
-        public string TargetDescription => Name == "Y" && TargetAbsOffset != 0
-            ? $"基准AbsY={BaseTargetAbs}, 动态偏移={TargetAbsOffset:+#;-#;0}mm, 动态目标AbsY={TargetAbs}"
+        public string TargetDescription => Name == "Y"
+            ? TargetAbsOffset != 0
+                ? $"基准AbsY={BaseTargetAbs}, 动态偏移={TargetAbsOffset:+#;-#;0}mm, " +
+                  $"动态目标AbsY={TargetAbs}, Y方向={AbsolutePerDisplayDirection:+#;-#}"
+                : $"目标AbsY={TargetAbs}, Y方向={AbsolutePerDisplayDirection:+#;-#}"
             : $"目标Abs{Name}={TargetAbs}";
     }
 
@@ -59,14 +65,18 @@ internal static class XAbsFineTuneHelper
         string stationCode,
         string context,
         CancellationToken ct,
-        int yTargetAbsOffsetMm = 0)
+        int yCenterToPickOffsetMm = 0)
     {
+        if (yCenterToPickOffsetMm < 0)
+            throw new ArgumentOutOfRangeException(nameof(yCenterToPickOffsetMm), "斜床中心到取料位的Y偏移量不能为负数");
+
         var axes = new[]
         {
             new AxisFineTune("X", cfg.XAbsFineTune, status => status.XPos, status => status.XEncoderAbs, +1),
             new AxisFineTune("Y", cfg.YAbsFineTune, status => status.YPos, status => status.YEncoderAbs, -1)
         };
-        List<ActiveAxisFineTune> activeAxes = ResolveActiveAxes(axes, craneNo, stationCode, context, yTargetAbsOffsetMm);
+        List<ActiveAxisFineTune> activeAxes = ResolveActiveAxes(
+            axes, craneNo, stationCode, context, yCenterToPickOffsetMm);
         if (activeAxes.Count == 0)
             return;
 
@@ -147,7 +157,7 @@ internal static class XAbsFineTuneHelper
         int craneNo,
         string stationCode,
         string context,
-        int yTargetAbsOffsetMm)
+        int yCenterToPickOffsetMm)
     {
         var activeAxes = new List<ActiveAxisFineTune>();
         foreach (AxisFineTune axis in axes)
@@ -165,8 +175,13 @@ internal static class XAbsFineTuneHelper
                 continue;
             }
 
-            int targetAbs = axis.Name == "Y" ? baseTargetAbs + yTargetAbsOffsetMm : baseTargetAbs;
-            activeAxes.Add(new ActiveAxisFineTune(axis, baseTargetAbs, targetAbs));
+            int direction = axis.Name == "Y"
+                ? axis.Settings.GetAbsolutePerDisplayDirection(craneNo, GetDefaultYDirection(craneNo))
+                : axis.DefaultAbsolutePerDisplayDirection;
+            int targetAbs = axis.Name == "Y"
+                ? checked(baseTargetAbs - direction * yCenterToPickOffsetMm)
+                : baseTargetAbs;
+            activeAxes.Add(new ActiveAxisFineTune(axis, baseTargetAbs, targetAbs, direction));
         }
 
         return activeAxes;
@@ -174,6 +189,13 @@ internal static class XAbsFineTuneHelper
 
     private static List<AxisCorrection> BuildCorrections(IEnumerable<ActiveAxisFineTune> activeAxes, CraneStatus status)
         => activeAxes.Select(axis => new AxisCorrection(axis, axis.TargetAbs - axis.AbsoluteEncoder(status))).ToList();
+
+    /// <summary>
+    /// 兼容未包含 absolutePerDisplayDirections 的旧运行目录配置。
+    /// 现场已确认 Crane#1/#3/#4 同向、Crane#2 反向；Crane#5 未复核，保持历史反向行为。
+    /// </summary>
+    private static int GetDefaultYDirection(int craneNo)
+        => craneNo is 1 or 3 or 4 ? +1 : -1;
 
     private static void LogQualifiedAxes(IEnumerable<AxisCorrection> corrections, CraneStatus status, string stationCode, string context)
     {

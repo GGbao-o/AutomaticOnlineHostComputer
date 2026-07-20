@@ -1700,7 +1700,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             await cr.MoveAbsoluteAsync(bx + _ox, yPick, -1, ct: ct);
             await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
                 cr, _cfg, CraneRearNo, bed.Code, $"2号线后天车-{bed.Code}下料取料前", ct,
-                yTargetAbsOffsetMm: yOff);
+                yCenterToPickOffsetMm: yOff);
             //下降取料    加上数据库的偏移值   lz是计算公式算的
             int zDown = lz + _oz;
             Console.WriteLine($"│ [下料] ① Z下降到{lz}(Z-半径)+天车偏移({_oz})={zDown} 充磁取料");

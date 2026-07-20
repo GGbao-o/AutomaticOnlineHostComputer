@@ -4,7 +4,7 @@
 
 **Goal:** Use a workpiece-specific Y absolute-encoder target when rear cranes pick a part from a skew bed for unloading.
 
-**Architecture:** Keep each station configuration as the Y absolute-encoder value at its fixed database coordinate. Add an optional dynamic Y target offset to the shared fine-tune helper. Only rear-crane skew-unload callers supply `yOff`; all fixed-coordinate callers retain the zero default.
+**Architecture:** Keep each station configuration as the Y absolute-encoder value at its fixed database coordinate. Rear-crane skew-unload callers pass the positive geometric `yOff`; the shared helper converts it with a per-crane Y direction. Fixed-coordinate callers retain the zero default.
 
 **Tech Stack:** C#, .NET, WPF upper-computer service layer, `dotnet build`.
 
@@ -86,3 +86,10 @@ Expected: `yOff` appears only at the two rear skew-unload callers; X uses its un
 git add -- Service/FlowEngine/XAbsFineTuneHelper.cs Service/FlowEngine/Line1RearFlowEngine.cs Service/FlowEngine/Line2RearFlowEngine.cs Docs/全线业务逻辑详解.md Docs/superpowers/specs/2026-07-18-skew-unload-y-abs-target-design.md Docs/superpowers/plans/2026-07-18-skew-unload-y-abs-target.md
 git commit -m "fix: use dynamic y encoder target for skew unload"
 ```
+
+### Revision 2026-07-20: Per-crane direction
+
+- [x] Rename the helper argument to `yCenterToPickOffsetMm` so callers pass an unsigned geometric offset rather than an already-signed Abs offset.
+- [x] Read Crane#1/#3/#4=`+1` and Crane#2=`-1` from `yAbsFineTune.absolutePerDisplayDirections`; Crane#5 remains unverified at `-1`.
+- [x] Replace the old global addition with `targetAbsY = baseTargetAbsY - direction * yCenterToPickOffsetMm`.
+- [x] Reuse the same direction for display correction and feedback-follow validation.

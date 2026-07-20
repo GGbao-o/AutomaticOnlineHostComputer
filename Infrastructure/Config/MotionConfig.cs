@@ -147,6 +147,11 @@ public sealed class MotionConfig
         public int ToleranceMm { get; set; } = 5;
         /// <summary>单次最大允许微调量(mm)。超过该值直接报警, 防止标定/坐标错误时大距离盲修。</summary>
         public int MaxAdjustMm { get; set; } = 50;
+        /// <summary>
+        /// 每台天车的“绝对编码器变化量 / 显示坐标变化量”方向，只允许 -1 或 +1。
+        /// 仅 Y 轴使用；未配置时保留历史兼容值 -1。
+        /// </summary>
+        public Dictionary<int, int> AbsolutePerDisplayDirections { get; set; } = new();
         /// <summary>每台天车每个工位的本轴绝对编码器标定值。值为-1表示该工位不做微调。</summary>
         public Dictionary<int, Dictionary<string, int>> StationTargets { get; set; } = new()
         {
@@ -171,6 +176,20 @@ public sealed class MotionConfig
             target = -1;
             if (!StationTargets.TryGetValue(craneNo, out var stations)) return false;
             return stations.TryGetValue(stationCode, out target);
+        }
+
+        public int GetAbsolutePerDisplayDirection(int craneNo, int fallbackDirection = -1)
+        {
+            int direction = AbsolutePerDisplayDirections.TryGetValue(craneNo, out int configured)
+                ? configured
+                : fallbackDirection;
+            if (direction is not (-1 or +1))
+            {
+                throw new InvalidDataException(
+                    $"天车#{craneNo}绝对编码器/显示坐标方向只能配置为-1或+1，当前为{direction}");
+            }
+
+            return direction;
         }
     }
 
