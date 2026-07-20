@@ -1229,6 +1229,7 @@ public sealed class Line2RearFlowEngine : IDisposable
     /// <summary>上料流程: 中转架取料→X11检测→送斜床→握手→标记加工中</summary>
     private async Task DoLoad(SkewCtx bed, string rs, CancellationToken ct)
     {
+        string actionId = OperationalEventContextFactory.NewActionId("L2-REAR-LOAD");
         bool transferLocked = false; // 新Zone模型下不再使用_transferRackLock作为中转架业务互斥
         WorkpieceCache wp;
         long rackArrivalSeq;
@@ -1320,7 +1321,17 @@ public sealed class Line2RearFlowEngine : IDisposable
 
             Console.WriteLine($"│ [取料] step2: XY到中转架({rx + _ox},{ry + _oy})");
             await cr.MoveAbsoluteAsync(rx + _ox, ry + _oy, -1, ct: ct);
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(cr, _cfg, CraneRearNo, rs, $"2号线后天车-{rs}取料前", ct);
+            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                cr, _cfg, CraneRearNo, rs, $"2号线后天车-{rs}取料前",
+                reporter: _exceptionReporter,
+                failureContext: OperationalEventContextFactory.FineTuneFailure(
+                    scope: "2号线", engine: "后端引擎", deviceNo: CraneRearNo.ToString(), station: rs,
+                    actionStage: $"{rs}中转架取料前XY微调", workpiece: wp,
+                    source: OperationalEventContextFactory.ConfirmedLocation(rs, "本物理周期来源"),
+                    target: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "已选斜床目标"),
+                    owner: "2号线后天车", targetZ: EvidenceValue<int>.Confirmed(pz + _oz, "已有中转架取料Z公式与偏移"),
+                    physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(true, "Z回原点命令已返回", rs)),
+                actionId: actionId, safeZ: sz, ct: ct);
             Console.WriteLine($"│ [取料] step3: Z下降到{pz + _oz}");
             try
             {
@@ -1402,7 +1413,17 @@ public sealed class Line2RearFlowEngine : IDisposable
                 Console.WriteLine("│ [移动] ⚠ XY未到位! 重试...");
                 await cr.MoveAbsoluteAsync(bx + _ox, by + _oy, -1, ct: ct);
             }
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(cr, _cfg, CraneRearNo, bed.Code, $"2号线后天车-{bed.Code}上料放斜床前", ct);
+            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                cr, _cfg, CraneRearNo, bed.Code, $"2号线后天车-{bed.Code}上料放斜床前",
+                reporter: _exceptionReporter,
+                failureContext: OperationalEventContextFactory.FineTuneFailure(
+                    scope: "2号线", engine: "后端引擎", deviceNo: CraneRearNo.ToString(), station: bed.Code,
+                    actionStage: $"{bed.Code}上料放斜床前XY微调", workpiece: wp,
+                    source: OperationalEventContextFactory.ConfirmedLocation(rs, "本物理周期来源"),
+                    target: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "已选斜床目标"),
+                    owner: "2号线后天车", targetZ: EvidenceValue<int>.Confirmed(Pz(bz, wp.Diameter) + _oz, "已有斜床装料Z公式与偏移"),
+                    physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(true, holdingWorkpiece, "中转架取料X11=1且Z已升安全", "天车/斜床上方")),
+                actionId: actionId, safeZ: sz, ct: ct);
 
             // 到这里才绑定斜床工件: X11已确认吸住、Z已升安全、后天车已到目标斜床上方。
             // 在此之前异常按“工件仍在中转架/后天车”处理, 避免Idle斜床残留旧Wp。
@@ -1630,6 +1651,7 @@ public sealed class Line2RearFlowEngine : IDisposable
     /// <summary>下料流程: 取料→X11检测→尾座张开→分流到动平衡/不需动平衡架</summary>
     private async Task DoUnload(SkewCtx bed, CancellationToken ct)
     {
+        string actionId = OperationalEventContextFactory.NewActionId("L2-REAR-UNLOAD");
         bool magnetOn = false;
         bool holdingWorkpiece = false;       // X11确认有版后才算工件已经在后天车上, 不能只看是否发过充磁命令
         bool placedToDestination = false;    // 退磁放到目标位 + Z升安全 + 必要通知完成后, 才允许斜床Idle并清Wp
@@ -1702,7 +1724,16 @@ public sealed class Line2RearFlowEngine : IDisposable
             //先移动xy   移动到xy指定位置
             await cr.MoveAbsoluteAsync(bx + _ox, yPick, -1, ct: ct);
             await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
-                cr, _cfg, CraneRearNo, bed.Code, $"2号线后天车-{bed.Code}下料取料前", ct,
+                cr, _cfg, CraneRearNo, bed.Code, $"2号线后天车-{bed.Code}下料取料前",
+                reporter: _exceptionReporter,
+                failureContext: OperationalEventContextFactory.FineTuneFailure(
+                    scope: "2号线", engine: "后端引擎", deviceNo: CraneRearNo.ToString(), station: bed.Code,
+                    actionStage: $"{bed.Code}下料取料前XY微调", workpiece: wp,
+                    source: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "本物理周期来源"),
+                    target: EvidenceValue<string>.Unknown("ST020/ST021分流尚未确定"),
+                    owner: "2号线后天车", targetZ: EvidenceValue<int>.Confirmed(lz + _oz, "已有斜床取料Z公式与偏移"),
+                    physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(true, "Z回原点命令已返回", bed.Code)),
+                actionId: actionId, safeZ: sz, ct: ct,
                 yCenterToPickOffsetMm: yOff);
             //下降取料    加上数据库的偏移值   lz是计算公式算的
             int zDown = lz + _oz;
@@ -1911,7 +1942,17 @@ public sealed class Line2RearFlowEngine : IDisposable
                     if (!TryCoords("ST020", out int dx, out int dy, out int dz)) throw new Exception("缺少ST020坐标");
                     Console.WriteLine($"│   XY到ST020({dx + _ox},{dy + _oy})");
                     await cr.MoveAbsoluteAsync(dx + _ox, dy + _oy, -1, ct: ct);
-                    await XAbsFineTuneHelper.VerifyAndFineTuneAsync(cr, _cfg, CraneRearNo, "ST020", "2号线后天车-ST020放料前", ct);
+                    await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                        cr, _cfg, CraneRearNo, "ST020", "2号线后天车-ST020放料前",
+                        reporter: _exceptionReporter,
+                        failureContext: OperationalEventContextFactory.FineTuneFailure(
+                            scope: "2号线", engine: "后端引擎", deviceNo: CraneRearNo.ToString(), station: "ST020",
+                            actionStage: "ST020动平衡架放料前XY微调", workpiece: wp,
+                            source: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "本物理周期来源"),
+                            target: OperationalEventContextFactory.ConfirmedLocation("ST020", "分流结果"),
+                            owner: "2号线后天车", targetZ: EvidenceValue<int>.Confirmed(Pz(dz, wp.Diameter) + _oz, "已有ST020放料Z公式与偏移"),
+                            physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, "斜床取料X11=1且分流已完成", "天车/ST020上方")),
+                        actionId: actionId, safeZ: sz, ct: ct);
                     int dz2 = Pz(dz, wp.Diameter);
                     Console.WriteLine($"│   Z下降到{dz2 + _oz}");
                     try
@@ -1947,7 +1988,17 @@ public sealed class Line2RearFlowEngine : IDisposable
                     if (!TryCoords("ST021", out int gx, out int gy, out int gz)) throw new Exception("缺少ST021坐标");
                     Console.WriteLine($"│   XY到ST021({gx + _ox},{gy + _oy})");
                     await cr.MoveAbsoluteAsync(gx + _ox, gy + _oy, -1, ct: ct);
-                    await XAbsFineTuneHelper.VerifyAndFineTuneAsync(cr, _cfg, CraneRearNo, "ST021", "2号线后天车-ST021放料前", ct);
+                    await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                        cr, _cfg, CraneRearNo, "ST021", "2号线后天车-ST021放料前",
+                        reporter: _exceptionReporter,
+                        failureContext: OperationalEventContextFactory.FineTuneFailure(
+                            scope: "2号线", engine: "后端引擎", deviceNo: CraneRearNo.ToString(), station: "ST021",
+                            actionStage: "ST021不平衡架放料前XY微调", workpiece: wp,
+                            source: OperationalEventContextFactory.ConfirmedLocation(bed.Code, "本物理周期来源"),
+                            target: OperationalEventContextFactory.ConfirmedLocation("ST021", "分流结果"),
+                            owner: "2号线后天车", targetZ: EvidenceValue<int>.Confirmed(Pz(gz, wp.Diameter) + _oz, "已有ST021放料Z公式与偏移"),
+                            physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, "斜床取料X11=1且分流已完成", "天车/ST021上方")),
+                        actionId: actionId, safeZ: sz, ct: ct);
                     int gz2 = Pz(gz, wp.Diameter);
                     Console.WriteLine($"│   Z下降到{gz2 + _oz}");
                     try

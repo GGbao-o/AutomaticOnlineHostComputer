@@ -1950,6 +1950,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
     /// <summary>前天车单工件任务: Pos3取料→打号机→中转架。锁由调度层持有。</summary>
     private async Task ProcessCraneFrontAsync(WorkpieceCache wp, CancellationToken ct = default)
     {
+        string actionId = OperationalEventContextFactory.NewActionId("L2-FRONT");
         bool magnetOn = false;
         try
         {
@@ -1993,7 +1994,17 @@ public sealed class Line2FrontFlowEngine : IDisposable
             Console.WriteLine("[Line2Front] [前天车] 去货叉Pos3前确认Z=0±5mm");
             await crane.EnsureZAtZeroAsync(5, ct);
             await crane.MoveAbsoluteAsync(f2xOff, f2yOff, -1, ct: ct);
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, CraneFront2No, "ST714", "2号线前天车-货叉Pos3取料前", ct);
+            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                crane, _cfg, CraneFront2No, "ST714", "2号线前天车-货叉Pos3取料前",
+                reporter: _exceptionReporter,
+                failureContext: OperationalEventContextFactory.FineTuneFailure(
+                    scope: "2号线", engine: "前端引擎", deviceNo: CraneFront2No.ToString(), station: "ST714",
+                    actionStage: "货叉Pos3取料前XY微调", workpiece: wp,
+                    source: OperationalEventContextFactory.ConfirmedLocation("ST714", "本物理周期来源"),
+                    target: OperationalEventContextFactory.ConfirmedLocation("ST502", "本物理周期目标"),
+                    owner: "2号线前天车", targetZ: EvidenceValue<int>.Confirmed(f2zOff, "已有取料Z公式与偏移"),
+                    physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(true, "XY已到ST714上方", "ST714")),
+                actionId: actionId, safeZ: safeZ, ct: ct);
             try
             {
                 await crane.MoveAbsoluteAsync(-1, -1, f2zOff, ct: ct);
@@ -2090,7 +2101,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
             bool zoneTsLocked = false;
             try
             {
-                await MarkingHandshakeAsync(crane, wp, safeZ, ct);
+                await MarkingHandshakeAsync(crane, wp, safeZ, actionId, ct);
 
                 Console.WriteLine("[Line2Front] [前天车] ③.5 获取ZoneTS(中转架↔ST606碰撞区), 准备进入中转架...");
                 while (!await _safety.TransferSkew1CollisionLock.WaitAsync(TimeSpan.FromSeconds(1), ct))
@@ -2101,7 +2112,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 zoneTsLocked = true;
                 Console.WriteLine("[Line2Front] [前天车] ZoneTS已获取 ✓，当前持有ZoneMT+ZoneTS，可进入中转架");
 
-                await PlaceOnTransferRackAsync(crane, wp, safeZ, ct);
+                await PlaceOnTransferRackAsync(crane, wp, safeZ, actionId, ct);
                 _safety.TransferSkew1CollisionLock.Release();
                 zoneTsLocked = false;
                 _safety.MarkerTransferCollisionLock.Release();
@@ -2176,7 +2187,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
     ///   Z降(公式)→退磁放下工件→Z升安全→写 D:\job1\A (内容=刻印+直径)
     ///   →轮询等 D:\job1\B 出现(1小时超时)→Z降→充磁取料→Z升→删B
     /// </summary>
-    private async Task MarkingHandshakeAsync(CraneService crane, WorkpieceCache wp, int safeZ, CancellationToken ct)
+    private async Task MarkingHandshakeAsync(CraneService crane, WorkpieceCache wp, int safeZ, string actionId, CancellationToken ct)
     {
         if (!TryGetStationCoords("ST502", out int mx, out int my, out int mz)) throw new InvalidOperationException("数据库未找到 ST502");
         Console.WriteLine($"[Line2Front] [打号机] ④ ST502({mx},{my},{mz})");
@@ -2186,7 +2197,17 @@ public sealed class Line2FrontFlowEngine : IDisposable
         int mxOff = mx + _craneOffsetX, myOff = my + _craneOffsetY, mzOff = markerZ + _craneOffsetZ;
         Console.WriteLine($"[Line2Front] [前天车] Z降={markerZ} +偏移({_craneOffsetX},{_craneOffsetY},{_craneOffsetZ}) 退磁放下");
         await crane.MoveAbsoluteAsync(mxOff, myOff, -1, ct: ct);
-        await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, CraneFront2No, "ST502", "2号线前天车-打号机放料前", ct);
+        await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+            crane, _cfg, CraneFront2No, "ST502", "2号线前天车-打号机放料前",
+            reporter: _exceptionReporter,
+            failureContext: OperationalEventContextFactory.FineTuneFailure(
+                scope: "2号线", engine: "前端引擎", deviceNo: CraneFront2No.ToString(), station: "ST502",
+                actionStage: "打号机放料前XY微调", workpiece: wp,
+                source: OperationalEventContextFactory.ConfirmedLocation("ST714", "本物理周期来源"),
+                target: OperationalEventContextFactory.ConfirmedLocation("ST502", "本物理周期目标"),
+                owner: "2号线前天车", targetZ: EvidenceValue<int>.Confirmed(mzOff, "已有打号机放料Z公式与偏移"),
+                physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(true, false, "ST714取料充磁已返回", "天车/路径中")),
+            actionId: actionId, safeZ: safeZ, ct: ct);
         try
         {
             await crane.MoveAbsoluteAsync(-1, -1, mzOff, ct: ct);
@@ -2258,7 +2279,17 @@ public sealed class Line2FrontFlowEngine : IDisposable
         // Z降充磁取料→X11检测→Z升→删B.txt
         int markerZPickup = markerZ + _craneOffsetZ; // 取料Z = 公式Z + 天车偏移
         Console.WriteLine($"[Line2Front] [前天车] Z降={markerZPickup} 充磁取料 → X11检测 → 删B.txt");
-        await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, CraneFront2No, "ST502", "2号线前天车-打号机取回前", ct);
+        await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+            crane, _cfg, CraneFront2No, "ST502", "2号线前天车-打号机取回前",
+            reporter: _exceptionReporter,
+            failureContext: OperationalEventContextFactory.FineTuneFailure(
+                scope: "2号线", engine: "前端引擎", deviceNo: CraneFront2No.ToString(), station: "ST502",
+                actionStage: "打号机取回前XY微调", workpiece: wp,
+                source: OperationalEventContextFactory.ConfirmedLocation("ST502", "本物理周期来源"),
+                target: EvidenceValue<string>.Unknown("中转架位置尚未选择"),
+                owner: "2号线前天车", targetZ: EvidenceValue<int>.Confirmed(markerZPickup, "已有打号机取料Z公式与偏移"),
+                physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(false, "打号机B文件已生成", "ST502")),
+            actionId: actionId, safeZ: safeZ, ct: ct);
         try
         {
             await crane.MoveAbsoluteAsync(-1, -1, markerZPickup, ct: ct);
@@ -2309,7 +2340,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
     ///   → XY到中转架 → Z降(公式) → 退磁放下 → Z升安全
     ///   注意：二次判断只看物理有板信号；软件缓存残留不能阻止放料，缓存异常由放料后的OnRackPlaced生命线处理。
     /// </summary>
-    private async Task PlaceOnTransferRackAsync(CraneService crane, WorkpieceCache wp, int safeZ, CancellationToken ct, bool transferRackLockAlreadyHeld = false)
+    private async Task PlaceOnTransferRackAsync(CraneService crane, WorkpieceCache wp, int safeZ, string actionId, CancellationToken ct, bool transferRackLockAlreadyHeld = false)
     {
         bool placedOnRack = false;
         bool rackCacheNotified = false;
@@ -2338,7 +2369,17 @@ public sealed class Line2FrontFlowEngine : IDisposable
             // ── XY先到位 → Z降(公式+偏移) → 退磁 → Z升 ──
             int rxOff = rx + _craneOffsetX, ryOff = ry + _craneOffsetY;
             await crane.MoveAbsoluteAsync(rxOff, ryOff, -1, ct: ct); // XY到中转架上方
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, CraneFront2No, rackStation, $"2号线前天车-{rackStation}放料前", ct);
+            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                crane, _cfg, CraneFront2No, rackStation, $"2号线前天车-{rackStation}放料前",
+                reporter: _exceptionReporter,
+                failureContext: OperationalEventContextFactory.FineTuneFailure(
+                    scope: "2号线", engine: "前端引擎", deviceNo: CraneFront2No.ToString(), station: rackStation,
+                    actionStage: $"{rackStation}中转架放料前XY微调", workpiece: wp,
+                    source: OperationalEventContextFactory.ConfirmedLocation("ST502", "本物理周期来源"),
+                    target: OperationalEventContextFactory.ConfirmedLocation(rackStation, "已选择的空中转架"),
+                    owner: "2号线前天车", targetZ: EvidenceValue<int>.Confirmed(ComputePickupZ(rz, wp.Diameter) + _craneOffsetZ, "已有中转架放料Z公式与偏移"),
+                    physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(true, false, "打号机取回充磁已返回", "天车/路径中")),
+                actionId: actionId, safeZ: safeZ, ct: ct);
             int rackZ = ComputePickupZ(rz, wp.Diameter) + _craneOffsetZ; // Z公式 + 天车Z偏移
             Console.WriteLine($"[Line2Front] [前天车] Z降={rackZ}(公式+偏移{_craneOffsetZ}) 退磁放下");
             try

@@ -1253,6 +1253,7 @@ public sealed class GrindingFlowEngine : IDisposable
     private async Task ProcessWorkpieceAsync(GrinderContext grinder, WorkpieceCache wp, int actionVersion,
         CancellationTokenSource actionCts, TaskCompletionSource<bool> completion)
     {
+        string actionId = OperationalEventContextFactory.NewActionId("GRIND-LOAD");
         using var _ = actionCts;
         var ct = actionCts.Token;
         grinder.PendingWorkpiece = wp; // 标记在途, FindReadyGrinder会跳过此研磨机
@@ -1375,7 +1376,17 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine($"[GrindingEngine] [{craneName}] 去ST709取料前确认Z=0±5mm");
             await crane.EnsureZAtZeroAsync(5, ct);
             await crane.MoveAbsoluteAsync(ApplyOffsetX(rackX), ApplyOffsetY(rackY), -1, ct: ct);
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, _cfg.Grinding.CraneNo, "ST709", "研磨天车-ST709上料架取料前", ct);
+            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                crane, _cfg, _cfg.Grinding.CraneNo, "ST709", "研磨天车-ST709上料架取料前",
+                reporter: _exceptionReporter,
+                failureContext: OperationalEventContextFactory.FineTuneFailure(
+                    scope: "研磨", engine: "研磨引擎", deviceNo: _cfg.Grinding.CraneNo.ToString(), station: "ST709",
+                    actionStage: "ST709上料架取料前XY微调", workpiece: wp,
+                    source: OperationalEventContextFactory.ConfirmedLocation("ST709", "本物理周期来源"),
+                    target: OperationalEventContextFactory.ConfirmedLocation(grinder.StationCode, "已选研磨机目标"),
+                    owner: "研磨天车", targetZ: EvidenceValue<int>.Confirmed(ApplyOffsetZ(pickupZ), "已有ST709取料Z公式与偏移"),
+                    physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(true, "Z零位检查已返回", "ST709")),
+                actionId: actionId, safeZ: _cfg.Grinding.SafeZHeight, ct: ct);
             await crane.MoveAbsoluteAsync(-1, -1, ApplyOffsetZ(pickupZ), ct: ct);
 
             // ── ⑤ 充磁取料 ───────────────────────────────────────
@@ -1459,7 +1470,17 @@ public sealed class GrindingFlowEngine : IDisposable
             // ── ⑨ Z 下降到研磨机装料位置（加 Z 偏移）─────────────
             int loadZ = ComputeGrinderLoadZ(gz, wp.Diameter);
             Console.WriteLine($"[GrindingEngine] [{craneName}] ⑨ Z下降到装料位置 {loadZ}+{_craneOffsetZ} (研磨机Z={gz} - d/2={wp.Diameter / 2})");
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, _cfg.Grinding.CraneNo, grinder.StationCode, $"研磨天车-{grinder.StationCode}上料放入前", ct);
+            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                crane, _cfg, _cfg.Grinding.CraneNo, grinder.StationCode, $"研磨天车-{grinder.StationCode}上料放入前",
+                reporter: _exceptionReporter,
+                failureContext: OperationalEventContextFactory.FineTuneFailure(
+                    scope: "研磨", engine: "研磨引擎", deviceNo: _cfg.Grinding.CraneNo.ToString(), station: grinder.StationCode,
+                    actionStage: $"{grinder.StationCode}上料放入前XY微调", workpiece: wp,
+                    source: OperationalEventContextFactory.ConfirmedLocation("ST709", "本物理周期来源"),
+                    target: OperationalEventContextFactory.ConfirmedLocation(grinder.StationCode, "已选研磨机目标"),
+                    owner: "研磨天车", targetZ: EvidenceValue<int>.Confirmed(ApplyOffsetZ(loadZ), "已有研磨机装料Z公式与偏移"),
+                    physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, "ST709取料X11=1且研磨机已请求上料", "天车/研磨机上方")),
+                actionId: actionId, safeZ: _cfg.Grinding.SafeZHeight, ct: ct);
             await crane.MoveAbsoluteAsync(-1, -1, ApplyOffsetZ(loadZ), ct: ct);
 
             // ── ⑩ 上料到达锁紧位置 ───────────────────────────────
@@ -1602,6 +1623,7 @@ public sealed class GrindingFlowEngine : IDisposable
     private async Task UnloadFromGrinderAsync(GrinderContext grinder, int actionVersion,
         CancellationTokenSource actionCts, TaskCompletionSource<bool> completion)
     {
+        string actionId = OperationalEventContextFactory.NewActionId("GRIND-UNLOAD");
         using var _ = actionCts;
         var ct = actionCts.Token;
         var wp = grinder.PendingWorkpiece;
@@ -1661,7 +1683,17 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine($"[GrindingEngine] [{craneName}] 去{grinder.StationCode}下料取板前确认Z=0±5mm");
             await crane.EnsureZAtZeroAsync(5, ct);
             await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(ApplyOffsetX(gx), ApplyOffsetY(gy), -1, ct: c), "XY去研磨机取料位", ct);
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, _cfg.Grinding.CraneNo, grinder.StationCode, $"研磨天车-{grinder.StationCode}下料取料前", ct);
+            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                crane, _cfg, _cfg.Grinding.CraneNo, grinder.StationCode, $"研磨天车-{grinder.StationCode}下料取料前",
+                reporter: _exceptionReporter,
+                failureContext: OperationalEventContextFactory.FineTuneFailure(
+                    scope: "研磨", engine: "研磨引擎", deviceNo: _cfg.Grinding.CraneNo.ToString(), station: grinder.StationCode,
+                    actionStage: $"{grinder.StationCode}下料取料前XY微调", workpiece: workpiece,
+                    source: OperationalEventContextFactory.ConfirmedLocation(grinder.StationCode, "本物理周期来源"),
+                    target: OperationalEventContextFactory.ConfirmedLocation("ST710", "本物理周期目标"),
+                    owner: "研磨天车", targetZ: EvidenceValue<int>.Confirmed(ApplyOffsetZ(pickupZ), "已有研磨机取料Z公式与偏移"),
+                    physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(true, "Z零位检查且研磨机门开已返回", grinder.StationCode)),
+                actionId: actionId, safeZ: _cfg.Grinding.SafeZHeight, ct: ct);
             await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(-1, -1, ApplyOffsetZ(pickupZ), ct: c), "Z降研磨机取料位", ct);
 
             // ── ③ 充磁取工件 ─────────────────────────────────────
@@ -1728,7 +1760,17 @@ public sealed class GrindingFlowEngine : IDisposable
                 throw new InvalidOperationException("数据库未找到 ST710 下料架坐标");
             Console.WriteLine($"[GrindingEngine] [{craneName}] ⑦ XY移到下料架 ST710({unloadX}+{_craneOffsetX},{unloadY}+{_craneOffsetY}) Z基准={unloadRackZ}");
             await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), -1, ct: c), "XY去下料架", ct);
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(crane, _cfg, _cfg.Grinding.CraneNo, "ST710", "研磨天车-ST710下料架放料前", ct);
+            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                crane, _cfg, _cfg.Grinding.CraneNo, "ST710", "研磨天车-ST710下料架放料前",
+                reporter: _exceptionReporter,
+                failureContext: OperationalEventContextFactory.FineTuneFailure(
+                    scope: "研磨", engine: "研磨引擎", deviceNo: _cfg.Grinding.CraneNo.ToString(), station: "ST710",
+                    actionStage: "ST710下料架放料前XY微调", workpiece: workpiece,
+                    source: OperationalEventContextFactory.ConfirmedLocation(grinder.StationCode, "本物理周期来源"),
+                    target: OperationalEventContextFactory.ConfirmedLocation("ST710", "已确认下料架目标"),
+                    owner: "研磨天车", targetZ: EvidenceValue<int>.Confirmed(ApplyOffsetZ(ComputeUnloadZ(unloadRackZ, workpiece.Diameter)), "已有ST710放料Z公式与偏移"),
+                    physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, "研磨机取料X11=1且Z已升安全", "天车/ST710上方")),
+                actionId: actionId, safeZ: _cfg.Grinding.SafeZHeight, ct: ct);
 
             // ── ⑧ Z 下降到放料位置（加 Z 偏移）──────────────
             int unloadZ = ComputeUnloadZ(unloadRackZ, workpiece.Diameter);

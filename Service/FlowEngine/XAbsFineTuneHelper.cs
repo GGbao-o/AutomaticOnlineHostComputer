@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Service;
 
@@ -58,98 +59,307 @@ internal static class XAbsFineTuneHelper
         public bool NeedsCorrection => Math.Abs(Delta) > Axis.Tolerance;
     }
 
+    private sealed class FineTuneEvidenceAccumulator
+    {
+        private CraneStatus? _latest;
+        private IReadOnlyList<ActiveAxisFineTune> _activeAxes = Array.Empty<ActiveAxisFineTune>();
+        private string _failureStage = "初始化";
+        private int _stableSampleCount;
+        private int _stageReadCount;
+        private int _totalReadCount;
+        private int _fineTuneAttemptCount;
+        private int _feedbackRereadCount;
+        private int? _lastSentX;
+        private int? _lastSentY;
+        private DeviceCommandEvidence _xCommand = NotSent("X轴尚未要求微调");
+        private DeviceCommandEvidence _yCommand = NotSent("Y轴尚未要求微调");
+        private EvidenceValue<string> _lastCheckpoint;
+
+        public FineTuneEvidenceAccumulator(OperationalEventContext context)
+        {
+            _lastCheckpoint = context.Evidence.BusinessState.LastSuccessfulCheckpoint;
+        }
+
+        public void SetActiveAxes(IReadOnlyList<ActiveAxisFineTune> axes) => _activeAxes = axes;
+
+        public void BeginStage(string stage)
+        {
+            _failureStage = stage;
+            _stageReadCount = 0;
+            _stableSampleCount = 0;
+        }
+
+        public void BeginReadAttempt()
+        {
+            _stageReadCount++;
+            _totalReadCount++;
+        }
+
+        public void Capture(CraneStatus? status, int stableSampleCount)
+        {
+            if (status != null)
+                _latest = status;
+            _stableSampleCount = stableSampleCount;
+        }
+
+        public void FineTuneAttempt(int attempt)
+        {
+            _fineTuneAttemptCount = attempt;
+            _failureStage = $"第{attempt}次微调计算";
+        }
+
+        public void CommandPrepared(int targetX, int targetY, IReadOnlyList<AxisCorrection> movingAxes)
+        {
+            _lastSentX = targetX == -1 ? null : targetX;
+            _lastSentY = targetY == -1 ? null : targetY;
+            bool movingX = movingAxes.Any(item => item.Axis.Name == "X");
+            bool movingY = movingAxes.Any(item => item.Axis.Name == "Y");
+            _xCommand = movingX ? SentUnconfirmed("XY微调命令即将发送，返回结果尚未取得") : NotSent("X轴无需修正");
+            _yCommand = movingY ? SentUnconfirmed("XY微调命令即将发送，返回结果尚未取得") : NotSent("Y轴无需修正");
+            _failureStage = $"第{_fineTuneAttemptCount}次XY微调命令";
+        }
+
+        public void CommandAcknowledged(IReadOnlyList<AxisCorrection> movingAxes)
+        {
+            if (movingAxes.Any(item => item.Axis.Name == "X"))
+                _xCommand = Acknowledged("MoveAbsoluteAsync成功返回");
+            if (movingAxes.Any(item => item.Axis.Name == "Y"))
+                _yCommand = Acknowledged("MoveAbsoluteAsync成功返回");
+            Checkpoint($"第{_fineTuneAttemptCount}次XY微调命令成功返回");
+        }
+
+        public void FeedbackReread(int retry)
+        {
+            _feedbackRereadCount++;
+            _failureStage = $"第{_fineTuneAttemptCount}次微调反馈重读{retry}";
+        }
+
+        public void Checkpoint(string checkpoint) =>
+            _lastCheckpoint = EvidenceValue<string>.Confirmed(checkpoint, "Helper中既有调用成功返回");
+
+        public PositionEvidence ToPositionEvidence(PositionEvidence original)
+        {
+            ActiveAxisFineTune? x = _activeAxes.FirstOrDefault(item => item.Name == "X");
+            ActiveAxisFineTune? y = _activeAxes.FirstOrDefault(item => item.Name == "Y");
+            AxisCorrection? xCorrection = _latest != null && x != null ? new AxisCorrection(x, x.TargetAbs - x.AbsoluteEncoder(_latest)) : null;
+            AxisCorrection? yCorrection = _latest != null && y != null ? new AxisCorrection(y, y.TargetAbs - y.AbsoluteEncoder(_latest)) : null;
+            string unavailable = "状态读取尚未成功";
+
+            return original with
+            {
+                DisplayX = Snapshot(_latest?.XPos, unavailable),
+                DisplayY = Snapshot(_latest?.YPos, unavailable),
+                DisplayZ = Snapshot(_latest?.ZPos, unavailable),
+                AbsX = Snapshot(_latest?.XEncoderAbs, unavailable),
+                AbsY = Snapshot(_latest?.YEncoderAbs, unavailable),
+                TargetX = Optional(_lastSentX, "按已有显示坐标与Abs偏差计算的X目标", "尚未计算X显示目标"),
+                TargetY = Optional(_lastSentY, "按已有显示坐标与Abs偏差计算的Y目标", "尚未计算Y显示目标"),
+                TargetZ = original.TargetZ,
+                TargetAbsX = AxisValue(x, item => item.TargetAbs, "X轴未启用或没有目标配置"),
+                TargetAbsY = AxisValue(y, item => item.TargetAbs, "Y轴未启用或没有目标配置"),
+                LastSentDisplayTargetX = Optional(_lastSentX, "最后一次MoveAbsoluteAsync的X参数", "本次未发送X微调目标"),
+                LastSentDisplayTargetY = Optional(_lastSentY, "最后一次MoveAbsoluteAsync的Y参数", "本次未发送Y微调目标"),
+                XFineTuneCommand = _xCommand,
+                YFineTuneCommand = _yCommand,
+                FailureStage = EvidenceValue<string>.Confirmed(_failureStage, "异常捕获时Helper阶段"),
+                DeltaX = Correction(xCorrection, "X偏差尚不可计算"),
+                DeltaY = Correction(yCorrection, "Y偏差尚不可计算"),
+                ToleranceX = AxisValue(x, item => item.Tolerance, "X轴未启用或没有目标配置"),
+                ToleranceY = AxisValue(y, item => item.Tolerance, "Y轴未启用或没有目标配置"),
+                MaximumCorrectionX = AxisValue(x, item => item.MaxAdjust, "X轴未启用或没有目标配置"),
+                MaximumCorrectionY = AxisValue(y, item => item.MaxAdjust, "Y轴未启用或没有目标配置"),
+                StableSampleCount = EvidenceValue<int>.Confirmed(_stableSampleCount, "当前稳定读取窗口已有样本数"),
+                StageReadCount = EvidenceValue<int>.Confirmed(_stageReadCount, "当前读取阶段尝试次数"),
+                TotalReadCount = EvidenceValue<int>.Confirmed(_totalReadCount, "本次微调累计读取尝试次数"),
+                FineTuneAttemptCount = EvidenceValue<int>.Confirmed(_fineTuneAttemptCount, "已开始的微调次数"),
+                FeedbackRereadCount = EvidenceValue<int>.Confirmed(_feedbackRereadCount, "反馈重读累计次数"),
+                CapturedAtUtc = EvidenceValue<DateTime>.Inferred(DateTime.UtcNow, "监控异常捕获时间；非PLC采样时钟")
+            };
+        }
+
+        public BusinessStateEvidence ToBusinessState(BusinessStateEvidence original) => new(
+            original.Availability,
+            original.Reason,
+            _lastCheckpoint,
+            original.StateBefore,
+            original.StateAfter,
+            original.CacheBefore,
+            original.CacheAfter,
+            original.OwnerBefore,
+            original.OwnerAfter,
+            original.HoldingWorkpiece,
+            original.Placed,
+            original.CacheNotified,
+            original.PhysicalCommitments);
+
+        public EvidenceValue<bool> ZMayStillBeLow(int safeZ, int toleranceMm)
+        {
+            if (_latest == null)
+                return EvidenceValue<bool>.Unknown("未取得天车Z显示坐标，无法判断是否仍在低位");
+            bool awayFromSafe = Math.Abs(_latest.ZPos - safeZ) > toleranceMm;
+            return awayFromSafe
+                ? EvidenceValue<bool>.Inferred(true, $"最新显示Z={_latest.ZPos}，偏离安全目标{safeZ}±{toleranceMm}")
+                : EvidenceValue<bool>.Confirmed(false, $"最新显示Z={_latest.ZPos}位于安全目标{safeZ}±{toleranceMm}");
+        }
+
+        private static EvidenceValue<int> Snapshot(int? value, string reason) =>
+            value.HasValue ? EvidenceValue<int>.Confirmed(value.Value, "Helper已有CraneStatus快照") : EvidenceValue<int>.Unavailable(reason);
+
+        private static EvidenceValue<int> Optional(int? value, string reason, string missing) =>
+            value.HasValue ? EvidenceValue<int>.Confirmed(value.Value, reason) : EvidenceValue<int>.Unavailable(missing);
+
+        private static EvidenceValue<int> AxisValue(ActiveAxisFineTune? axis, Func<ActiveAxisFineTune, int> selector, string missing) =>
+            axis != null ? EvidenceValue<int>.Confirmed(selector(axis), "微调配置和调用参数") : EvidenceValue<int>.NotApplicable(missing);
+
+        private static EvidenceValue<int> Correction(AxisCorrection? correction, string missing) =>
+            correction != null ? EvidenceValue<int>.Confirmed(correction.Delta, "目标Abs减当前Abs") : EvidenceValue<int>.Unavailable(missing);
+
+        private static DeviceCommandEvidence NotSent(string reason) =>
+            new(DeviceCommandState.NotSent, EvidenceAvailability.Confirmed, reason);
+
+        private static DeviceCommandEvidence SentUnconfirmed(string reason) =>
+            new(DeviceCommandState.SentUnconfirmed, EvidenceAvailability.Unknown, reason);
+
+        private static DeviceCommandEvidence Acknowledged(string reason) =>
+            new(DeviceCommandState.Acknowledged, EvidenceAvailability.Confirmed, reason);
+    }
+
     public static async Task VerifyAndFineTuneAsync(
         CraneService crane,
         MotionConfig cfg,
         int craneNo,
         string stationCode,
         string context,
+        IOperationalEventReporter reporter,
+        OperationalEventContext failureContext,
+        string actionId,
+        int safeZ,
         CancellationToken ct,
         int yCenterToPickOffsetMm = 0)
     {
-        if (yCenterToPickOffsetMm < 0)
-            throw new ArgumentOutOfRangeException(nameof(yCenterToPickOffsetMm), "斜床中心到取料位的Y偏移量不能为负数");
-
-        var axes = new[]
+        var evidence = new FineTuneEvidenceAccumulator(failureContext);
+        try
         {
-            new AxisFineTune("X", cfg.XAbsFineTune, status => status.XPos, status => status.XEncoderAbs, +1),
-            new AxisFineTune("Y", cfg.YAbsFineTune, status => status.YPos, status => status.YEncoderAbs, -1)
-        };
-        List<ActiveAxisFineTune> activeAxes = ResolveActiveAxes(
-            axes, craneNo, stationCode, context, yCenterToPickOffsetMm);
-        if (activeAxes.Count == 0)
-            return;
+            if (yCenterToPickOffsetMm < 0)
+                throw new ArgumentOutOfRangeException(nameof(yCenterToPickOffsetMm), "斜床中心到取料位的Y偏移量不能为负数");
 
-        await DelayWithLogAsync("[XYAbsFineTune]", stationCode, context, "微调前沉降", BeforeFineTuneSettleDelayMs, ct);
-        CraneStatus status = await ReadStableStatusAsync(crane, stationCode, context, "微调前", activeAxes, ct);
-
-        for (int fineTuneAttempt = 1; fineTuneAttempt <= FineTuneMaxAttempts; fineTuneAttempt++)
-        {
-            List<AxisCorrection> corrections = BuildCorrections(activeAxes, status);
-            if (corrections.All(correction => !correction.NeedsCorrection))
+            var axes = new[]
             {
-                LogQualifiedAxes(corrections, status, stationCode, context);
+                new AxisFineTune("X", cfg.XAbsFineTune, status => status.XPos, status => status.XEncoderAbs, +1),
+                new AxisFineTune("Y", cfg.YAbsFineTune, status => status.YPos, status => status.YEncoderAbs, -1)
+            };
+            List<ActiveAxisFineTune> activeAxes = ResolveActiveAxes(
+                axes, craneNo, stationCode, context, yCenterToPickOffsetMm);
+            evidence.SetActiveAxes(activeAxes);
+            if (activeAxes.Count == 0)
                 return;
-            }
 
-            foreach (AxisCorrection correction in corrections.Where(correction => correction.NeedsCorrection))
+            evidence.BeginStage("微调前沉降");
+            await DelayWithLogAsync("[XYAbsFineTune]", stationCode, context, "微调前沉降", BeforeFineTuneSettleDelayMs, ct);
+            evidence.Checkpoint("微调前沉降完成");
+            CraneStatus status = await ReadStableStatusAsync(crane, stationCode, context, "微调前", activeAxes, evidence, ct);
+            evidence.Checkpoint("微调前稳定状态读取完成");
+
+            for (int fineTuneAttempt = 1; fineTuneAttempt <= FineTuneMaxAttempts; fineTuneAttempt++)
             {
-                if (Math.Abs(correction.Delta) > correction.Axis.MaxAdjust)
+                evidence.FineTuneAttempt(fineTuneAttempt);
+                List<AxisCorrection> corrections = BuildCorrections(activeAxes, status);
+                if (corrections.All(correction => !correction.NeedsCorrection))
                 {
-                    throw new InvalidOperationException(
-                        $"[{context}] {stationCode} {correction.Axis.Name}绝对编码器偏差过大: " +
+                    LogQualifiedAxes(corrections, status, stationCode, context);
+                    return;
+                }
+
+                foreach (AxisCorrection correction in corrections.Where(correction => correction.NeedsCorrection))
+                {
+                    if (Math.Abs(correction.Delta) > correction.Axis.MaxAdjust)
+                    {
+                        throw new InvalidOperationException(
+                            $"[{context}] {stationCode} {correction.Axis.Name}绝对编码器偏差过大: " +
+                            $"显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
+                            $"当前Abs{correction.Axis.Name}={correction.Axis.AbsoluteEncoder(status)}, " +
+                            $"{correction.Axis.TargetDescription}, Δ={correction.Delta}mm > " +
+                            $"最大微调{correction.Axis.MaxAdjust}mm, 禁止Z下降");
+                    }
+                }
+
+                CraneStatus beforeMoveStatus = status;
+                List<AxisCorrection> movingAxes = corrections.Where(correction => correction.NeedsCorrection).ToList();
+                int targetX = -1;
+                int targetY = -1;
+                foreach (AxisCorrection correction in movingAxes)
+                {
+                    int deltaDisplay = correction.Delta * correction.Axis.AbsolutePerDisplayDirection;
+                    int adjustDisplay = correction.Axis.DisplayPosition(status) + deltaDisplay;
+                    Console.WriteLine(
+                        $"[{correction.Axis.Name}AbsFineTune] [{context}] {stationCode} 需要同步微调({fineTuneAttempt}/{FineTuneMaxAttempts}): " +
                         $"显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
                         $"当前Abs{correction.Axis.Name}={correction.Axis.AbsoluteEncoder(status)}, " +
-                        $"{correction.Axis.TargetDescription}, Δ={correction.Delta}mm > " +
-                        $"最大微调{correction.Axis.MaxAdjust}mm, 禁止Z下降");
+                        $"{correction.Axis.TargetDescription}, ΔAbs={correction.Delta}mm, " +
+                        $"Δ显示={deltaDisplay}mm → 微调显示{correction.Axis.Name}={adjustDisplay}");
+
+                    if (correction.Axis.Name == "X") targetX = adjustDisplay;
+                    else targetY = adjustDisplay;
                 }
+
+                int moveTolerance = Math.Max(1, movingAxes.Max(correction => correction.Axis.Tolerance));
+                Console.WriteLine($"[XYAbsFineTune] [{context}] {stationCode} 发起一次XY微调: X={(targetX == -1 ? "保持" : targetX)}, Y={(targetY == -1 ? "保持" : targetY)}");
+                evidence.CommandPrepared(targetX, targetY, movingAxes);
+                await crane.MoveAbsoluteAsync(targetX, targetY, -1, tolerance: moveTolerance, timeoutMs: cfg.AbsMove.TimeoutMs, ct: ct);
+                evidence.CommandAcknowledged(movingAxes);
+
+                int maxDelta = movingAxes.Max(correction => Math.Abs(correction.Delta));
+                int settleDelayMs = ComputeAfterMoveSettleDelayMs(maxDelta);
+                evidence.BeginStage($"微调后{fineTuneAttempt}共同沉降");
+                await DelayWithLogAsync("[XYAbsFineTune]", stationCode, context, $"微调后{fineTuneAttempt}共同沉降", settleDelayMs, ct);
+                evidence.Checkpoint($"微调后{fineTuneAttempt}共同沉降完成");
+                status = await ReadStableStatusAsync(crane, stationCode, context, $"微调后{fineTuneAttempt}", activeAxes, evidence, ct);
+                evidence.Checkpoint($"微调后{fineTuneAttempt}稳定状态读取完成");
+
+                foreach (AxisCorrection correction in movingAxes)
+                {
+                    status = await EnsureAbsFeedbackFollowedAsync(
+                        crane, stationCode, context, fineTuneAttempt, correction.Axis, beforeMoveStatus, status, activeAxes, evidence, ct);
+                }
+
+                LogCurrentCorrections(BuildCorrections(activeAxes, status), stationCode, context, fineTuneAttempt);
             }
 
-            CraneStatus beforeMoveStatus = status;
-            List<AxisCorrection> movingAxes = corrections.Where(correction => correction.NeedsCorrection).ToList();
-            int targetX = -1;
-            int targetY = -1;
-            foreach (AxisCorrection correction in movingAxes)
-            {
-                int deltaDisplay = correction.Delta * correction.Axis.AbsolutePerDisplayDirection;
-                int adjustDisplay = correction.Axis.DisplayPosition(status) + deltaDisplay;
-                Console.WriteLine(
-                    $"[{correction.Axis.Name}AbsFineTune] [{context}] {stationCode} 需要同步微调({fineTuneAttempt}/{FineTuneMaxAttempts}): " +
-                    $"显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
+            List<AxisCorrection> finalCorrections = BuildCorrections(activeAxes, status);
+            string remaining = string.Join("；", finalCorrections
+                .Where(correction => correction.NeedsCorrection)
+                .Select(correction =>
+                    $"{correction.Axis.Name}: 显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
                     $"当前Abs{correction.Axis.Name}={correction.Axis.AbsoluteEncoder(status)}, " +
-                    $"{correction.Axis.TargetDescription}, ΔAbs={correction.Delta}mm, " +
-                    $"Δ显示={deltaDisplay}mm → 微调显示{correction.Axis.Name}={adjustDisplay}");
-
-                if (correction.Axis.Name == "X") targetX = adjustDisplay;
-                else targetY = adjustDisplay;
-            }
-
-            int moveTolerance = Math.Max(1, movingAxes.Max(correction => correction.Axis.Tolerance));
-            Console.WriteLine($"[XYAbsFineTune] [{context}] {stationCode} 发起一次XY微调: X={(targetX == -1 ? "保持" : targetX)}, Y={(targetY == -1 ? "保持" : targetY)}");
-            await crane.MoveAbsoluteAsync(targetX, targetY, -1, tolerance: moveTolerance, timeoutMs: cfg.AbsMove.TimeoutMs, ct: ct);
-
-            int maxDelta = movingAxes.Max(correction => Math.Abs(correction.Delta));
-            int settleDelayMs = ComputeAfterMoveSettleDelayMs(maxDelta);
-            await DelayWithLogAsync("[XYAbsFineTune]", stationCode, context, $"微调后{fineTuneAttempt}共同沉降", settleDelayMs, ct);
-            status = await ReadStableStatusAsync(crane, stationCode, context, $"微调后{fineTuneAttempt}", activeAxes, ct);
-
-            foreach (AxisCorrection correction in movingAxes)
-            {
-                status = await EnsureAbsFeedbackFollowedAsync(
-                    crane, stationCode, context, fineTuneAttempt, correction.Axis, beforeMoveStatus, status, activeAxes, ct);
-            }
-
-            LogCurrentCorrections(BuildCorrections(activeAxes, status), stationCode, context, fineTuneAttempt);
+                    $"{correction.Axis.TargetDescription}, Δ={correction.Delta}mm, 容差={correction.Axis.Tolerance}mm"));
+            throw new InvalidOperationException($"[{context}] {stationCode} XY绝对编码器两次微调后仍超差: {remaining}, 禁止Z下降");
         }
-
-        List<AxisCorrection> finalCorrections = BuildCorrections(activeAxes, status);
-        string remaining = string.Join("；", finalCorrections
-            .Where(correction => correction.NeedsCorrection)
-            .Select(correction =>
-                $"{correction.Axis.Name}: 显示{correction.Axis.Name}={correction.Axis.DisplayPosition(status)}, " +
-                $"当前Abs{correction.Axis.Name}={correction.Axis.AbsoluteEncoder(status)}, " +
-                $"{correction.Axis.TargetDescription}, Δ={correction.Delta}mm, 容差={correction.Axis.Tolerance}mm"));
-        throw new InvalidOperationException($"[{context}] {stationCode} XY绝对编码器两次微调后仍超差: {remaining}, 禁止Z下降");
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            try
+            {
+                OperationalEvidence original = failureContext.Evidence;
+                reporter.Report(failureContext with
+                {
+                    EventCode = "CRANE_XY_FINE_TUNE_FAILED",
+                    ActionId = actionId,
+                    CorrelationKey = $"{actionId}:xy-fine-tune:{stationCode}",
+                    CapturedException = ex,
+                    DetailMessage = $"{context}；失败阶段={evidence.ToPositionEvidence(original.Position).FailureStage.Value}；{ex.Message}",
+                    Evidence = original with
+                    {
+                        Position = evidence.ToPositionEvidence(original.Position),
+                        MotionAndMagnet = original.MotionAndMagnet with
+                        {
+                            ZMayStillBeLow = evidence.ZMayStillBeLow(safeZ, 5)
+                        },
+                        BusinessState = evidence.ToBusinessState(original.BusinessState)
+                    }
+                });
+            }
+            catch { }
+            throw;
+        }
     }
 
     private static List<ActiveAxisFineTune> ResolveActiveAxes(
@@ -226,20 +436,25 @@ internal static class XAbsFineTuneHelper
         string context,
         string phase,
         IReadOnlyList<ActiveAxisFineTune> activeAxes,
+        FineTuneEvidenceAccumulator evidence,
         CancellationToken ct)
     {
         CraneStatus? latest = null;
         var window = new List<CraneStatus>(StableReadRequiredCount);
+        evidence.BeginStage(phase);
 
         for (int attempt = 1; attempt <= StableReadMaxAttempts; attempt++)
         {
+            evidence.BeginReadAttempt();
             latest = await crane.ReadStatusAsync(ct);
+            evidence.Capture(latest, window.Count);
             if (latest == null)
                 throw new InvalidOperationException($"[{context}] {stationCode} XY绝对编码器{phase}读取状态失败, 禁止Z下降");
 
             window.Add(latest);
             if (window.Count > StableReadRequiredCount)
                 window.RemoveAt(0);
+            evidence.Capture(latest, window.Count);
 
             Console.WriteLine($"[XYAbsFineTune] [{context}] {stationCode} {phase}状态采样({attempt}/{StableReadMaxAttempts}): {FormatAxisValues(latest, activeAxes)}");
 
@@ -262,6 +477,7 @@ internal static class XAbsFineTuneHelper
                 if (unstableRanges.Count == 0)
                 {
                     Console.WriteLine($"[XYAbsFineTune] [{context}] {stationCode} {phase}状态稳定({StableReadRequiredCount}次窗口): {FormatAxisValues(latest, activeAxes)}");
+                    evidence.Checkpoint($"{phase}状态稳定({StableReadRequiredCount}次窗口)");
                     return latest;
                 }
 
@@ -283,19 +499,24 @@ internal static class XAbsFineTuneHelper
         CraneStatus beforeMove,
         CraneStatus afterMove,
         IReadOnlyList<ActiveAxisFineTune> activeAxes,
+        FineTuneEvidenceAccumulator evidence,
         CancellationToken ct)
     {
         for (int retry = 0; retry <= AbsFeedbackRefreshMaxRetries; retry++)
         {
             if (IsAbsFeedbackFollowed(beforeMove, afterMove, axis, out string reason))
+            {
+                evidence.Checkpoint($"第{fineTuneAttempt}次{axis.Name}绝对编码器反馈已跟随");
                 return afterMove;
+            }
 
             if (retry >= AbsFeedbackRefreshMaxRetries)
                 throw new InvalidOperationException($"[{context}] {stationCode} {axis.Name}绝对编码器微调后反馈未跟随显示坐标: {reason}, 禁止继续微调/Z下降");
 
             Console.WriteLine($"[{axis.Name}AbsFineTune] [{context}] {stationCode} 微调后{fineTuneAttempt}反馈疑似未刷新({reason}), 再等{AbsFeedbackRefreshRetryDelayMs}ms后共同重读({retry + 1}/{AbsFeedbackRefreshMaxRetries})");
             await Task.Delay(AbsFeedbackRefreshRetryDelayMs, ct);
-            afterMove = await ReadStableStatusAsync(crane, stationCode, context, $"微调后{fineTuneAttempt}反馈重读{retry + 1}", activeAxes, ct);
+            evidence.FeedbackReread(retry + 1);
+            afterMove = await ReadStableStatusAsync(crane, stationCode, context, $"微调后{fineTuneAttempt}反馈重读{retry + 1}", activeAxes, evidence, ct);
         }
 
         return afterMove;
