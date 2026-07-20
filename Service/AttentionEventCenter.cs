@@ -109,9 +109,9 @@ public sealed class AttentionEventCenter
         try
         {
             return _store.Snapshot().Events
-                .Select(TryMapBack)
-                .Where(item => item is not null)
-                .Cast<AttentionEvent>()
+                .Where(IsLegacyEvent)
+                .Take(Capacity)
+                .Select(MapBack)
                 .ToArray();
         }
         catch
@@ -140,26 +140,29 @@ public sealed class AttentionEventCenter
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "未知Attention事件类别")
     };
 
-    private static AttentionEvent? TryMapBack(OperationalEvent item)
+    private static bool IsLegacyEvent(OperationalEvent item) => item.EventCode is
+        "LEGACY_SAFETY_ALARM" or
+        "LEGACY_WARNING" or
+        "LEGACY_EMERGENCY";
+
+    private static AttentionEvent MapBack(OperationalEvent item)
     {
-        AttentionEventKind? kind = item.EventCode switch
+        AttentionEventKind kind = item.EventCode switch
         {
             "LEGACY_SAFETY_ALARM" => AttentionEventKind.SafetyAlarm,
             "LEGACY_WARNING" => AttentionEventKind.Warning,
             "LEGACY_EMERGENCY" => AttentionEventKind.Emergency,
-            _ => null
+            _ => throw new ArgumentOutOfRangeException(nameof(item), item.EventCode, "未知legacy事件代码")
         };
 
-        return kind is null
-            ? null
-            : new AttentionEvent(
-                item.LastOccurredAtUtc.Ticks,
-                item.LastOccurredAtUtc.ToLocalTime(),
-                kind.Value,
-                item.Scope,
-                item.Source,
-                item.LatestDetailMessage,
-                string.IsNullOrEmpty(item.LatestResult) ? null : item.LatestResult);
+        return new AttentionEvent(
+            item.LastOccurredAtUtc.Ticks,
+            item.LastOccurredAtUtc.ToLocalTime(),
+            kind,
+            item.Scope,
+            item.Source,
+            item.LatestDetailMessage,
+            string.IsNullOrEmpty(item.LatestResult) ? null : item.LatestResult);
     }
 
     private static string BuildCorrelationKey(

@@ -87,6 +87,29 @@ public sealed class AttentionEventCenterAdapterTests
     }
 
     [Fact]
+    public void Snapshot_PreservesLegacyCapacityUsingMostRecentLegacyEvents()
+    {
+        var fixture = CreateFixture(new DateTime(2026, 7, 20, 3, 4, 5, DateTimeKind.Utc));
+        const int total = AttentionEventCenter.Capacity + 5;
+        for (int index = 0; index < total; index++)
+        {
+            fixture.Center.Record(
+                AttentionEventKind.Warning,
+                "scope",
+                "source",
+                $"message-{index}");
+        }
+
+        IReadOnlyList<AttentionEvent> snapshot = fixture.Center.Snapshot();
+
+        Assert.Equal(AttentionEventCenter.Capacity, snapshot.Count);
+        Assert.Equal($"message-{total - 1}", snapshot[0].Message);
+        Assert.Equal("message-5", snapshot[^1].Message);
+        Assert.DoesNotContain(snapshot, item => item.Message == "message-4");
+        Assert.Equal(total, fixture.Store.Snapshot().Events.Count);
+    }
+
+    [Fact]
     public void Changed_ForwardsStoreNotificationOnceAndIsolatesSubscribers()
     {
         var fixture = CreateFixture(new DateTime(2026, 7, 20, 3, 4, 5, DateTimeKind.Utc));
