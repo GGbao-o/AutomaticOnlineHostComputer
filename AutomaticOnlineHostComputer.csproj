@@ -46,6 +46,15 @@
     <Folder Include="Libs\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="AutomaticOnlineHostComputer.Tests\**\*.cs" />
+    <Page Remove="AutomaticOnlineHostComputer.Tests\**\*.xaml" />
+    <None Remove="AutomaticOnlineHostComputer.Tests\**\*" />
+    <EmbeddedResource Remove="AutomaticOnlineHostComputer.Tests\**\*" />
+    <Content Remove="AutomaticOnlineHostComputer.Tests\**\*" />
+    <Resource Remove="AutomaticOnlineHostComputer.Tests\**\*" />
+  </ItemGroup>
+
   <!-- 默认包含规则会自动包含项目目录下所有 .cs 和 .xaml 文件，递归子文件夹 -->
   <!-- 自动排除 bin, obj, .vs, .idea 等临时文件夹 -->
   <!-- 因此您无需手动编写任何 Compile 或 Page 条目 -->
