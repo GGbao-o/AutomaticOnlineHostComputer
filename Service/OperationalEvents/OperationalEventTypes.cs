@@ -120,32 +120,59 @@ public sealed record PositionEvidence(
     EvidenceValue<int> TargetY,
     EvidenceValue<int> TargetAbsX,
     EvidenceValue<int> TargetAbsY,
+    EvidenceValue<int> LastSentDisplayTargetX,
+    EvidenceValue<int> LastSentDisplayTargetY,
+    DeviceCommandEvidence XFineTuneCommand,
+    DeviceCommandEvidence YFineTuneCommand,
+    EvidenceValue<string> FailureStage,
     EvidenceValue<int> DeltaX,
     EvidenceValue<int> DeltaY,
-    EvidenceValue<int> Tolerance,
-    EvidenceValue<int> MaximumCorrection,
+    EvidenceValue<int> ToleranceX,
+    EvidenceValue<int> ToleranceY,
+    EvidenceValue<int> MaximumCorrectionX,
+    EvidenceValue<int> MaximumCorrectionY,
     EvidenceValue<int> StableSampleCount,
+    EvidenceValue<int> StageReadCount,
+    EvidenceValue<int> TotalReadCount,
     EvidenceValue<int> FineTuneAttemptCount,
+    EvidenceValue<int> FeedbackRereadCount,
     EvidenceValue<DateTime> CapturedAtUtc)
 {
-    public static PositionEvidence Unavailable(string reason) =>
-        new(
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<int>.Unavailable(reason),
-            EvidenceValue<DateTime>.Unavailable(reason));
+    public static PositionEvidence Unavailable(string reason)
+    {
+        var unavailableCommand = new DeviceCommandEvidence(
+            DeviceCommandState.Unavailable,
+            EvidenceAvailability.Unavailable,
+            reason);
+
+        return new(
+            DisplayX: EvidenceValue<int>.Unavailable(reason),
+            DisplayY: EvidenceValue<int>.Unavailable(reason),
+            DisplayZ: EvidenceValue<int>.Unavailable(reason),
+            AbsX: EvidenceValue<int>.Unavailable(reason),
+            AbsY: EvidenceValue<int>.Unavailable(reason),
+            TargetX: EvidenceValue<int>.Unavailable(reason),
+            TargetY: EvidenceValue<int>.Unavailable(reason),
+            TargetAbsX: EvidenceValue<int>.Unavailable(reason),
+            TargetAbsY: EvidenceValue<int>.Unavailable(reason),
+            LastSentDisplayTargetX: EvidenceValue<int>.Unavailable(reason),
+            LastSentDisplayTargetY: EvidenceValue<int>.Unavailable(reason),
+            XFineTuneCommand: unavailableCommand,
+            YFineTuneCommand: unavailableCommand,
+            FailureStage: EvidenceValue<string>.Unavailable(reason),
+            DeltaX: EvidenceValue<int>.Unavailable(reason),
+            DeltaY: EvidenceValue<int>.Unavailable(reason),
+            ToleranceX: EvidenceValue<int>.Unavailable(reason),
+            ToleranceY: EvidenceValue<int>.Unavailable(reason),
+            MaximumCorrectionX: EvidenceValue<int>.Unavailable(reason),
+            MaximumCorrectionY: EvidenceValue<int>.Unavailable(reason),
+            StableSampleCount: EvidenceValue<int>.Unavailable(reason),
+            StageReadCount: EvidenceValue<int>.Unavailable(reason),
+            TotalReadCount: EvidenceValue<int>.Unavailable(reason),
+            FineTuneAttemptCount: EvidenceValue<int>.Unavailable(reason),
+            FeedbackRereadCount: EvidenceValue<int>.Unavailable(reason),
+            CapturedAtUtc: EvidenceValue<DateTime>.Unavailable(reason));
+    }
 }
 
 public sealed record MotionAndMagnetEvidence(

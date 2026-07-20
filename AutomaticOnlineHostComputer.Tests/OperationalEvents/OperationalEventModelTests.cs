@@ -17,9 +17,20 @@ public sealed class OperationalEventModelTests
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.AbsY.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.TargetX.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.DeltaX.Availability);
-        Assert.Equal(EvidenceAvailability.Unavailable, evidence.Tolerance.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.LastSentDisplayTargetX.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.LastSentDisplayTargetY.Availability);
+        Assert.Equal(DeviceCommandState.Unavailable, evidence.XFineTuneCommand.State);
+        Assert.Equal(DeviceCommandState.Unavailable, evidence.YFineTuneCommand.State);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.FailureStage.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.ToleranceX.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.ToleranceY.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.MaximumCorrectionX.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.MaximumCorrectionY.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.StableSampleCount.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.StageReadCount.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.TotalReadCount.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.FineTuneAttemptCount.Availability);
+        Assert.Equal(EvidenceAvailability.Unavailable, evidence.FeedbackRereadCount.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, evidence.CapturedAtUtc.Availability);
     }
 
@@ -82,7 +93,17 @@ public sealed class OperationalEventModelTests
             AbsX = EvidenceValue<int>.Confirmed(1000, "绝对坐标快照"),
             TargetX = EvidenceValue<int>.Confirmed(125, "动作目标"),
             DeltaX = EvidenceValue<int>.Confirmed(-5, "调用点已计算"),
-            Tolerance = EvidenceValue<int>.Confirmed(2, "微调参数")
+            LastSentDisplayTargetX = EvidenceValue<int>.Confirmed(125, "最后一次X移动命令参数"),
+            XFineTuneCommand = new DeviceCommandEvidence(
+                DeviceCommandState.Acknowledged,
+                EvidenceAvailability.Confirmed,
+                "X移动命令成功返回"),
+            FailureStage = EvidenceValue<string>.Confirmed("feedback-reread", "异常捕获时阶段"),
+            ToleranceX = EvidenceValue<int>.Confirmed(2, "X微调参数"),
+            MaximumCorrectionX = EvidenceValue<int>.Confirmed(30, "X微调参数"),
+            StageReadCount = EvidenceValue<int>.Confirmed(3, "当前阶段计数"),
+            TotalReadCount = EvidenceValue<int>.Confirmed(7, "动作累计计数"),
+            FeedbackRereadCount = EvidenceValue<int>.Confirmed(1, "反馈重读计数")
         };
 
         Assert.Equal(120, position.DisplayX.Value);
@@ -91,6 +112,9 @@ public sealed class OperationalEventModelTests
         Assert.Equal(EvidenceAvailability.Confirmed, position.AbsX.Availability);
         Assert.Equal(EvidenceAvailability.Unavailable, position.AbsY.Availability);
         Assert.Equal(-5, position.DeltaX.Value);
+        Assert.Equal(EvidenceAvailability.Unavailable, position.ToleranceY.Availability);
+        Assert.Equal(1, position.FeedbackRereadCount.Value);
+        Assert.True(position.FeedbackRereadCount.HasValue);
     }
 
     [Fact]
