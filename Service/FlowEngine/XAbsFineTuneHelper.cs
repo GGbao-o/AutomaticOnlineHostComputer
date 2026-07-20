@@ -27,6 +27,58 @@ internal static class XAbsFineTuneHelper
     private const int AbsFeedbackRefreshMaxRetries = 3;
     private const int AbsFeedbackRefreshRetryDelayMs = 1000;
 
+    internal enum FineTuneDelayKind
+    {
+        Phase,
+        StableRead,
+        FeedbackRefresh
+    }
+
+    /// <summary>
+    /// 仅隔离微调算法执行边界，便于用确定性状态序列验证失败证据；不得承载业务判断。
+    /// </summary>
+    internal interface IFineTuneExecution
+    {
+        Task<CraneStatus?> ReadStatusAsync(CancellationToken ct);
+
+        Task MoveAbsoluteAsync(
+            int x,
+            int y,
+            int z,
+            int tolerance,
+            int timeoutMs,
+            CancellationToken ct);
+
+        Task DelayAsync(FineTuneDelayKind kind, int delayMs, CancellationToken ct);
+    }
+
+    private sealed class CraneFineTuneExecution : IFineTuneExecution
+    {
+        private readonly CraneService _crane;
+
+        public CraneFineTuneExecution(CraneService crane) => _crane = crane;
+
+        public Task<CraneStatus?> ReadStatusAsync(CancellationToken ct) =>
+            _crane.ReadStatusAsync(ct);
+
+        public Task MoveAbsoluteAsync(
+            int x,
+            int y,
+            int z,
+            int tolerance,
+            int timeoutMs,
+            CancellationToken ct) =>
+            _crane.MoveAbsoluteAsync(x, y, z, tolerance: tolerance, timeoutMs: timeoutMs, ct: ct);
+
+        public Task DelayAsync(FineTuneDelayKind kind, int delayMs, CancellationToken ct) => kind switch
+        {
+            FineTuneDelayKind.Phase => Task.Delay(delayMs, ct),
+            FineTuneDelayKind.StableRead => Task.Delay(delayMs, ct),
+            FineTuneDelayKind.FeedbackRefresh => Task.Delay(delayMs, ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "未知微调延时类型")
+        };
+    }
+
     private sealed record AxisFineTune(
         string Name,
         MotionConfig.AxisAbsFineTuneSection Settings,
@@ -317,6 +369,33 @@ internal static class XAbsFineTuneHelper
         CancellationToken ct,
         int yCenterToPickOffsetMm = 0)
     {
+        await VerifyAndFineTuneAsync(
+            new CraneFineTuneExecution(crane),
+            cfg,
+            craneNo,
+            stationCode,
+            context,
+            reporter,
+            failureContext,
+            actionId,
+            physicalTracker,
+            ct,
+            yCenterToPickOffsetMm);
+    }
+
+    internal static async Task VerifyAndFineTuneAsync(
+        IFineTuneExecution execution,
+        MotionConfig cfg,
+        int craneNo,
+        string stationCode,
+        string context,
+        IOperationalEventReporter reporter,
+        OperationalEventContext failureContext,
+        string actionId,
+        OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker,
+        CancellationToken ct,
+        int yCenterToPickOffsetMm = 0)
+    {
         FineTuneEvidenceAccumulator? evidence = FineTuneEvidenceAccumulator.TryCreate(failureContext);
         try
         {
@@ -335,9 +414,9 @@ internal static class XAbsFineTuneHelper
                 return;
 
             evidence?.BeginStage("微调前沉降");
-            await DelayWithLogAsync("[XYAbsFineTune]", stationCode, context, "微调前沉降", BeforeFineTuneSettleDelayMs, ct);
+            await DelayWithLogAsync(execution, "[XYAbsFineTune]", stationCode, context, "微调前沉降", BeforeFineTuneSettleDelayMs, ct);
             evidence?.Checkpoint("微调前沉降完成");
-            CraneStatus status = await ReadStableStatusAsync(crane, stationCode, context, "微调前", activeAxes, evidence, ct);
+            CraneStatus status = await ReadStableStatusAsync(execution, stationCode, context, "微调前", activeAxes, evidence, ct);
             evidence?.Checkpoint("微调前稳定状态读取完成");
 
             for (int fineTuneAttempt = 1; fineTuneAttempt <= FineTuneMaxAttempts; fineTuneAttempt++)
@@ -386,21 +465,21 @@ internal static class XAbsFineTuneHelper
                 int moveTolerance = Math.Max(1, movingAxes.Max(correction => correction.Axis.Tolerance));
                 Console.WriteLine($"[XYAbsFineTune] [{context}] {stationCode} 发起一次XY微调: X={(targetX == -1 ? "保持" : targetX)}, Y={(targetY == -1 ? "保持" : targetY)}");
                 evidence?.CommandPrepared(targetX, targetY, movingAxes);
-                await crane.MoveAbsoluteAsync(targetX, targetY, -1, tolerance: moveTolerance, timeoutMs: cfg.AbsMove.TimeoutMs, ct: ct);
+                await execution.MoveAbsoluteAsync(targetX, targetY, -1, moveTolerance, cfg.AbsMove.TimeoutMs, ct);
                 evidence?.CommandAcknowledged(movingAxes);
 
                 int maxDelta = movingAxes.Max(correction => Math.Abs(correction.Delta));
                 int settleDelayMs = ComputeAfterMoveSettleDelayMs(maxDelta);
                 evidence?.BeginStage($"微调后{fineTuneAttempt}共同沉降");
-                await DelayWithLogAsync("[XYAbsFineTune]", stationCode, context, $"微调后{fineTuneAttempt}共同沉降", settleDelayMs, ct);
+                await DelayWithLogAsync(execution, "[XYAbsFineTune]", stationCode, context, $"微调后{fineTuneAttempt}共同沉降", settleDelayMs, ct);
                 evidence?.Checkpoint($"微调后{fineTuneAttempt}共同沉降完成");
-                status = await ReadStableStatusAsync(crane, stationCode, context, $"微调后{fineTuneAttempt}", activeAxes, evidence, ct);
+                status = await ReadStableStatusAsync(execution, stationCode, context, $"微调后{fineTuneAttempt}", activeAxes, evidence, ct);
                 evidence?.Checkpoint($"微调后{fineTuneAttempt}稳定状态读取完成");
 
                 foreach (AxisCorrection correction in movingAxes)
                 {
                     status = await EnsureAbsFeedbackFollowedAsync(
-                        crane, stationCode, context, fineTuneAttempt, correction.Axis, beforeMoveStatus, status, activeAxes, evidence, ct);
+                        execution, stationCode, context, fineTuneAttempt, correction.Axis, beforeMoveStatus, status, activeAxes, evidence, ct);
                 }
 
                 LogCurrentCorrections(BuildCorrections(activeAxes, status), stationCode, context, fineTuneAttempt);
@@ -518,7 +597,7 @@ internal static class XAbsFineTuneHelper
     }
 
     private static async Task<CraneStatus> ReadStableStatusAsync(
-        CraneService crane,
+        IFineTuneExecution execution,
         string stationCode,
         string context,
         string phase,
@@ -533,7 +612,7 @@ internal static class XAbsFineTuneHelper
         for (int attempt = 1; attempt <= StableReadMaxAttempts; attempt++)
         {
             evidence?.BeginReadAttempt();
-            latest = await crane.ReadStatusAsync(ct);
+            latest = await execution.ReadStatusAsync(ct);
             evidence?.Capture(latest, window.Count);
             if (latest == null)
                 throw new InvalidOperationException($"[{context}] {stationCode} XY绝对编码器{phase}读取状态失败, 禁止Z下降");
@@ -571,14 +650,14 @@ internal static class XAbsFineTuneHelper
                 Console.WriteLine($"[XYAbsFineTune] [{context}] {stationCode} {phase}状态未稳定({StableReadRequiredCount}次窗口): {string.Join("；", unstableRanges)}");
             }
 
-            await Task.Delay(StableReadDelayMs, ct);
+            await execution.DelayAsync(FineTuneDelayKind.StableRead, StableReadDelayMs, ct);
         }
 
         throw new InvalidOperationException($"[{context}] {stationCode} XY绝对编码器{phase}连续读取不稳定: 最近{FormatAxisValues(latest!, activeAxes)}, 禁止微调/Z下降");
     }
 
     private static async Task<CraneStatus> EnsureAbsFeedbackFollowedAsync(
-        CraneService crane,
+        IFineTuneExecution execution,
         string stationCode,
         string context,
         int fineTuneAttempt,
@@ -604,9 +683,9 @@ internal static class XAbsFineTuneHelper
             }
 
             Console.WriteLine($"[{axis.Name}AbsFineTune] [{context}] {stationCode} 微调后{fineTuneAttempt}反馈疑似未刷新({reason}), 再等{AbsFeedbackRefreshRetryDelayMs}ms后共同重读({retry + 1}/{AbsFeedbackRefreshMaxRetries})");
-            await Task.Delay(AbsFeedbackRefreshRetryDelayMs, ct);
+            await execution.DelayAsync(FineTuneDelayKind.FeedbackRefresh, AbsFeedbackRefreshRetryDelayMs, ct);
             evidence?.FeedbackReread(retry + 1);
-            afterMove = await ReadStableStatusAsync(crane, stationCode, context, $"微调后{fineTuneAttempt}反馈重读{retry + 1}", activeAxes, evidence, ct);
+            afterMove = await ReadStableStatusAsync(execution, stationCode, context, $"微调后{fineTuneAttempt}反馈重读{retry + 1}", activeAxes, evidence, ct);
         }
 
         return afterMove;
@@ -652,6 +731,7 @@ internal static class XAbsFineTuneHelper
     }
 
     private static async Task DelayWithLogAsync(
+        IFineTuneExecution execution,
         string prefix,
         string stationCode,
         string context,
@@ -660,6 +740,6 @@ internal static class XAbsFineTuneHelper
         CancellationToken ct)
     {
         Console.WriteLine($"{prefix} [{context}] {stationCode} {phase}: 等待PLC/编码器刷新 {delayMs}ms");
-        await Task.Delay(delayMs, ct);
+        await execution.DelayAsync(FineTuneDelayKind.Phase, delayMs, ct);
     }
 }

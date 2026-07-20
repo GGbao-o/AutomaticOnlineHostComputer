@@ -267,6 +267,7 @@ internal static class OperationalEventContextFactory
             ActionStage = actionStage,
             Title = $"{station}下降前XY绝对编码器微调失败",
             Source = nameof(XAbsFineTuneHelper),
+            IndependentAction = true,
             DetailMessage = actionStage,
             PhysicalConclusion = new PhysicalConclusionEvidence(
                 PhysicalConclusionCode.CommandNotSent,
