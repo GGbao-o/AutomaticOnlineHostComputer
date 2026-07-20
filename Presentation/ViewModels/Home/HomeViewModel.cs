@@ -16,6 +16,7 @@ using AutomaticOnlineHostComputer.Communication.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 using RackAddr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
@@ -25,6 +26,7 @@ public sealed class HomeViewModel : ObservableObject
     private readonly ManagementQueryService _queryService;
     private readonly PositionUpdateService _positionService;
     private readonly AttentionEventCenter _attentionEvents;
+    private readonly IOperationalEventReporter _exceptionReporter;
     private readonly ProductionFlowEngine _flowEngine;
     private readonly CraneConnectionCache _craneCache;
     private readonly MotionConfig _cfg;
@@ -203,18 +205,19 @@ public sealed class HomeViewModel : ObservableObject
     public string ErpTaskImportStatus { get => _erpTaskImportStatus; private set => SetField(ref _erpTaskImportStatus, value); }
 
     public HomeViewModel(ManagementQueryService queryService, PositionUpdateService positionService,
-        AttentionEventCenter attentionEvents)
+        AttentionEventCenter attentionEvents, IOperationalEventReporter exceptionReporter)
     {
         Console.WriteLine("HomeViewModel页面启动");
         _queryService = queryService;
         _positionService = positionService;
         _attentionEvents = attentionEvents;
+        _exceptionReporter = exceptionReporter;
         _craneCache = new CraneConnectionCache();
         _manipulatorCache = new ManipulatorConnectionCache();
         _cfg = MotionConfig.Load();  // 提前加载，引擎创建和UI同步都要用
 
         // 引擎依赖天车/机械手缓存，由 HomeVM 创建并持有引用
-        _flowEngine = new ProductionFlowEngine(_craneCache, _manipulatorCache, _positionService, _cfg);
+        _flowEngine = new ProductionFlowEngine(_craneCache, _manipulatorCache, _positionService, _cfg, _exceptionReporter);
 
         Crane1F = new CraneCardViewModel(1, _craneCache);
         Crane1R = new CraneCardViewModel(2, _craneCache);
@@ -2388,7 +2391,7 @@ public sealed class HomeViewModel : ObservableObject
             .Where(r => !string.IsNullOrWhiteSpace(r.StationCode))
             .ToDictionary(r => r.StationCode.Trim().ToUpperInvariant(), r => r, StringComparer.OrdinalIgnoreCase);
         _stationDict = grindingCoords; // 缓存供弹窗查询
-        _grindingEngine = new GrindingFlowEngine(_craneCache, _cfg, grindingCoords, _mcCache);
+        _grindingEngine = new GrindingFlowEngine(_craneCache, _cfg, grindingCoords, _mcCache, _exceptionReporter);
         Console.WriteLine($"[HomeViewModel] 研磨流程引擎已创建（{grindingCoords.Count} 个工位坐标）");
 
         // ── 前后端共享中转架互斥锁 ──
@@ -2423,21 +2426,21 @@ public sealed class HomeViewModel : ObservableObject
             Console.WriteLine("[HomeViewModel]   前端引擎后续仍通过共享MC缓存重连, 禁止1/2号线各自直连");
         }
         _line1Engine = new Line1FrontFlowEngine(_craneCache, _manipulatorCache, _cfg, grindingCoords,
-            _sharedTransferRackLock, sharedSafety, rackSvc: frontRackSvc,
+            _exceptionReporter, _sharedTransferRackLock, sharedSafety, rackSvc: frontRackSvc,
             manipulatorLock: _sharedManipulatorLock);
         Console.WriteLine("[HomeViewModel] 1号线前端流程引擎已创建" + (sharedMc63Ready ? "(共享MC63已连接)" : "(共享MC63待重连)"));
 
         // ── 创建1号线后端流程引擎 (中转架状态从前端DeviceStatus读取) ──
         // M817+M720 锁传给1号线后端: DoUnload长工件→M817, 短工件→M720
         _line1RearEngine = new Line1RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords,
-            _sharedTransferRackLock, sharedSafety, _line1Engine.DeviceStatus,
+            _sharedTransferRackLock, sharedSafety, _exceptionReporter, _line1Engine.DeviceStatus,
             lockM817: lockM817, lockM720: lockM720);
         Console.WriteLine("[HomeViewModel] 1号线后端流程引擎已创建");
 
         // ── 创建机械手2动平衡流转引擎 ──
         // 4把锁全传: M2Flow用M817或M818, M3Flow用M821+M720
         _line1BalancingEngine = new BalancingFlowEngine(_manipulatorCache, _craneCache, _mcCache, _cfg, grindingCoords,
-            lockM817, lockM818, lockM821, lockM720);
+            _exceptionReporter, lockM817, lockM818, lockM821, lockM720);
         Console.WriteLine("[HomeViewModel] 机械手2动平衡流转引擎已创建(两条线共用)");
 
         // ── 创建2号线流程引擎 ──────────────────────────────────────
@@ -2445,13 +2448,13 @@ public sealed class HomeViewModel : ObservableObject
         var sharedSafety2 = new SafetyFlags();
 
         _line2Engine = new Line2FrontFlowEngine(_craneCache, _manipulatorCache, _cfg, grindingCoords,
-            transferRackLock: _sharedTransferRackLock2, safety: sharedSafety2,
+            _exceptionReporter, transferRackLock: _sharedTransferRackLock2, safety: sharedSafety2,
             rackSvc: frontRackSvc, manipulatorLock: _sharedManipulatorLock);
         Console.WriteLine("[HomeViewModel] 2号线前端流程引擎已创建(共享机械手锁)");
 
         // M818+M821 锁传给2号线后端: DoUnload长工件→M818, 短工件→M821
         _line2RearEngine = new Line2RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords,
-            _sharedTransferRackLock2, sharedSafety2, _line2Engine.DeviceStatus,
+            _sharedTransferRackLock2, sharedSafety2, _exceptionReporter, _line2Engine.DeviceStatus,
             lockM818: lockM818, lockM821: lockM821);
         Console.WriteLine("[HomeViewModel] 2号线后端流程引擎已创建");
 

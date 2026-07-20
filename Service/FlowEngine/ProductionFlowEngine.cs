@@ -9,6 +9,7 @@ using AutomaticOnlineHostComputer.Domain.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Service;
 
@@ -29,6 +30,7 @@ public sealed class ProductionFlowEngine : IDisposable
     private readonly CancellationTokenSource _engineCts = new();
     private readonly CraneConnectionCache _craneCache;
     private readonly ManipulatorConnectionCache _manipulatorCache;
+    private readonly IOperationalEventReporter _exceptionReporter;
     private Task? _engineTask;
     private bool _disposed;
 
@@ -174,12 +176,13 @@ public sealed class ProductionFlowEngine : IDisposable
     private readonly PositionUpdateService _posSvc;
 
     public ProductionFlowEngine(CraneConnectionCache craneCache, ManipulatorConnectionCache manipulatorCache,
-        PositionUpdateService positionService, MotionConfig cfg)
+        PositionUpdateService positionService, MotionConfig cfg, IOperationalEventReporter exceptionReporter)
     {
         _craneCache = craneCache;
         _manipulatorCache = manipulatorCache;
         _posSvc = positionService;
         _cfg = cfg; // 使用共享配置实例, UI 修改后即时生效
+        _exceptionReporter = exceptionReporter;
 
         Console.WriteLine($"[FlowEngine] 引擎实例已创建（速度走GetCraneSpeed/GetManipulatorSpeed, 未配置设备用AbsMove默认值）");
     }

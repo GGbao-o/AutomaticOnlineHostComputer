@@ -11,6 +11,7 @@ using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Domain.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Service;
 
@@ -31,6 +32,7 @@ public sealed class GrindingFlowEngine : IDisposable
     private readonly CraneConnectionCache _craneCache;    // 天车#5共享连接(复用主页面TCP, 避免双连接冲突)
     private readonly MotionConfig _cfg;                   // 运动参数配置(速度/Z公式系数/超时/轮询间隔/X11延时等)
     private readonly Dictionary<string, MachineManagementRowVm> _stationCoords; // 工位坐标(数据库machine表, 含XYZ+偏移量)
+    private readonly IOperationalEventReporter _exceptionReporter;
     // ── MC连接(共享McConnectionCache, 与平衡/后端引擎共用, 防重复TCP) ──
     //   MC65=192.168.2.65: 上料架(研磨上料架) M730(末位有板/允许取板) M731(取板完成) D200(2号位测长,读)
     //   MC64=192.168.2.64: 下料架(研磨下料架) M720(无板且允许放版) M721(放版完成,写)
@@ -271,12 +273,14 @@ public sealed class GrindingFlowEngine : IDisposable
 
     /// <param name="mcc">MC共享连接缓存(与平衡/后端引擎共用, 防同一PLC重复TCP连接)</param>
     public GrindingFlowEngine(CraneConnectionCache craneCache, MotionConfig cfg,
-        Dictionary<string, MachineManagementRowVm> stationCoords, McConnectionCache mcc)
+        Dictionary<string, MachineManagementRowVm> stationCoords, McConnectionCache mcc,
+        IOperationalEventReporter exceptionReporter)
     {
         _craneCache = craneCache;
         _cfg = cfg;
         _stationCoords = stationCoords;
         _mcCache = mcc;
+        _exceptionReporter = exceptionReporter;
 
         _grinders = new List<GrinderContext>
         {

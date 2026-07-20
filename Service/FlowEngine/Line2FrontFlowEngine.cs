@@ -11,6 +11,7 @@ using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Domain.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 using RackAddr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
 
 namespace AutomaticOnlineHostComputer.Service;
@@ -47,6 +48,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
     private readonly ManipulatorConnectionCache _manipulatorCache;      // 机械手连接缓存(共享)
     private readonly MotionConfig _cfg;                                 // 运动参数配置(速度/Z公式/安全高度等)
     private readonly Dictionary<string, MachineManagementRowVm> _stationCoords; // 工位坐标字典(key=站号)
+    private readonly IOperationalEventReporter _exceptionReporter;
     private readonly CancellationTokenSource _engineCts = new();        // 引擎取消令牌
     private Task? _engineTask;                                          // 引擎后台Task
     private bool _disposed;
@@ -322,7 +324,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
     /// <param name="safety">前后天车共享安全标志。为null时自建。</param>
     /// <param name="manipulatorLock">机械手互斥锁(必须与1号线共享同一个实例!)</param>
     public Line2FrontFlowEngine(CraneConnectionCache craneCache, ManipulatorConnectionCache manipulatorCache,
-        MotionConfig cfg, Dictionary<string, MachineManagementRowVm> stationCoords,
+        MotionConfig cfg, Dictionary<string, MachineManagementRowVm> stationCoords, IOperationalEventReporter exceptionReporter,
         SemaphoreSlim? transferRackLock = null, SafetyFlags? safety = null,
         CenteringRackService? rackSvc = null, SemaphoreSlim? manipulatorLock = null)
     {
@@ -330,6 +332,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         _manipulatorCache = manipulatorCache;
         _cfg = cfg;
         _stationCoords = stationCoords;
+        _exceptionReporter = exceptionReporter;
         _ownsTransferRackLock = transferRackLock == null;
         _transferRackLock = transferRackLock ?? new SemaphoreSlim(1, 1);
         _ownsManipulatorLock = false; // 2号线永远共享机械手锁

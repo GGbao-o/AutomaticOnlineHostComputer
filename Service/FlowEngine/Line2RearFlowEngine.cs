@@ -6,6 +6,7 @@ using AutomaticOnlineHostComputer.Communication.Clients;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 using RackAddr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
 
 namespace AutomaticOnlineHostComputer.Service;
@@ -35,6 +36,7 @@ public sealed class Line2RearFlowEngine : IDisposable
     private readonly SemaphoreSlim _transferRackLock;
     private readonly SafetyFlags _safety;
     private readonly Dictionary<string, MachineManagementRowVm> _stationCoords;
+    private readonly IOperationalEventReporter _exceptionReporter;
     private readonly Line2FrontFlowEngine.Line2DeviceStatus? _frontDs;
     private readonly CancellationTokenSource _engineCts = new();
     private Task? _engineTask;
@@ -220,11 +222,12 @@ public sealed class Line2RearFlowEngine : IDisposable
     /// <param name="lockM821">M821位置锁: Line2后天车放料 ↔ M3Flow取料 互斥</param>
     public Line2RearFlowEngine(CraneConnectionCache cc, ManipulatorConnectionCache mc,
         McConnectionCache mcc, MotionConfig cfg, Dictionary<string, MachineManagementRowVm> sc,
-        SemaphoreSlim trl, SafetyFlags sf, Line2FrontFlowEngine.Line2DeviceStatus? fd = null,
+        SemaphoreSlim trl, SafetyFlags sf, IOperationalEventReporter exceptionReporter,
+        Line2FrontFlowEngine.Line2DeviceStatus? fd = null,
         SemaphoreSlim? lockM818 = null, SemaphoreSlim? lockM821 = null)
     {
         _craneCache = cc; _manipulatorCache = mc; _mcCache = mcc; _cfg = cfg; _stationCoords = sc;
-        _transferRackLock = trl; _safety = sf; _frontDs = fd;
+        _transferRackLock = trl; _safety = sf; _exceptionReporter = exceptionReporter; _frontDs = fd;
         _lockM818 = lockM818; _lockM821 = lockM821;
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("  [后引擎2] 2号线后端流程引擎 已创建");

@@ -6,6 +6,7 @@ using AutomaticOnlineHostComputer.Communication.Clients;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Service;
 
@@ -37,6 +38,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     private readonly SemaphoreSlim _transferRackLock;
     private readonly SafetyFlags _safety;
     private readonly Dictionary<string, MachineManagementRowVm> _stationCoords;
+    private readonly IOperationalEventReporter _exceptionReporter;
     private readonly Line1FrontFlowEngine.Line1DeviceStatus? _frontDs;
     private readonly CancellationTokenSource _engineCts = new();
     private Task? _engineTask;
@@ -222,11 +224,12 @@ public sealed class Line1RearFlowEngine : IDisposable
     /// <param name="lockM720">M720位置锁: Line1后天车放料 ↔ M3Flow放料 ↔ 研磨天车取料 互斥</param>
     public Line1RearFlowEngine(CraneConnectionCache cc, ManipulatorConnectionCache mc,
         McConnectionCache mcc, MotionConfig cfg, Dictionary<string, MachineManagementRowVm> sc,
-        SemaphoreSlim trl, SafetyFlags sf, Line1FrontFlowEngine.Line1DeviceStatus? fd = null,
+        SemaphoreSlim trl, SafetyFlags sf, IOperationalEventReporter exceptionReporter,
+        Line1FrontFlowEngine.Line1DeviceStatus? fd = null,
         SemaphoreSlim? lockM817 = null, SemaphoreSlim? lockM720 = null)
     {
         _craneCache = cc; _manipulatorCache = mc; _mcCache = mcc; _cfg = cfg; _stationCoords = sc;
-        _transferRackLock = trl; _safety = sf; _frontDs = fd;
+        _transferRackLock = trl; _safety = sf; _exceptionReporter = exceptionReporter; _frontDs = fd;
         _lockM817 = lockM817; _lockM720 = lockM720;
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("  [后引擎] 1号线后端流程引擎 已创建");

@@ -3,6 +3,7 @@ using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Communication.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
+using AutomaticOnlineHostComputer.Service.OperationalEvents;
 using RackAddr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
 
 namespace AutomaticOnlineHostComputer.Service;
@@ -78,6 +79,7 @@ public sealed class BalancingFlowEngine : IDisposable
     private readonly CraneConnectionCache _craneCache;             // 后天车共享连接, 用于读取X坐标(安全互斥)
     private readonly MotionConfig _cfg;                            // 运动参数配置(速度/公式/Z因子等)
     private readonly Dictionary<string, MachineManagementRowVm> _stationCoords; // 工位坐标
+    private readonly IOperationalEventReporter _exceptionReporter;
     private readonly CancellationTokenSource _engineCts = new();   // 引擎取消令牌
     private Task? _engineTask;       // 主循环Task
     private bool _disposed;          // 是否已Dispose
@@ -391,6 +393,7 @@ public sealed class BalancingFlowEngine : IDisposable
     /// </summary>
     public BalancingFlowEngine(ManipulatorConnectionCache mc, CraneConnectionCache cc,
         McConnectionCache mcc, MotionConfig cfg, Dictionary<string, MachineManagementRowVm> sc,
+        IOperationalEventReporter exceptionReporter,
         SemaphoreSlim? lockM817 = null, SemaphoreSlim? lockM818 = null,
         SemaphoreSlim? lockM821 = null, SemaphoreSlim? lockM720 = null)
     {
@@ -399,6 +402,7 @@ public sealed class BalancingFlowEngine : IDisposable
         _mcCache = mcc;
         _cfg = cfg;
         _stationCoords = sc;
+        _exceptionReporter = exceptionReporter;
         _lockM817 = lockM817; _lockM818 = lockM818;
         _lockM821 = lockM821; _lockM720 = lockM720;
         Console.WriteLine($"[平衡引擎#{EngineId}] 实例已创建");
