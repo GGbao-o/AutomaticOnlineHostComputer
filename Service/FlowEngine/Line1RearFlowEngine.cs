@@ -87,6 +87,8 @@ public sealed class Line1RearFlowEngine : IDisposable
     public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
     /// <summary>后天车异常恢复失败、现场位置不再可确认时通知主页面暂停整条1号线并弹窗。</summary>
     public Action<string>? OnRearCraneSafetyAlarm;
+    /// <summary>X11三次失败已有最终结构化事件；此回调只复用整线暂停和弹窗，避免重复Legacy事件。</summary>
+    public Action<string>? OnRearCraneX11FinalSafetyAlarm;
     /// <summary>X11连续无板但已安全退磁回升时通知主页面一次，不暂停引擎。</summary>
     public Action<string>? OnRearCraneWarning;
 
@@ -141,6 +143,13 @@ public sealed class Line1RearFlowEngine : IDisposable
         // 中转架取料时三次有效X11读取均为0；异常收尾完成后必须暂停对应整线。
         public bool X11PickupFailed;
         public string X11RecoverySummary = "未执行";
+        // 仅供最终结构化事件复制已发生的收尾结果，不参与任何业务分支。
+        public RecoveryStepState X11MagnetOffState = RecoveryStepState.NotAttempted;
+        public string X11MagnetOffDetail = "尚未进入X11失败退磁收尾";
+        public RecoveryStepState X11SafeZState = RecoveryStepState.NotAttempted;
+        public string X11SafeZDetail = "尚未进入X11失败Z回安全收尾";
+        public bool X11CacheRestored;
+        public Exception? X11FailureException;
     }
 
     /// <summary>斜床引擎状态</summary>
@@ -1514,10 +1523,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 if (retry > 1)
                 {
                     loadState.X11PickupFailed = true;
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_X11_NOT_CONFIRMED",
-                        operationalSite with { ActionStage = $"{rs}三次X11均未确认持件" }, operationalTracker, null,
-                        "三次业务X11读取均有效返回0；只能确认未确认持件，不能推断工件仍在中转架", true,
-                        holdingWorkpiece: false);
+                    // 最终结构化事件延后到finally：一次记录退磁、Z、退避、锁和暂停的最终结果。
                     throw new Exception("取料失败: 3次充磁后X11仍=0");
                 }
                 currentZ += 5;
@@ -1583,6 +1589,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         catch (Exception ex)
         {
             Console.WriteLine($"│ [上料] ❌ 异常: {wp.IdentityText} {ex.Message}");
+            if (loadState.X11PickupFailed) loadState.X11FailureException = ex;
             if (loadState.PlacedOnBed && !loadState.LoadDoneNotified)
             {
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PHYSICAL_HANDOFF_NOT_CLOSED",
@@ -1622,7 +1629,11 @@ public sealed class Line1RearFlowEngine : IDisposable
                         operationalTracker.CompleteMagnetOff();
                         mag = false;
                         if (loadState.X11PickupFailed)
+                        {
+                            loadState.X11MagnetOffState = RecoveryStepState.Succeeded;
+                            loadState.X11MagnetOffDetail = "退磁方法成功返回；不等于现场已确认释放";
                             loadState.X11RecoverySummary = "退磁成功";
+                        }
                     }
                     catch (Exception offEx)
                     {
@@ -1632,7 +1643,11 @@ public sealed class Line1RearFlowEngine : IDisposable
                             "原业务在异常收尾中吞掉退磁异常；实际退磁结果未知", true,
                             holdingWorkpiece: holdingWorkpiece);
                         if (loadState.X11PickupFailed)
+                        {
+                            loadState.X11MagnetOffState = RecoveryStepState.Failed;
+                            loadState.X11MagnetOffDetail = $"退磁方法异常，实际退磁结果未知({offEx.Message})";
                             loadState.X11RecoverySummary = $"退磁失败，结果未知({offEx.Message})";
+                        }
                         Console.WriteLine($"│ [上料] ⚠ X11未确认有版,退磁失败: {offEx.Message}");
                     }
                 }
@@ -1642,17 +1657,30 @@ public sealed class Line1RearFlowEngine : IDisposable
                 {
                     try
                     {
+                        operationalTracker.BeginSafeZReturn(0, "X11三次失败异常收尾开始Z回原点");
                         await cr.MoveAbsoluteAsync(-1, -1, 0, ct: CancellationToken.None);
+                        operationalTracker.ConfirmSafeZ(0, _cfg.AbsMove.Tolerance, "X11三次失败异常收尾Z回原点命令成功返回");
+                        physicalTracker?.TryConfirmSafeZ(0, _cfg.AbsMove.Tolerance, "X11三次失败异常收尾Z回原点命令成功返回");
                         loadState.ZMayBeDown = false; // Z已安全，finally可以退避
                         if (loadState.X11PickupFailed)
+                        {
+                            loadState.X11SafeZState = RecoveryStepState.Succeeded;
+                            loadState.X11SafeZDetail = "Z回原点命令成功返回";
                             loadState.X11RecoverySummary += "；Z已回原点";
+                        }
                         Console.WriteLine("│ [上料] X11=0恢复: Z已回原点");
                     }
                     catch (Exception zEx)
                     {
+                        operationalTracker.MarkZUnknown($"X11三次失败异常收尾Z回原点失败({zEx.Message})");
+                        physicalTracker?.TryMarkZUnknown($"X11三次失败异常收尾Z回原点失败({zEx.Message})");
                         loadState.ZMayBeDown = true; // Z回升失败，禁止退避
                         if (loadState.X11PickupFailed)
+                        {
+                            loadState.X11SafeZState = RecoveryStepState.Failed;
+                            loadState.X11SafeZDetail = $"Z回原点失败({zEx.Message})";
                             loadState.X11RecoverySummary += $"；Z回原点失败({zEx.Message})";
+                        }
                         Console.WriteLine($"│ [上料] X11=0恢复: Z→0失败({zEx.Message}), 禁止X退避, 已直接释放锁");
                     }
                 }
@@ -1662,6 +1690,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 // X11未确认吸住, 工件按仍在中转架处理 → 恢复_wps缓存供下轮重试
                 //   否则中转架有物理工件但无缓存数据, 前端也不会再放→永久死锁
                 lock (_wpLock) { RestoreRackWorkpieceLocked(rs, wp, rackArrivalSeq); }
+                if (loadState.X11PickupFailed) loadState.X11CacheRestored = true;
                 Console.WriteLine(loadState.X11PickupFailed
                     ? $"│ [上料] X11连续三次为0 → 缓存[{rs}]已按原顺序{rackArrivalSeq}恢复, 等待人工确认后恢复运行"
                     : $"│ [上料] X11未确认工件离开中转架 → 缓存[{rs}]已按原顺序{rackArrivalSeq}恢复, 下轮可重试");
@@ -1678,6 +1707,14 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         finally
         {
+            // 以下布尔值只观察动作租约在原finally前后的状态，不参与锁释放判断。
+            bool zoneTsHeldBeforeCleanup = operation.IsHeld("ZoneTS");
+            bool zoneMtHeldBeforeCleanup = operation.IsHeld("ZoneMT");
+            bool rearCraneHeldBeforeCleanup = operation.IsHeld("RearCrane");
+            RecoveryStepState x11RetreatState = RecoveryStepState.Skipped;
+            string x11RetreatDetail = bed.Code == "ST108"
+                ? "ZoneTS退避尚未执行"
+                : $"目标{bed.Code}不需要ZoneTS侧X退避";
             bool releasedSharedInFinally = false;
             string sharedCleanupText = string.Empty;
             if (sharedLocked)
@@ -1687,6 +1724,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     sharedLocked = false;
                     sharedCleanupText = "ZoneTS已由斜床应急提前释放";
                     Console.WriteLine("│ [上料] ZoneTS已由应急释放, 跳过finally退避释放");
+                    if (loadState.X11PickupFailed) x11RetreatDetail = "ZoneTS已由应急提前释放，未执行自动X退避";
                 }
                 else
                 {
@@ -1696,12 +1734,20 @@ public sealed class Line1RearFlowEngine : IDisposable
                         // 情景：已发送Z下降命令，或正在等待尾座夹紧/退磁/Z回升。
                         // 此时Z、Y和尾座结果可能未知，禁止finally自动执行X+1000，避免低位横移。
                         sharedCleanupText = "Z轴已经或可能已经下降，程序未执行X轴+1000毫米退避";
+                        if (loadState.X11PickupFailed) x11RetreatDetail = "Z轴可能仍在低位，按安全策略跳过X退避";
                         Console.WriteLine("│ [上料] ⚠ Z轴已经或可能已经下降, 禁止X+1000低位横移");
                     }
                     else
                     {
                         // 情景：Z尚未下降，或异常恢复已确认Z安全；按现场策略尝试X+1000。
                         retreatSucceeded = await TryRetreatSharedAreaBeforeReleaseAsync(cr, "ST108", "上料", ct);
+                        if (loadState.X11PickupFailed)
+                        {
+                            x11RetreatState = retreatSucceeded ? RecoveryStepState.Succeeded : RecoveryStepState.Failed;
+                            x11RetreatDetail = retreatSucceeded
+                                ? "Z轴已确认安全，ZoneTS侧X退避成功"
+                                : "Z轴已确认安全，但ZoneTS侧X退避失败或位置无法确认";
+                        }
                         sharedCleanupText = retreatSucceeded
                             ? "Z轴已确认安全，X轴+1000毫米退避成功"
                             : "Z轴已确认安全，但X轴+1000毫米退避失败或位置无法确认";
@@ -1752,14 +1798,48 @@ public sealed class Line1RearFlowEngine : IDisposable
                     : $"{x11Alarm}；{pendingSafetyAlarm}";
             }
 
+            string lockAndRetreat = string.IsNullOrWhiteSpace(sharedCleanupText)
+                ? rearCleanupText
+                : $"{sharedCleanupText}；{rearCleanupText}";
+            bool safetyAlarmCallbackCompleted = false;
             if (pendingSafetyAlarm != null)
             {
-                string lockAndRetreat = string.IsNullOrWhiteSpace(sharedCleanupText)
-                    ? rearCleanupText
-                    : $"{sharedCleanupText}；{rearCleanupText}";
                 pendingSafetyAlarm += $"。异常收尾：{lockAndRetreat}。禁止直接点击启动；请先人工处理现场，确认安全后执行斜床应急恢复。";
                 Console.WriteLine($"│ [上料] ⚠ {pendingSafetyAlarm}");
-                OnRearCraneSafetyAlarm?.Invoke(pendingSafetyAlarm);
+                Action<string>? safetyAlarmCallback = loadState.X11PickupFailed
+                    ? OnRearCraneX11FinalSafetyAlarm
+                    : OnRearCraneSafetyAlarm;
+                bool callbackWasSubscribed = safetyAlarmCallback != null;
+                safetyAlarmCallback?.Invoke(pendingSafetyAlarm);
+                safetyAlarmCallbackCompleted = callbackWasSubscribed;
+            }
+
+            if (loadState.X11PickupFailed)
+            {
+                // 告警回调返回后才记录，确保事件展示的是本次finally的最终结果而不是中间态。
+                var finalization = new OperationalEventContextFactory.RearLoadX11Finalization(
+                    loadState.X11MagnetOffState,
+                    loadState.X11MagnetOffDetail,
+                    loadState.X11SafeZState,
+                    loadState.X11SafeZDetail,
+                    x11RetreatState,
+                    x11RetreatDetail,
+                    zoneTsHeldBeforeCleanup,
+                    !operation.IsHeld("ZoneTS"),
+                    zoneMtHeldBeforeCleanup,
+                    !operation.IsHeld("ZoneMT"),
+                    rearCraneHeldBeforeCleanup,
+                    !operation.IsHeld("RearCrane"),
+                    loadState.X11CacheRestored,
+                    _paused,
+                    safetyAlarmCallbackCompleted,
+                    $"{loadState.X11RecoverySummary}；{lockAndRetreat}");
+                OperationalEventContextFactory.TryReportRearLoadX11FinalFailure(
+                    _exceptionReporter,
+                    operationalSite with { ActionStage = $"{rs}三次X11均未确认持件（最终收尾）" },
+                    operationalTracker,
+                    finalization,
+                    loadState.X11FailureException);
             }
             
             _fastNextCycle = true; // 刚完成上料, 通知主循环快速检查下料任务

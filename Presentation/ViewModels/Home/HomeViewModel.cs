@@ -1882,7 +1882,7 @@ public sealed class HomeViewModel : ObservableObject
     }
 
     /// <summary>后天车无法完成退磁/回升时，立即暂停对应整线并在主页面显示安全告警。</summary>
-    private void HandleLineSafetyAlarm(int line, string source, string message)
+    private void HandleLineSafetyAlarm(int line, string source, string message, bool recordLegacyEvent = true)
     {
         // 先同步关闭前后端派发门；不能等待UI线程调度后再暂停。
         if (line == 1)
@@ -1913,7 +1913,9 @@ public sealed class HomeViewModel : ObservableObject
             else popupAlreadyShown = false;
         }
 
-        _attentionEvents.Record(AttentionEventKind.SafetyAlarm, $"{line}号线", source, message);
+        // X11三次失败会在finally生成完整结构化事件；该专用入口只跳过重复Legacy记录，暂停和弹窗完全相同。
+        if (recordLegacyEvent)
+            _attentionEvents.Record(AttentionEventKind.SafetyAlarm, $"{line}号线", source, message);
         if (popupAlreadyShown) return;
 
         void UpdateUiAndShowAlarm()
@@ -2473,6 +2475,8 @@ public sealed class HomeViewModel : ObservableObject
         _grindingEngine!.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
         _line1RearEngine.OnRearCraneSafetyAlarm = message => HandleLineSafetyAlarm(1, "后天车安全异常", message);
         _line2RearEngine.OnRearCraneSafetyAlarm = message => HandleLineSafetyAlarm(2, "后天车安全异常", message);
+        _line1RearEngine.OnRearCraneX11FinalSafetyAlarm = message => HandleLineSafetyAlarm(1, "后天车X11取料失败", message, recordLegacyEvent: false);
+        _line2RearEngine.OnRearCraneX11FinalSafetyAlarm = message => HandleLineSafetyAlarm(2, "后天车X11取料失败", message, recordLegacyEvent: false);
         _line1RearEngine.OnRearCraneWarning = message => HandleRearCraneWarning(1, message);
         _line2RearEngine.OnRearCraneWarning = message => HandleRearCraneWarning(2, message);
         _line1Engine.OnSafetyAlarm = message => HandleLineSafetyAlarm(1, "前端流程异常", message);

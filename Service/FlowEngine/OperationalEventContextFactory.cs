@@ -59,6 +59,28 @@ internal static class OperationalEventContextFactory
         EvidenceValue<int> SafeZTarget,
         EvidenceValue<int> SafeZTolerance);
 
+    /// <summary>
+    /// 后天车上料X11失败在finally完成后的最终旁路快照。
+    /// 只描述调用点已经取得的结果，不参与原有收尾判断。
+    /// </summary>
+    internal sealed record RearLoadX11Finalization(
+        RecoveryStepState MagnetOffState,
+        string MagnetOffDetail,
+        RecoveryStepState SafeZReturnState,
+        string SafeZReturnDetail,
+        RecoveryStepState RetreatState,
+        string RetreatDetail,
+        bool ZoneTsHeldBeforeCleanup,
+        bool ZoneTsReleasedAfterward,
+        bool ZoneMtHeldBeforeCleanup,
+        bool ZoneMtReleasedAfterward,
+        bool RearCraneHeldBeforeCleanup,
+        bool RearCraneReleasedAfterward,
+        bool CacheRestored,
+        bool RearEnginePaused,
+        bool SafetyAlarmCallbackCompleted,
+        string ResultSummary);
+
     internal sealed record FineTunePhysicalSnapshot(
         EvidenceValue<int> X11LastValue,
         EvidenceValue<bool> X11ReadValid,
@@ -529,6 +551,184 @@ internal static class OperationalEventContextFactory
             // 证据构造、目录和Reporter任何失败都不得影响生产流程。
         }
     }
+
+    /// <summary>
+    /// 在后天车上料X11三次失败的原finally完成后记录唯一最终事件。
+    /// 该方法只复制快照，不读取设备、不改变状态，也不抛异常回业务流程。
+    /// </summary>
+    public static void TryReportRearLoadX11FinalFailure(
+        IOperationalEventReporter reporter,
+        OperationalPhysicalEventSite site,
+        OperationalPhysicalCycleTracker tracker,
+        RearLoadX11Finalization finalization,
+        Exception? exception)
+    {
+        try
+        {
+            if (!site.MonitoringAvailable) return;
+
+            OperationalEventDefinition definition = OperationalEventCatalog.Default.GetRequired("CRANE_X11_NOT_CONFIRMED");
+            OperationalPhysicalCycleSnapshot snapshot = tracker.Snapshot();
+            WorkpieceEvidence workpiece = site.Workpiece.HasValue
+                ? Workpiece(
+                    site.Workpiece.Value,
+                    ConfirmedLocation(site.PlannedSource, "物理动作计划来源"),
+                    ConfirmedLocation(site.PlannedTarget, "物理动作计划目标"),
+                    site.Owner,
+                    snapshot.LastConfirmedLocation)
+                : UnknownWorkpiece("后天车上料调用点没有计划工件");
+
+            var recoverySteps = new[]
+            {
+                new RecoveryStepEvidence("异常收尾退磁", finalization.MagnetOffState, finalization.MagnetOffDetail),
+                new RecoveryStepEvidence("异常收尾Z回安全", finalization.SafeZReturnState, finalization.SafeZReturnDetail),
+                new RecoveryStepEvidence("安全Z后X退避", finalization.RetreatState, finalization.RetreatDetail)
+            };
+            bool recoveryComplete = recoverySteps.All(step =>
+                step.State is RecoveryStepState.Succeeded or RecoveryStepState.Skipped);
+            EvidenceValue<bool> cacheRestored = finalization.CacheRestored
+                ? EvidenceValue<bool>.Confirmed(true, "原业务finally已按到达顺序恢复中转架缓存")
+                : EvidenceValue<bool>.Unknown("最终事件调用点没有缓存恢复成功证据");
+            EvidenceValue<string> cacheAfter = finalization.CacheRestored
+                ? EvidenceValue<string>.Confirmed("中转架缓存已按原到达顺序恢复", "原业务catch完成缓存恢复")
+                : EvidenceValue<string>.Unknown("最终事件调用点没有缓存恢复成功证据");
+            var commitments = new[]
+            {
+                new PhysicalCommitmentEvidence("X11确认持件", EvidenceValue<bool>.Confirmed(false, "三次有效X11读取均返回0"), "只能确认未确认持件，不能推断工件仍在来源位"),
+                new PhysicalCommitmentEvidence("退磁命令返回", CommandReturned(snapshot.MagnetOffCommand), snapshot.MagnetOffCommand.Reason),
+                new PhysicalCommitmentEvidence("Z回安全", snapshot.ZKnownSafe, snapshot.ZKnownSafe.Reason),
+                new PhysicalCommitmentEvidence("ZoneTS释放", LockReleased(finalization.ZoneTsHeldBeforeCleanup, finalization.ZoneTsReleasedAfterward, "ZoneTS"), "最终动作租约状态"),
+                new PhysicalCommitmentEvidence("ZoneMT释放", LockReleased(finalization.ZoneMtHeldBeforeCleanup, finalization.ZoneMtReleasedAfterward, "ZoneMT"), "最终动作租约状态"),
+                new PhysicalCommitmentEvidence("后天车锁释放", LockReleased(finalization.RearCraneHeldBeforeCleanup, finalization.RearCraneReleasedAfterward, "RearCrane"), "最终动作租约状态"),
+                new PhysicalCommitmentEvidence("整线暂停告警", finalization.SafetyAlarmCallbackCompleted
+                    ? EvidenceValue<bool>.Confirmed(true, "后天车安全告警回调已完成")
+                    : EvidenceValue<bool>.Unknown("安全告警回调没有完成证据"), "回调完成后由主页面同步暂停对应整线")
+            };
+            var business = new BusinessStateEvidence(
+                EvidenceAvailability.Confirmed,
+                "最终事件只复制原finally已经完成的业务收尾事实",
+                snapshot.LastSuccessfulCheckpoint,
+                EvidenceValue<string>.Unknown("调用点没有保存状态机修改前值"),
+                EvidenceValue<string>.Confirmed("Idle/人工确认暂停", "X11失败原业务分支已恢复缓存并设置暂停"),
+                snapshot.CacheBefore,
+                cacheAfter,
+                Text(site.Owner, "物理动作所有者参数"),
+                EvidenceValue<string>.NotApplicable("X11=0未确认工件已离开中转架"),
+                EvidenceValue<bool>.Confirmed(false, "三次有效X11读取均为0"),
+                EvidenceValue<bool>.Confirmed(false, "X11未确认持件，未执行放料"),
+                cacheRestored,
+                commitments);
+            var locks = new LockEvidence(
+                EvidenceAvailability.Confirmed,
+                "最终事件在原finally锁释放调用完成后生成",
+                new[]
+                {
+                    LockItem("ZoneTS", finalization.ZoneTsHeldBeforeCleanup, finalization.ZoneTsReleasedAfterward),
+                    LockItem("ZoneMT", finalization.ZoneMtHeldBeforeCleanup, finalization.ZoneMtReleasedAfterward),
+                    LockItem("RearCrane", finalization.RearCraneHeldBeforeCleanup, finalization.RearCraneReleasedAfterward)
+                });
+            var recovery = new RecoveryEvidence(
+                EvidenceAvailability.Confirmed,
+                "最终事件在原finally恢复和锁释放完成后生成",
+                EvidenceValue<bool>.Confirmed(true, "X11三次失败后的异常收尾已进入finally"),
+                recoveryComplete
+                    ? EvidenceValue<bool>.Confirmed(true, "所有适用收尾步骤成功或按安全策略跳过")
+                    : EvidenceValue<bool>.Confirmed(false, "至少一个收尾步骤失败或结果未知"),
+                recoverySteps,
+                new[]
+                {
+                    finalization.ResultSummary,
+                    finalization.RearEnginePaused
+                        ? "后端引擎已设置暂停"
+                        : "后端引擎暂停状态未取得确认"
+                },
+                "异常收尾结果只说明软件已执行的步骤，不等于现场物理状态已安全确认");
+            OperatorGuidance guidance = new(
+                new[]
+                {
+                    "人工确认中转架、磁铁、Z轴、后天车和工件实际位置。",
+                    "确认锁释放和整线暂停状态后，再按现场应急流程处理。"
+                },
+                new[]
+                {
+                    "禁止把X11=0解释为工件仍在中转架。",
+                    "禁止在物理位置未确认时直接重新启动或重放取料命令。"
+                },
+                "人工确认物理状态和业务条件后，才允许按既有应急流程继续。");
+
+            OperationalEvidence unavailable = OperationalEvidence.Unavailable("后天车X11最终事件只复制本动作快照");
+            reporter.Report(new OperationalEventContext
+            {
+                EventCode = "CRANE_X11_NOT_CONFIRMED",
+                Severity = definition.DefaultSeverity,
+                Category = definition.DefaultCategory,
+                Scope = site.Scope,
+                Engine = site.Engine,
+                DeviceType = site.DeviceType,
+                DeviceNo = site.DeviceNo,
+                Station = site.Station,
+                ActionStage = $"{site.Station}三次X11均未确认持件（最终收尾）",
+                Title = definition.Title,
+                Source = nameof(OperationalEventContextFactory),
+                ActionId = site.ActionId,
+                CorrelationKey = site.CorrelationKey,
+                IndependentAction = true,
+                DetailMessage = $"三次有效X11读取均返回0；最终收尾：{finalization.ResultSummary}",
+                Result = "原业务已完成异常收尾并保持整线人工暂停",
+                CapturedException = exception,
+                PhysicalConclusion = new PhysicalConclusionEvidence(
+                    PhysicalConclusionCode.ManualConfirmationRequired,
+                    EvidenceAvailability.Confirmed,
+                    "X11未确认持件，最终收尾结果已记录但现场仍需人工确认",
+                    finalization.ResultSummary),
+                BusinessPaused = finalization.RearEnginePaused
+                    ? EvidenceValue<bool>.Confirmed(true, "后端引擎已设置暂停")
+                    : EvidenceValue<bool>.Unknown("后端引擎暂停状态未取得确认"),
+                Evidence = unavailable with
+                {
+                    Workpiece = workpiece,
+                    Position = unavailable.Position with
+                    {
+                        TargetZ = snapshot.TargetZ,
+                        FailureStage = EvidenceValue<string>.Confirmed("X11三次有效返回0后最终收尾", "最终事件调用点")
+                    },
+                    MotionAndMagnet = new MotionAndMagnetEvidence(
+                        snapshot.ZDownCommand,
+                        snapshot.ZMayStillBeLow,
+                        snapshot.MagnetOnCommand,
+                        snapshot.MagnetOffCommand,
+                        snapshot.X11LastValue,
+                        snapshot.X11ReadValid,
+                        snapshot.X11Attempts,
+                        snapshot.X11ReadAtUtc),
+                    BusinessState = business,
+                    Locks = locks,
+                    Recovery = recovery,
+                    Guidance = guidance
+                }
+            });
+        }
+        catch
+        {
+            // 监控快照失败不得影响原finally、锁释放、暂停或弹窗。
+        }
+    }
+
+    private static LockItemEvidence LockItem(string name, bool heldBeforeCleanup, bool releasedAfterward) =>
+        new(
+            name,
+            heldBeforeCleanup
+                ? EvidenceValue<bool>.Confirmed(true, "最终收尾开始时动作租约持有该锁")
+                : EvidenceValue<bool>.NotApplicable("最终收尾开始时动作租约未持有该锁"),
+            heldBeforeCleanup
+                ? EvidenceValue<bool>.Confirmed(releasedAfterward, releasedAfterward ? "最终动作租约已不再持有该锁" : "最终收尾后仍持有该锁")
+                : EvidenceValue<bool>.NotApplicable("最终收尾开始时动作租约未持有该锁"),
+            releasedAfterward ? "仍需按现场流程确认锁和设备位置" : "禁止继续派发动作");
+
+    private static EvidenceValue<bool> LockReleased(bool heldBeforeCleanup, bool releasedAfterward, string name) =>
+        heldBeforeCleanup
+            ? EvidenceValue<bool>.Confirmed(releasedAfterward, $"{name}最终动作租约状态")
+            : EvidenceValue<bool>.NotApplicable($"最终收尾开始时未持有{name}");
 
     private static PhysicalConclusionEvidence Conclusion(string eventCode, string detail) => eventCode switch
     {

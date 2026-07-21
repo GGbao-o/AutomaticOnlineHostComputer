@@ -140,7 +140,9 @@ public sealed class PhysicalEvidenceInstrumentationTests
         Assert.Equal(26, Regex.Matches(all, @"CRANE_MAGNET_ON_RESPONSE_UNKNOWN").Count);
         Assert.Equal(26, Regex.Matches(all, @"CRANE_X11_READ_FAILED").Count);
         Assert.Equal(36, Regex.Matches(all, @"CRANE_MAGNET_OFF_FAILED").Count);
-        Assert.Equal(14, Regex.Matches(all, @"CRANE_X11_NOT_CONFIRMED").Count);
+        // 两条后天车上料出口延后到finally最终化助手；其余12个出口仍直接上报。
+        Assert.Equal(12, Regex.Matches(all, @"CRANE_X11_NOT_CONFIRMED").Count);
+        Assert.Equal(2, Regex.Matches(all, @"TryReportRearLoadX11FinalFailure").Count);
         Assert.Equal(12, Regex.Matches(all, @"CRANE_X11_UNEXPECTED_WORKPIECE").Count);
         Assert.Equal(16, Regex.Matches(all, @"PHYSICAL_HANDOFF_NOT_CLOSED").Count);
     }
