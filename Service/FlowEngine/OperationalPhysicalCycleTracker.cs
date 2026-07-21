@@ -131,10 +131,19 @@ internal sealed class OperationalPhysicalCycleTracker
         _zReason = NonBlank(reason, "Z当前位置未知，仍需人工确认");
     });
 
+    public void BeginSafeZReturn(int target, string reason) => Try(() =>
+    {
+        _targetZ = EvidenceValue<int>.Confirmed(target, "调用点在启动安全Z运动前提供的实际目标值");
+        _zMayStillBeLow = null;
+        _zKnownSafe = false;
+        _zReason = NonBlank(reason, "安全Z运动调用已开始但尚未取得成功返回，当前位置未知");
+    });
+
     public void ConfirmSafeZ(int target, int tolerance, string reason) => Try(() =>
     {
         _safeZTarget = target;
         _safeZTolerance = Math.Max(0, tolerance);
+        _targetZ = EvidenceValue<int>.Confirmed(target, "安全Z运动方法成功返回后的目标值");
         _zKnownSafe = true;
         _zMayStillBeLow = false;
         _zReason = NonBlank(reason, "Z回安全高度方法成功返回");
@@ -222,21 +231,25 @@ internal sealed class OperationalPhysicalCycleTracker
         _lastSuccessfulCheckpoint = checkpoint;
     });
 
-    public void BeginCacheMutation(string key, string before, string detail) => Try(() =>
+    public void BeginCacheMutation(string key, EvidenceValue<string> before, string detail) => Try(() =>
     {
         string normalizedKey = NonBlank(key, "未知缓存键");
         _cacheKey = EvidenceValue<string>.Confirmed(normalizedKey, "调用点提供的缓存键");
-        _cacheBefore = EvidenceValue<string>.Confirmed(NonBlank(before, "修改前值未知"), "调用点在缓存修改前已掌握");
+        _cacheBefore = before;
         _cacheAfter = EvidenceValue<string>.Unknown("缓存修改调用已开始，修改后值未知");
         BeginMonitorStep(OperationalMonitorStepKind.CacheMutation, normalizedKey, detail);
     });
 
-    public void CompleteCacheMutation(string key, string before, string after, string detail) => Try(() =>
+    public void CompleteCacheMutation(
+        string key,
+        EvidenceValue<string> before,
+        EvidenceValue<string> after,
+        string detail) => Try(() =>
     {
         string normalizedKey = NonBlank(key, "未知缓存键");
         _cacheKey = EvidenceValue<string>.Confirmed(normalizedKey, "调用点提供的缓存键");
-        _cacheBefore = EvidenceValue<string>.Confirmed(NonBlank(before, "修改前值未知"), "调用点在缓存修改前已掌握");
-        _cacheAfter = EvidenceValue<string>.Confirmed(NonBlank(after, "修改后值未知"), "原业务缓存修改成功完成后的事实");
+        _cacheBefore = before;
+        _cacheAfter = after;
         CompleteMonitorStep(OperationalMonitorStepKind.CacheMutation, normalizedKey, detail);
     });
 

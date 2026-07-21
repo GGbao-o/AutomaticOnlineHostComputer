@@ -479,7 +479,10 @@ public sealed class PhysicalEvidenceInstrumentationTests
     public void Cache_mutation_preserves_exact_before_after_facts_and_unknown_started_result()
     {
         var tracker = new OperationalPhysicalCycleTracker("cycle-cache-mutation");
-        tracker.BeginCacheMutation("M2:pickReg=710", "存在工件P-001", "Remove调用已开始");
+        tracker.BeginCacheMutation(
+            "M2:pickReg=710",
+            EvidenceValue<string>.Confirmed("存在工件P-001", "锁内读取已确认"),
+            "Remove调用已开始");
 
         OperationalPhysicalCycleSnapshot started = tracker.Snapshot();
         Assert.Equal("M2:pickReg=710", started.CacheKey.Value);
@@ -487,12 +490,42 @@ public sealed class PhysicalEvidenceInstrumentationTests
         Assert.Equal(EvidenceAvailability.Unknown, started.CacheAfter.Availability);
         Assert.Equal(OperationalMonitorStepState.StartedResultUnknown, Assert.Single(started.MonitorSteps).State);
 
-        tracker.CompleteCacheMutation("M2:pickReg=710", "存在工件P-001", "键已移除", "Remove成功返回");
+        tracker.CompleteCacheMutation(
+            "M2:pickReg=710",
+            EvidenceValue<string>.Confirmed("存在工件P-001", "锁内读取已确认"),
+            EvidenceValue<string>.Confirmed("键已移除", "Remove成功返回"),
+            "Remove成功返回");
         OperationalPhysicalCycleSnapshot succeeded = tracker.Snapshot();
         Assert.Equal("存在工件P-001", succeeded.CacheBefore.Value);
         Assert.Equal("键已移除", succeeded.CacheAfter.Value);
         Assert.Equal(EvidenceAvailability.Confirmed, succeeded.CacheAfter.Availability);
         Assert.Equal(OperationalMonitorStepState.Succeeded, Assert.Single(succeeded.MonitorSteps).State);
+    }
+
+    [Fact]
+    public void Cache_callback_before_fact_stays_unknown_instead_of_becoming_confirmed_unknown_text()
+    {
+        var tracker = new OperationalPhysicalCycleTracker("cycle-cache-callback");
+        tracker.BeginCacheMutation(
+            "M817",
+            EvidenceValue<string>.Unknown("回调前未确认M817缓存已写入本周期工件"),
+            "缓存回调调用已开始");
+
+        OperationalPhysicalCycleSnapshot started = tracker.Snapshot();
+        Assert.Equal(EvidenceAvailability.Unknown, started.CacheBefore.Availability);
+        Assert.False(started.CacheBefore.HasValue);
+        Assert.Contains("未确认", started.CacheBefore.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("已确认", started.CacheBefore.Reason, StringComparison.Ordinal);
+
+        tracker.CompleteCacheMutation(
+            "M817",
+            EvidenceValue<string>.Unknown("回调前未确认M817缓存已写入本周期工件"),
+            EvidenceValue<string>.Confirmed("回调成功后M817缓存已写入本周期工件", "缓存回调成功返回"),
+            "缓存回调成功返回");
+
+        OperationalPhysicalCycleSnapshot completed = tracker.Snapshot();
+        Assert.Equal(EvidenceAvailability.Unknown, completed.CacheBefore.Availability);
+        Assert.Equal(EvidenceAvailability.Confirmed, completed.CacheAfter.Availability);
     }
 
     [Fact]

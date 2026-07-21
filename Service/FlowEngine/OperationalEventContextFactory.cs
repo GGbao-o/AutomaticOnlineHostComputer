@@ -156,13 +156,19 @@ internal static class OperationalEventContextFactory
         }
     }
 
-    public static string NewActionId(string engineCode) =>
-        TryNewActionId(engineCode);
+    private static long _fallbackActionSequence;
 
-    public static string TryNewActionId(string engineCode)
+    public static string NewActionId(string engineCode) => TryNewActionId(engineCode);
+
+    public static string TryNewActionId(string engineCode, Func<Guid>? guidFactory = null)
     {
-        try { return $"{engineCode}-{Guid.NewGuid():N}"; }
-        catch { return string.Empty; }
+        string prefix = string.IsNullOrWhiteSpace(engineCode) ? "OPERATION" : engineCode;
+        try { return $"{prefix}-{(guidFactory ?? Guid.NewGuid)():N}"; }
+        catch
+        {
+            long sequence = Interlocked.Increment(ref _fallbackActionSequence);
+            return $"{prefix}-isolated-{Environment.ProcessId}-{sequence}";
+        }
     }
 
     public static OperationalPhysicalCycleTracker? TryCreatePhysicalCycleTracker(string cycleId)
@@ -424,9 +430,7 @@ internal static class OperationalEventContextFactory
             EvidenceValue<bool> downstreamEvidence = MonitorStepState(
                 snapshot.MonitorSteps, OperationalMonitorStepKind.DownstreamNotification,
                 downstreamNotified, "PLC/CNC通知");
-            EvidenceValue<bool> closedEvidence = MonitorStepState(
-                snapshot.MonitorSteps, OperationalMonitorStepKind.PhysicalHandoff,
-                handoffClosed, "完整物理交接闭环");
+            EvidenceValue<bool> closedEvidence = PhysicalHandoffState(snapshot.MonitorSteps, handoffClosed);
             var commitments = new List<PhysicalCommitmentEvidence>
             {
                 new PhysicalCommitmentEvidence("充磁命令调用", CommandReturned(snapshot.MagnetOnCommand), snapshot.MagnetOnCommand.Reason),
@@ -587,6 +591,38 @@ internal static class OperationalEventContextFactory
         if (matching.All(step => step.State == OperationalMonitorStepState.Succeeded))
             return EvidenceValue<bool>.Confirmed(true, $"{label}全部成功返回：{string.Join("；", matching.Select(step => step.Name))}");
         return EvidenceValue<bool>.Confirmed(false, $"{label}尚未开始：{string.Join("；", matching.Where(step => step.State == OperationalMonitorStepState.NotStarted).Select(step => step.Name))}");
+    }
+
+    private static EvidenceValue<bool> PhysicalHandoffState(
+        IReadOnlyList<OperationalMonitorStepEvidence> steps,
+        bool? legacyValue)
+    {
+        OperationalMonitorStepEvidence[] prerequisites = steps
+            .Where(step => step.Kind != OperationalMonitorStepKind.PhysicalHandoff)
+            .ToArray();
+        OperationalMonitorStepEvidence[] notStarted = prerequisites
+            .Where(step => step.State == OperationalMonitorStepState.NotStarted)
+            .ToArray();
+        if (notStarted.Length > 0)
+        {
+            return EvidenceValue<bool>.Confirmed(false,
+                $"完整物理交接尚未开始全部预期步骤：{string.Join("；", notStarted.Select(step => step.Name))}");
+        }
+
+        OperationalMonitorStepEvidence[] startedUnknown = prerequisites
+            .Where(step => step.State == OperationalMonitorStepState.StartedResultUnknown)
+            .ToArray();
+        if (startedUnknown.Length > 0)
+        {
+            return EvidenceValue<bool>.Unknown(
+                $"完整物理交接存在已开始但结果未知的步骤：{string.Join("；", startedUnknown.Select(step => step.Name))}");
+        }
+
+        return MonitorStepState(
+            steps,
+            OperationalMonitorStepKind.PhysicalHandoff,
+            legacyValue,
+            "完整物理交接闭环");
     }
 
     private static EvidenceValue<bool> StepState(OperationalMonitorStepEvidence step) => step.State switch

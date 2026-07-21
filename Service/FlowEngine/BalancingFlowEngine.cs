@@ -1164,12 +1164,15 @@ public sealed class BalancingFlowEngine : IDisposable
                         throw;
                     }
                     mag = false;
+                    operationalTracker.BeginZDown(curZ);
                     try
                     {
                         await _m2.MoveAbsoluteAsync(-1, -1, curZ, ct: ct);
+                        operationalTracker.CompleteZDown();
                     }
                     catch (PressureStopException)
                     {
+                        operationalTracker.MarkZUnknown("M2 X11重试下探触发下压保护，恢复后实际位置未知");
                         await _m2.RecoverFromPressureStopAsync(ct);
                     }
 
@@ -1292,14 +1295,17 @@ public sealed class BalancingFlowEngine : IDisposable
             holdingWorkpiece = false;
             SetM2Display(actionVersion, trackedWorkpiece, "已放到ST008/M710，等待M711确认");
             // ── 放料成功, 清理缓存 (工件已安全放到ST008, 不怕异常) ──
-            operationalTracker.BeginCacheMutation(pickReg, $"{pickReg}=存在({trackedWorkpiece.IdentityText})",
+            operationalTracker.BeginCacheMutation(pickReg,
+                EvidenceValue<string>.Confirmed($"{pickReg}=存在({trackedWorkpiece.IdentityText})", "锁内读取已确认来源缓存存在"),
                 $"开始移除来源缓存键{pickReg}");
             lock (_balWpsLock)
             {
                 _balWps.Remove(pickReg);
             }
-            operationalTracker.CompleteCacheMutation(pickReg, $"{pickReg}=存在({trackedWorkpiece.IdentityText})",
-                $"{pickReg}=已移除", $"来源缓存键{pickReg}移除完成");
+            operationalTracker.CompleteCacheMutation(pickReg,
+                EvidenceValue<string>.Confirmed($"{pickReg}=存在({trackedWorkpiece.IdentityText})", "锁内读取已确认来源缓存存在"),
+                EvidenceValue<string>.Confirmed($"{pickReg}=已移除", "Remove成功完成后的缓存事实"),
+                $"来源缓存键{pickReg}移除完成");
             Console.WriteLine($"[平衡引擎#{EngineId}] [M2] 缓存已清理 {pickReg} Keys=[{CacheKeysText}]");
 
             // ── 写M711=1: 通知PLC工件已送到ST008动平衡料架1(M300→M711) ──
@@ -1643,12 +1649,15 @@ public sealed class BalancingFlowEngine : IDisposable
                         throw;
                     }
                     mag = false;
+                    operationalTracker.BeginZDown(curZ);
                     try
                     {
                         await _m3.MoveAbsoluteAsync(-1, -1, curZ, ct: ct);
+                        operationalTracker.CompleteZDown();
                     }
                     catch (PressureStopException)
                     {
+                        operationalTracker.MarkZUnknown("M3 X11重试下探触发下压保护，恢复后实际位置未知");
                         await _m3.RecoverFromPressureStopAsync(ct);
                     }
 
@@ -1846,14 +1855,17 @@ public sealed class BalancingFlowEngine : IDisposable
             // ── 放料成功, 清理M821来源的缓存 (工件已安全放到ST010) ──
             if (!useM700) // M821来源走缓存, M820来源走D200无需清
             {
-                operationalTracker.BeginCacheMutation("M821", $"M821=存在({m3DisplayWorkpiece.IdentityText})",
+                operationalTracker.BeginCacheMutation("M821",
+                    EvidenceValue<string>.Confirmed($"M821=存在({m3DisplayWorkpiece.IdentityText})", "锁内读取已确认来源缓存存在"),
                     "开始移除来源缓存键M821");
                 lock (_balWpsLock)
                 {
                     _balWps.Remove("M821");
                 }
-                operationalTracker.CompleteCacheMutation("M821", $"M821=存在({m3DisplayWorkpiece.IdentityText})",
-                    "M821=已移除", "来源缓存键M821移除完成");
+                operationalTracker.CompleteCacheMutation("M821",
+                    EvidenceValue<string>.Confirmed($"M821=存在({m3DisplayWorkpiece.IdentityText})", "锁内读取已确认来源缓存存在"),
+                    EvidenceValue<string>.Confirmed("M821=已移除", "Remove成功完成后的缓存事实"),
+                    "来源缓存键M821移除完成");
                 Console.WriteLine($"[平衡引擎#{EngineId}] [M3] 缓存已清理 M821 Keys=[{CacheKeysText}]");
             }
             operationalSourceCacheClosed = true;

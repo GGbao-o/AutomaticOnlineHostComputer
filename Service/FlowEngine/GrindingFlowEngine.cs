@@ -1475,8 +1475,18 @@ public sealed class GrindingFlowEngine : IDisposable
                         throw;
                     }
                     magnetOn = false;
-                    try { await crane.MoveAbsoluteAsync(-1, -1, ApplyOffsetZ(pickupCheckZ), ct: ct); }
-                    catch (PressureStopException) { await crane.RecoverFromPressureStopAsync(ct); }
+                    int retryTargetZ = ApplyOffsetZ(pickupCheckZ);
+                    operationalTracker.BeginZDown(retryTargetZ);
+                    try
+                    {
+                        await crane.MoveAbsoluteAsync(-1, -1, retryTargetZ, ct: ct);
+                        operationalTracker.CompleteZDown();
+                    }
+                    catch (PressureStopException)
+                    {
+                        operationalTracker.MarkZUnknown("ST709 X11重试下探触发下压保护，恢复后实际位置未知");
+                        await crane.RecoverFromPressureStopAsync(ct);
+                    }
                     operationalTracker.BeginMagnetOn();
                     try
                     {
@@ -1943,8 +1953,18 @@ public sealed class GrindingFlowEngine : IDisposable
                         }
                     }, "退磁(X11重试)", ct);
                     magnetOn = false;
-                    try { await crane.MoveAbsoluteAsync(-1, -1, ApplyOffsetZ(unlPickupCheckZ), ct: ct); }
-                    catch (PressureStopException) { await crane.RecoverFromPressureStopAsync(ct); }
+                    int retryTargetZ = ApplyOffsetZ(unlPickupCheckZ);
+                    operationalTracker.BeginZDown(retryTargetZ);
+                    try
+                    {
+                        await crane.MoveAbsoluteAsync(-1, -1, retryTargetZ, ct: ct);
+                        operationalTracker.CompleteZDown();
+                    }
+                    catch (PressureStopException)
+                    {
+                        operationalTracker.MarkZUnknown($"{grinder.StationCode} X11重试下探触发下压保护，恢复后实际位置未知");
+                        await crane.RecoverFromPressureStopAsync(ct);
+                    }
                     await CraneOpAsync(crane, async c =>
                     {
                         operationalTracker.BeginMagnetOn();

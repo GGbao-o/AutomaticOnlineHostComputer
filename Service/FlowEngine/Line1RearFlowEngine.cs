@@ -1307,6 +1307,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             $"{rs}取料并放入{bed.Code}", actionId, $"{actionId}:rear-load", wp,
             rs, bed.Code, "1号线后天车", rs, "中转架工件缓存已取出",
             "ZoneMT/ZoneTS/后天车锁"));
+        operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.DownstreamNotification, $"{bed.Code}CNC上料完成");
+        operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, $"{bed.Code}上料完整交接");
         using var operation = BeginSkewOperation(bed, "上料", ct, transferLocked);
         ct = operation.Token;
         Console.WriteLine($"\n┌── [上料] 开始 ──────────────────────────");
@@ -1452,6 +1454,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     mag = false;
                     try
                     {
+                        operationalTracker.BeginZDown(currentZ);
                         await cr.MoveAbsoluteAsync(-1, -1, currentZ, ct: ct);
                     }
                     catch (PressureStopException)
@@ -1809,6 +1812,8 @@ public sealed class Line1RearFlowEngine : IDisposable
         {
             await cr.MagnetOffAsync(ct);
             operationalTracker.CompletePlacementMagnetOff(bed.Code);
+            operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, $"{bed.Code}上料完整交接",
+                $"{bed.Code}目标位退磁成功返回，放料推定成立；等待Z安全回升和CNC上料完成通知");
         }
         catch (Exception ex)
         {
@@ -1828,10 +1833,11 @@ public sealed class Line1RearFlowEngine : IDisposable
         Console.WriteLine("│ [握手] ⑧ 清上一步信号 → 写天车上料完成,CNC启动加工");
         if (isF) bed.F!.SafeSetMacro(1102, 0); // 清#1102
         else await bed.M!.ClearTailstockClampAsync(ct); // 清10371=0
-        operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.DownstreamNotification, $"{bed.Code}CNC上料完成");
         operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, $"{bed.Code}CNC上料完成", "CNC上料完成通知调用已开始，结果未知");
         if (!isF) await bed.M!.RemoteStartAsync(ct); else await bed.F!.SetCraneLoadDoneAsync(ct);
         operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, $"{bed.Code}CNC上料完成", "CNC上料完成通知成功返回");
+        operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, $"{bed.Code}上料完整交接",
+            $"{bed.Code}退磁、Z安全回升及CNC上料完成通知均成功返回");
         loadState.LoadDoneNotified = true;
         Console.WriteLine($"│ [握手] ✓ 全部完成 {wp.IdentityText}");
     }
@@ -2025,6 +2031,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     magnetOn = false;
                     try
                     {
+                        operationalTracker.BeginZDown(unlz);
                         await cr.MoveAbsoluteAsync(-1, -1, unlz, ct: ct);
                     }
                     catch (PressureStopException)
@@ -2207,6 +2214,19 @@ public sealed class Line1RearFlowEngine : IDisposable
             string balancingReason = isLong ? "版长≥800" : "任务勾选动平衡";
             Console.WriteLine(
                 $"│ [下料] ④ 分流 → {wp.IdentityText} 版长={wp.Length}mm {(needsBalancing ? $"{balancingReason}→ST0191号线动平衡下料架1" : "<800且未勾选→ST010研磨上料架1号位")}");
+            if (needsBalancing)
+            {
+                operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheNotification, "M817动平衡缓存回调");
+                operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheMutation, "M817");
+                operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST019/M817完整交接");
+            }
+            else
+            {
+                operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721(ST010放料完成)");
+                operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheNotification, "M720研磨缓存回调");
+                operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheMutation, "M720");
+                operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST010/M720完整交接");
+            }
             //   获取平衡料架位置锁(防M2Flow/M3Flow/研磨天车同时操作)
             //   1号线后天车下料分流区统一拿两把锁: M817 + M720。
             //   长板目标是M817, 短板目标是M720; 但后天车飞行/放料路径都经过同一侧分流区域,
@@ -2302,22 +2322,30 @@ public sealed class Line1RearFlowEngine : IDisposable
                     }
                     magnetOn = false;
                     operationalPlaced = true;
+                    operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST019/M817完整交接",
+                        "ST019目标位退磁成功返回，放料推定成立；等待缓存回调和Z安全回升");
                     Console.WriteLine($"│   ✓ ST019放料完成,退磁 {wp.IdentityText}");
                     // 通知平衡引擎。工件已物理放下, 缓存回调必须成功, 不能静默跳过。
-                    operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheNotification, "M817动平衡缓存回调");
                     if (OnBalancingRackPlaced == null)
                         throw new InvalidOperationException("M817已放料但动平衡缓存回调未绑定");
                     operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.CacheNotification, "M817动平衡缓存回调", "动平衡缓存回调调用已开始，结果未知");
-                    operationalTracker.BeginCacheMutation("M817", "回调前未确认M817缓存已写入本周期工件", "M817缓存写入调用已开始，修改后事实未知");
+                    operationalTracker.BeginCacheMutation("M817",
+                        EvidenceValue<string>.Unknown("回调前未确认M817缓存已写入本周期工件"),
+                        "M817缓存写入调用已开始，修改后事实未知");
                     OnBalancingRackPlaced.Invoke("M817", wp);
                     operationalCacheNotified = true;
-                    operationalTracker.CompleteCacheMutation("M817", "回调前未确认M817缓存已写入本周期工件", "回调成功后M817缓存已写入本周期工件", "M817缓存写入成功返回");
+                    operationalTracker.CompleteCacheMutation("M817",
+                        EvidenceValue<string>.Unknown("回调前未确认M817缓存已写入本周期工件"),
+                        EvidenceValue<string>.Confirmed("回调成功后M817缓存已写入本周期工件", "缓存回调成功返回"),
+                        "M817缓存写入成功返回");
                     operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.CacheNotification, "M817动平衡缓存回调", "动平衡缓存回调成功返回");
                     wp.ReportStage("1号线 动平衡下料架 M817");
                     //移动z
                     await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
                     physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST019放料后Z升安全命令成功返回");
                     operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST019放料后Z升安全命令成功返回");
+                    operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST019/M817完整交接",
+                        "ST019退磁、M817缓存回调及Z安全回升均成功返回");
                     holdingWorkpiece = false;
                     placedToDestination = true;
                 }
@@ -2381,6 +2409,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                     }
                     magnetOn = false;
                     operationalPlaced = true;
+                    operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST010/M720完整交接",
+                        "ST010目标位退磁成功返回，放料推定成立；等待Z安全回升、M721和研磨缓存回调");
                     Console.WriteLine("│   ✓ ST010放料完成,退磁");
                     //退磁完成先回安全位置
                     await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
@@ -2404,15 +2434,21 @@ public sealed class Line1RearFlowEngine : IDisposable
 
                     // ── 通知研磨引擎: 工件已放到1号位, 入FIFO缓存 ──
                     wp.BoreType = 1; // bore固定1(大孔), 研磨机不需要版孔区分
-                    operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheNotification, "M720研磨缓存回调");
                     if (OnGrindingRackPlaced == null)
                         throw new InvalidOperationException("M720/ST010已放料但研磨缓存回调未绑定");
                     operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.CacheNotification, "M720研磨缓存回调", "研磨缓存回调调用已开始，结果未知");
-                    operationalTracker.BeginCacheMutation("M720", "回调前未确认M720缓存已写入本周期工件", "M720缓存写入调用已开始，修改后事实未知");
+                    operationalTracker.BeginCacheMutation("M720",
+                        EvidenceValue<string>.Unknown("回调前未确认M720缓存已写入本周期工件"),
+                        "M720缓存写入调用已开始，修改后事实未知");
                     OnGrindingRackPlaced.Invoke(wp);
                     operationalCacheNotified = true;
-                    operationalTracker.CompleteCacheMutation("M720", "回调前未确认M720缓存已写入本周期工件", "回调成功后M720缓存已写入本周期工件", "M720缓存写入成功返回");
+                    operationalTracker.CompleteCacheMutation("M720",
+                        EvidenceValue<string>.Unknown("回调前未确认M720缓存已写入本周期工件"),
+                        EvidenceValue<string>.Confirmed("回调成功后M720缓存已写入本周期工件", "缓存回调成功返回"),
+                        "M720缓存写入成功返回");
                     operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.CacheNotification, "M720研磨缓存回调", "研磨缓存回调成功返回");
+                    operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST010/M720完整交接",
+                        "ST010退磁、Z安全回升、M721及M720研磨缓存回调均成功返回");
                     wp.ReportStage("1号线 研磨上料架 ST010/M720");
                     Console.WriteLine($"│   ✓ 通知研磨引擎入缓存 {wp.IdentityText} d={wp.Diameter} L={wp.Length}");
                     

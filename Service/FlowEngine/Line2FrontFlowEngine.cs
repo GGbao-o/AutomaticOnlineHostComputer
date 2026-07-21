@@ -1680,6 +1680,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         bool holdingWorkpiece = false;  // X11确认吸住后才算工件真的在机械手上
         bool placedOnFork = false;      // 退磁放到货叉后, 才允许货叉状态机接管
         operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M801取料完成通知");
+        operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST712货叉完整交接");
         try
         {
             Console.WriteLine($"[Line2Front] [机械手1] ═══ 取料送叉 {wp.IdentityText} d={wp.Diameter} L={wp.Length} ═══");
@@ -1886,6 +1887,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
             {
                 await _manipulator1!.MagnetOffAsync(ct);
                 operationalTracker.CompletePlacementMagnetOff("ST712货叉");
+                operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST712货叉完整交接",
+                    "货叉目标位退磁成功返回；等待Z回安全、机械手安全退出和M801通知");
             }
             catch (Exception ex)
             {
@@ -1936,6 +1939,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
             Console.WriteLine($"[Line2Front] [机械手1] ④ M801=1→0 取料完成 ✓ {wp.IdentityText}");
             // 门闩必须放在M801成功之后；主循环可能与本方法并行，提前置位会让货叉在M801失败时误启动。
             _manipulatorClearedFork = true;
+            operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST712货叉完整交接",
+                "退磁放料、Z回安全、机械手安全退出和M801通知均成功返回");
             Console.WriteLine("[Line2Front] [机械手1]   货叉放行门闩=ON，双头镗可开始交互；机械手继续回取板待机点");
 
             // 同1号线：货叉放行后仍保持两线共享机械手锁，先回取板待机点，再释放锁。
@@ -2106,6 +2111,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
             "2号线", "前端引擎", "前天车", CraneFront2No.ToString(), "ST502", "打号机取回并放到中转架",
             actionId, $"{actionId}:marker-pickup", wp, "ST502", "中转架", "2号线前天车", "ST502",
             "打号机工件等待取回", "前天车锁/ZoneMT/ZoneTS"));
+        pos3OperationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST502打号机放料与文件握手");
         bool magnetOn = false;
         try
         {
@@ -2485,6 +2491,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
         {
             await crane.MagnetOffAsync(ct);
             pos3OperationalTracker.CompletePlacementMagnetOff("ST502打号机");
+            pos3OperationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST502打号机放料与文件握手",
+                "打号机目标位退磁成功返回；等待Z回升和文件握手完成");
         }
         catch (Exception ex)
         {
@@ -2533,15 +2541,20 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
         // Z升+写A.txt 并发启动
         markerZUp = markerZ - 300 + _craneOffsetZ; // 上升目标Z = 取料位-400+天车偏移
-        var zUpTask = crane.MoveAbsoluteAsync(-1, -1, markerZUp, ct: ct);
+        pos3OperationalTracker.BeginSafeZReturn(markerZUp, "打号机放料后Z升命令已启动，尚未取得成功返回");
+        async Task MoveMarkerZUpWithEvidenceAsync()
+        {
+            await crane.MoveAbsoluteAsync(-1, -1, markerZUp, ct: ct);
+            pos3OperationalTracker.ConfirmSafeZ(markerZUp, _cfg.AbsMove.Tolerance, "打号机放料后Z升命令自身成功返回");
+            physicalTracker?.TryConfirmSafeZ(markerZUp, _cfg.AbsMove.Tolerance, "打号机放料后Z升命令自身成功返回");
+        }
+        var zUpTask = MoveMarkerZUpWithEvidenceAsync();
         Console.WriteLine($"[Line2Front] [打号机] Z升+写A.txt 并发启动... Z升目标={markerZUp}");
         // 写A.txt立即启动(不等Z升) → 打号机开始打标
         Console.WriteLine($"[Line2Front] [打号机] 写A.txt: '{content.Replace("\n", " | ")}'");
         pos3OperationalTracker.BeginMonitorStep(OperationalMonitorStepKind.FileHandshake, "ST502打号机文件握手", "打号机A文件写入与B文件完成回执等待已开始，结果未知");
         var writeATask = File.WriteAllTextAsync(fileA, content, Encoding.ASCII, ct);
         await Task.WhenAll(zUpTask, writeATask);  // 等Z升+写A都完成
-        pos3OperationalTracker.ConfirmSafeZ(markerZUp, _cfg.AbsMove.Tolerance, "打号机放料后Z升与文件写入均成功返回");
-        physicalTracker?.TryConfirmSafeZ(markerZUp, _cfg.AbsMove.Tolerance, "打号机放料后Z升与文件写入均成功返回");
         Console.WriteLine($"[Line2Front] [打号机] Z升完成 + A.txt已写入 ✓ {wp.IdentityText}");
 
         // ── 轮询等 B.txt (打标完成, 1小时超时) ──
@@ -2557,6 +2570,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
         }
         if (!File.Exists(fileB)) throw new TimeoutException("打标机超时：1小时(3600s)未生成 B.txt");
         pos3OperationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.FileHandshake, "ST502打号机文件握手", "打号机B文件已出现，文件握手成功返回");
+        pos3OperationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST502打号机放料与文件握手",
+            "退磁放料、Z回升及打号文件握手均成功返回");
         Console.WriteLine($"[Line2Front] [打号机] B.txt已生成 ✓ {wp.IdentityText}");
         }
         catch (Exception ex)
@@ -2718,6 +2733,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         bool placedOnRack = false;
         bool rackCacheNotified = false;
         operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.CacheNotification, "OnRackPlaced中转架缓存通知");
+        operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "中转架放料与缓存通知");
         string? notifiedRackStation = null;
         try
         {
@@ -2779,6 +2795,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
             {
                 await crane.MagnetOffAsync(ct);
                 operationalTracker.CompletePlacementMagnetOff(rackStation);
+                operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "中转架放料与缓存通知",
+                    $"{rackStation}目标位退磁成功返回；等待Z回安全和缓存通知");
             }
             catch (Exception ex)
             {
@@ -2802,6 +2820,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
             OnRackPlaced.Invoke(rackStation, wp);
             operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.CacheNotification, "OnRackPlaced中转架缓存通知", $"OnRackPlaced({rackStation})成功返回");
             rackCacheNotified = true;
+            operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "中转架放料与缓存通知",
+                $"{rackStation}退磁放料、Z回安全和缓存通知均成功返回");
             wp.ReportStage($"2号线 中转架 {rackStation}");
             // 物理放料和缓存通知已经完成, 先更新本地快照, 避免PLC有版信号下一轮才刷新导致后端暂时看不到。
             if (rackStation == "ST016") DeviceStatus.TransferRack4Free = false;
