@@ -39,7 +39,15 @@
       "Bash(python *)",
       "Bash(D:/python3.12.7/python.exe -m pip install openpyxl -q)",
       "Bash(D:/python3.12.7/python.exe \"D:/BSH/hateshujukejicode/自动线上位机/V4.4.0 - DIS-0928-1/Automatic Online Host Computer/Docs/create_device_config.py\")",
-      "Bash(git diff *)"
+      "Bash(git diff *)",
+      "Bash(dir \"D:\\\\BSH\\\\c#\\\\Automatic Online Host Computer\\\\Service\\\\OperationalEvents\\\\\" 2>nul & dir \"D:\\\\BSH\\\\c#\\\\Automatic Online Host Computer\\\\Infrastructure\\\\Export\\\\\")",
+      "Bash(dir \"D:\\\\BSH\\\\c#\\\\Automatic Online Host Computer\\\\Presentation\\\\ViewModels\\\\Home\\\\OperationalEvent*.cs\")",
+      "Bash(dir \"D:\\\\BSH\\\\c#\\\\Automatic Online Host Computer\\\\Presentation\\\\Services\\\\OperationalEvent*.cs\")",
+      "Bash(dir \"D:\\\\BSH\\\\c#\\\\Automatic Online Host Computer\\\\Views\\\\AttentionMonitor\\\\\" 2>nul)",
+      "Bash(dotnet test *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'fix: preserve physical evidence truth *)",
+      "Bash(grep -v \"//\\\\|///\")"
     ]
   }
 }

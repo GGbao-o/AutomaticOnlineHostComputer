@@ -236,6 +236,7 @@
     "enabled": true,
     "toleranceMm": 5,
     "maxAdjustMm": 1000,
+    "absolutePerDisplayDirections": {},
     "stationTargets": {
       "1": {
         "ST713": -2764,
@@ -425,7 +426,7 @@
       "ST608": 1200,
       "ST609": 1200,
       "ST610": 1255,
-      "ST108": 1350,
+      "ST108": 1300,
       "ST109": 1300,
       "ST111": 1300,
       "ST110": 1300,

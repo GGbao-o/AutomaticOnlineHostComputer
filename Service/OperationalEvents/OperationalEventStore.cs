@@ -9,6 +9,19 @@ public sealed class OperationalEventStore : IOperationalEventStore
     private readonly Dictionary<string, LinkedListNode<StoredEvent>> _currentByFingerprint =
         new(StringComparer.Ordinal);
 
+    public long CurrentVersion
+    {
+        get { lock (_gate) return _version; }
+    }
+
+    public OperationalEventDiagnostics GetDiagnosticsSnapshot()
+    {
+        lock (_gate)
+            return new OperationalEventDiagnostics(
+                _totalReceived, _aggregatedCount, _evictedCount,
+                _reporterFailureCount, _lastReporterFailureAtUtc, _lastReporterFailureReason);
+    }
+
     private long _version;
     private long _totalReceived;
     private long _aggregatedCount;

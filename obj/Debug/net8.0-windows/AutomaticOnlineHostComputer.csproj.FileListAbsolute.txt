@@ -298,3 +298,4 @@ D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\RuntimeD
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\RuntimeDiagnostics\RuntimeDiagnosticsView.g.cs
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\InProcessWorkpieces\InProcessWorkpieceOverviewView.baml
 D:\BSH\c#\Automatic Online Host Computer\obj\Debug\net8.0-windows\Views\InProcessWorkpieces\InProcessWorkpieceOverviewView.g.cs
+D:\BSH\c#\Automatic Online Host Computer\bin\Debug\net8.0-windows\Config\operational_event_monitor_settings.json

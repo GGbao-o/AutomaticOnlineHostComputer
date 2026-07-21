@@ -4,18 +4,77 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="#E9EEF5">
     <UserControl.Resources>
+        <SolidColorBrush x:Key="PanelBgBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="BorderSoftBrush" Color="#CED8E6" />
+        <SolidColorBrush x:Key="TextMainBrush" Color="#172033" />
+        <SolidColorBrush x:Key="TextMutedBrush" Color="#627084" />
+        <SolidColorBrush x:Key="HeaderBgBrush" Color="#F7FAFC" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#1677FF" />
+
         <Style x:Key="PanelStyle" TargetType="Border">
-            <Setter Property="Background" Value="#FFFFFF" />
-            <Setter Property="BorderBrush" Value="#CED8E6" />
+            <Setter Property="Background" Value="{StaticResource PanelBgBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,10" />
         </Style>
-        <Style x:Key="KpiStyle" TargetType="Border" BasedOn="{StaticResource PanelStyle}">
-            <Setter Property="Width" Value="190" />
-            <Setter Property="Height" Value="82" />
-            <Setter Property="Margin" Value="0,0,12,0" />
+
+        <Style x:Key="KpiStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PanelBgBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="MinWidth" Value="100" />
+            <Setter Property="Margin" Value="0,0,8,0" />
         </Style>
+
+        <Style x:Key="FilterLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource TextMainBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="10,0,4,0" />
+        </Style>
+
+        <Style x:Key="FilterComboStyle" TargetType="ComboBox">
+            <Setter Property="Width" Value="100" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+
+        <Style x:Key="FilterTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Width" Value="90" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Padding" Value="4,0" />
+        </Style>
+
+        <Style x:Key="DetailSectionStyle" TargetType="Border">
+            <Setter Property="Background" Value="#F8FAFC" />
+            <Setter Property="BorderBrush" Value="#E2E8F0" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+
+        <Style x:Key="DetailHeaderStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource TextMainBrush}" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <Style x:Key="DetailTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="FontFamily" Value="Consolas, Microsoft YaHei" />
+        </Style>
+
         <Style TargetType="DataGrid">
             <Setter Property="AutoGenerateColumns" Value="False" />
             <Setter Property="CanUserAddRows" Value="False" />
@@ -25,60 +84,193 @@
             <Setter Property="RowHeaderWidth" Value="0" />
             <Setter Property="GridLinesVisibility" Value="Horizontal" />
             <Setter Property="HorizontalGridLinesBrush" Value="#E2E8F0" />
-            <Setter Property="VerticalGridLinesBrush" Value="#FFFFFF" />
             <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="SelectionMode" Value="Single" />
+            <Setter Property="SelectionUnit" Value="FullRow" />
+            <Setter Property="RowHeight" Value="30" />
+            <Setter Property="ColumnHeaderHeight" Value="30" />
+            <Setter Property="FontSize" Value="12" />
         </Style>
     </UserControl.Resources>
 
-    <Grid Margin="18">
+    <Grid Margin="14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel>
-            <TextBlock FontSize="22" FontWeight="SemiBold" Foreground="#172033" Text="异常监控" />
-            <TextBlock Margin="0,5,0,0" Foreground="#627084"
-                       Text="仅保留当前程序生命周期内需要人工关注的异常、警告和应急操作；程序关闭后自动清空。" />
-        </StackPanel>
+        <!-- ── 标题栏 ── -->
+        <Border Grid.Row="0" Margin="0,0,0,10" Padding="14,10" Style="{StaticResource PanelStyle}">
+            <StackPanel>
+                <TextBlock FontSize="20" FontWeight="Bold" Foreground="{StaticResource TextMainBrush}" Text="异常监控" />
+                <TextBlock Margin="0,5,0,0" FontSize="12" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"
+                           Text="最多保留 5000 条聚合事件，程序关闭后自动清空。此页面只展示事件，不执行清报警、恢复引擎或设备控制。" />
+            </StackPanel>
+        </Border>
 
-        <WrapPanel Grid.Row="1" Margin="0,18,0,16">
-            <Border Style="{StaticResource KpiStyle}" BorderBrush="#FCA5A5">
-                <StackPanel><TextBlock Foreground="#B91C1C" Text="红色安全异常" /><TextBlock FontSize="26" FontWeight="Bold" Foreground="#DC2626" Text="{Binding SafetyAlarmCount}" /></StackPanel>
-            </Border>
-            <Border Style="{StaticResource KpiStyle}" BorderBrush="#FCD34D">
-                <StackPanel><TextBlock Foreground="#92400E" Text="黄色警告" /><TextBlock FontSize="26" FontWeight="Bold" Foreground="#D97706" Text="{Binding WarningCount}" /></StackPanel>
-            </Border>
-            <Border Style="{StaticResource KpiStyle}" BorderBrush="#93C5FD">
-                <StackPanel><TextBlock Foreground="#1D4ED8" Text="应急操作" /><TextBlock FontSize="26" FontWeight="Bold" Foreground="#2563EB" Text="{Binding EmergencyCount}" /></StackPanel>
-            </Border>
-            <Border Style="{StaticResource KpiStyle}" Width="250">
-                <StackPanel><TextBlock Foreground="#475569" Text="最近事件时间" /><TextBlock Margin="0,9,0,0" FontSize="16" FontWeight="SemiBold" Foreground="#172033" Text="{Binding LastEventText}" /></StackPanel>
-            </Border>
-        </WrapPanel>
-
-        <Border Grid.Row="2" Style="{StaticResource PanelStyle}" Margin="0,0,0,12">
-            <WrapPanel VerticalAlignment="Center">
-                <TextBlock Margin="0,5,8,0" Foreground="#475569" Text="类型" />
-                <ComboBox Width="145" ItemsSource="{Binding KindOptions}" SelectedItem="{Binding SelectedKind}" />
-                <TextBlock Margin="22,5,8,0" Foreground="#475569" Text="来源" />
-                <ComboBox Width="125" ItemsSource="{Binding ScopeOptions}" SelectedItem="{Binding SelectedScope}" />
-                <TextBlock Margin="22,5,0,0" Foreground="#64748B" Text="此页面只展示事件，不执行清报警、恢复引擎或设备控制。" />
+        <!-- ── KPI 和诊断 ── -->
+        <Border Grid.Row="1" Margin="0,0,0,8" Padding="10,8" Style="{StaticResource PanelStyle}">
+            <WrapPanel>
+                <Border Style="{StaticResource KpiStyle}" BorderBrush="#FCA5A5">
+                    <StackPanel>
+                        <TextBlock FontSize="11" Foreground="#B91C1C" Text="安全/结果未知" />
+                        <TextBlock FontSize="22" FontWeight="Bold" Foreground="#DC2626" Text="{Binding SafetyUnknownCount, Mode=OneWay, FallbackValue=0}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource KpiStyle}" BorderBrush="#F87171">
+                    <StackPanel>
+                        <TextBlock FontSize="11" Foreground="#991B1B" Text="最终失败" />
+                        <TextBlock FontSize="22" FontWeight="Bold" Foreground="#EF4444" Text="{Binding FinalFailureCount, Mode=OneWay, FallbackValue=0}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource KpiStyle}" BorderBrush="#FCD34D">
+                    <StackPanel>
+                        <TextBlock FontSize="11" Foreground="#92400E" Text="警告" />
+                        <TextBlock FontSize="22" FontWeight="Bold" Foreground="#D97706" Text="{Binding WarningCount, Mode=OneWay, FallbackValue=0}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource KpiStyle}" BorderBrush="#86EFAC">
+                    <StackPanel>
+                        <TextBlock FontSize="11" Foreground="#14532D" Text="自动恢复" />
+                        <TextBlock FontSize="22" FontWeight="Bold" Foreground="#16A34A" Text="{Binding RecoveryCount, Mode=OneWay, FallbackValue=0}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource KpiStyle}" BorderBrush="#93C5FD">
+                    <StackPanel>
+                        <TextBlock FontSize="11" Foreground="#1D4ED8" Text="阶段滞留" />
+                        <TextBlock FontSize="22" FontWeight="Bold" Foreground="#2563EB" Text="{Binding StageStallCount, Mode=OneWay, FallbackValue=0}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource KpiStyle}" BorderBrush="#D1D5DB" MinWidth="180">
+                    <StackPanel>
+                        <TextBlock FontSize="11" Foreground="#475569" Text="监控自检" />
+                        <TextBlock FontSize="11" Foreground="#64748B">
+                            <Run Text="接收:" /><Run Text="{Binding TotalReceived, Mode=OneWay, FallbackValue=0}" />
+                            <Run Text=" 聚合:" /><Run Text="{Binding AggregatedCount, Mode=OneWay, FallbackValue=0}" />
+                            <Run Text=" 淘汰:" /><Run Text="{Binding EvictedCount, Mode=OneWay, FallbackValue=0}" />
+                            <Run Text=" 失败:" /><Run Text="{Binding ReporterFailureCount, Mode=OneWay, FallbackValue=0}" />
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
             </WrapPanel>
         </Border>
 
-        <Border Grid.Row="3" Style="{StaticResource PanelStyle}" Padding="0">
-            <DataGrid ItemsSource="{Binding FilteredEvents}">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="时间" Width="160" Binding="{Binding OccurredAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" />
-                    <DataGridTextColumn Header="等级" Width="115" Binding="{Binding KindText}" />
-                    <DataGridTextColumn Header="来源" Width="150" Binding="{Binding Source}" />
-                    <DataGridTextColumn Header="内容" Width="*" Binding="{Binding Message}" />
-                    <DataGridTextColumn Header="结果" Width="105" Binding="{Binding ResultText}" />
-                </DataGrid.Columns>
-            </DataGrid>
+        <!-- ── 筛选栏 ── -->
+        <Border Grid.Row="2" Margin="0,0,0,8" Padding="10,6" Style="{StaticResource PanelStyle}">
+            <StackPanel>
+            <WrapPanel>
+                <TextBlock Text="时间从" Style="{StaticResource FilterLabelStyle}" Margin="0,0,4,0" />
+                <TextBox Text="{Binding FilterTimeFromText, UpdateSourceTrigger=LostFocus}" Width="120" Style="{StaticResource FilterTextBoxStyle}" />
+                <TextBlock Text="到" Style="{StaticResource FilterLabelStyle}" />
+                <TextBox Text="{Binding FilterTimeToText, UpdateSourceTrigger=LostFocus}" Width="120" Style="{StaticResource FilterTextBoxStyle}" />
+
+                <TextBlock Text="等级" Style="{StaticResource FilterLabelStyle}" />
+                <ComboBox ItemsSource="{Binding SeverityOptions}" Text="{Binding FilterSeverityText}" IsEditable="False" Style="{StaticResource FilterComboStyle}" />
+
+                <TextBlock Text="类别" Style="{StaticResource FilterLabelStyle}" />
+                <ComboBox ItemsSource="{Binding CategoryOptions}" Text="{Binding FilterCategoryText}" IsEditable="False" Style="{StaticResource FilterComboStyle}" />
+
+                <TextBlock Text="线路" Style="{StaticResource FilterLabelStyle}" />
+                <ComboBox ItemsSource="{Binding ScopeOptions}" SelectedItem="{Binding FilterScope}" Style="{StaticResource FilterComboStyle}" />
+
+                <TextBlock Text="引擎" Style="{StaticResource FilterLabelStyle}" />
+                <ComboBox ItemsSource="{Binding EngineOptions}" SelectedItem="{Binding FilterEngine}" Style="{StaticResource FilterComboStyle}" />
+            </WrapPanel>
+            <WrapPanel Margin="0,4,0,0">
+                <TextBlock Text="设备" Style="{StaticResource FilterLabelStyle}" Margin="0,0,4,0" />
+                <ComboBox ItemsSource="{Binding DeviceTypeOptions}" Text="{Binding FilterDeviceType}" IsEditable="True" Width="105" Height="24" FontSize="12" Margin="0,0,8,0" />
+                <TextBlock Text="编号" Style="{StaticResource FilterLabelStyle}" />
+                <TextBox Text="{Binding FilterDeviceNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FilterTextBoxStyle}" />
+                <TextBlock Text="工位" Style="{StaticResource FilterLabelStyle}" />
+                <TextBox Text="{Binding FilterStation, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FilterTextBoxStyle}" />
+                <TextBlock Text="工件" Style="{StaticResource FilterLabelStyle}" />
+                <TextBox Text="{Binding FilterWorkpiece, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FilterTextBoxStyle}" />
+                <TextBlock Text="关键字" Style="{StaticResource FilterLabelStyle}" />
+                <TextBox Text="{Binding FilterKeyword, UpdateSourceTrigger=PropertyChanged}" Width="130" Style="{StaticResource FilterTextBoxStyle}" />
+
+                <TextBlock Text="暂停" Style="{StaticResource FilterLabelStyle}" />
+                <ComboBox ItemsSource="{Binding PausedFilterOptions}" Text="{Binding FilterPausedText}" IsEditable="False" Style="{StaticResource FilterComboStyle}" Width="85" />
+                <TextBlock Text="恢复" Style="{StaticResource FilterLabelStyle}" />
+                <ComboBox ItemsSource="{Binding RecoveryFilterOptions}" Text="{Binding FilterRecoveryText}" IsEditable="False" Style="{StaticResource FilterComboStyle}" Width="85" />
+
+                <CheckBox IsChecked="{Binding FilterDuplicateOnly}" VerticalAlignment="Center" Margin="10,0,4,0" />
+                <TextBlock Text="仅重复" Style="{StaticResource FilterLabelStyle}" Margin="0,0,0,0" />
+            </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ── 主从布局 ── -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" MinWidth="420" />
+                <ColumnDefinition Width="4" />
+                <ColumnDefinition Width="*" MinWidth="300" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左：事件列表 -->
+            <Border Grid.Column="0" Style="{StaticResource PanelStyle}" Padding="0" Margin="0,0,0,0">
+                <DataGrid ItemsSource="{Binding FilteredRows}" SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
+                          EnableRowVirtualization="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="时间" Width="150" Binding="{Binding LastOccurred, StringFormat={}{0:MM-dd HH:mm:ss}}" />
+                        <DataGridTextColumn Header="等级" Width="52" Binding="{Binding SeverityText}" />
+                        <DataGridTextColumn Header="类别" Width="58" Binding="{Binding CategoryText}" />
+                        <DataGridTextColumn Header="标题" Width="180" Binding="{Binding Title}" />
+                        <DataGridTextColumn Header="设备/工位" Width="130" Binding="{Binding DeviceStation}" />
+                        <DataGridTextColumn Header="阶段" Width="80" Binding="{Binding Stage}" />
+                        <DataGridTextColumn Header="工件" Width="90" Binding="{Binding WorkpieceText}" />
+                        <DataGridTextColumn Header="次数" Width="40" Binding="{Binding CountText}" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Border>
+
+            <!-- 分隔 -->
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <!-- 右：详情 -->
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="10,0,0,0">
+                    <!-- 物理安全结论 -->
+                    <Border Style="{StaticResource DetailSectionStyle}" BorderBrush="#FCA5A5" Background="#FFF5F5">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource DetailHeaderStyle}" Foreground="#B91C1C" Text="物理安全结论" />
+                            <TextBlock Style="{StaticResource DetailTextStyle}" Text="从左侧选择事件查看。"
+                                       Visibility="Collapsed" x:Name="PhysicalEmptyHint" />
+                            <TextBlock Style="{StaticResource DetailTextStyle}" TextWrapping="Wrap"
+                                       Text="{Binding SelectedDetailTitle, FallbackValue=请选择事件}" FontSize="14" FontWeight="Bold" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 八组详情 -->
+                    <TextBlock Style="{StaticResource DetailTextStyle}" Text="{Binding SelectedDetailText, FallbackValue=请从左侧列表选择事件查看详情。}"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- ── 底部操作栏 ── -->
+        <Border Grid.Row="4" Margin="0,8,0,0" Padding="10,6" Style="{StaticResource PanelStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding OperationStatusText, FallbackValue=--}" FontSize="12"
+                               Foreground="{StaticResource TextMutedBrush}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Content="复制详情" Width="80" Height="28" FontSize="12" Margin="0,0,6,0"
+                            Click="Copy_Click" IsEnabled="{Binding CanCopy}" />
+                    <Button Content="导出当前筛选" Width="100" Height="28" FontSize="12" Margin="0,0,6,0"
+                            Click="ExportFiltered_Click" IsEnabled="{Binding CanExport}" />
+                    <Button Content="导出全部" Width="80" Height="28" FontSize="12"
+                            Click="ExportAll_Click" IsEnabled="{Binding CanExport}" />
+                </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </UserControl>

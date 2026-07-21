@@ -54,6 +54,10 @@ public interface IOperationalEventStore
 {
     event Action? Changed;
 
+    long CurrentVersion { get; }
+
+    OperationalEventDiagnostics GetDiagnosticsSnapshot();
+
     void Record(
         OperationalEventContext context,
         DateTime occurredAtUtc,

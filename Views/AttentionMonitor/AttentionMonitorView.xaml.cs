@@ -1,15 +1,24 @@
+using System.Windows;
+using System.Windows.Controls;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 using Microsoft.Extensions.DependencyInjection;
-using System.Windows.Controls;
 
 namespace AutomaticOnlineHostComputer.Views.AttentionMonitor;
 
-/// <summary>当前生命周期人工关注事件的只读页面。</summary>
+/// <summary>生产异常结构化观察页面 — 只读展示，不执行设备控制。</summary>
 public partial class AttentionMonitorView : UserControl
 {
+    private AttentionMonitorViewModel ViewModel => (AttentionMonitorViewModel)DataContext;
+
     public AttentionMonitorView()
     {
         InitializeComponent();
         DataContext = App.Services.GetRequiredService<AttentionMonitorViewModel>();
+        Loaded += (_, _) => ViewModel?.EnterPage();
+        Unloaded += (_, _) => ViewModel?.LeavePage();
     }
+
+    private async void Copy_Click(object sender, RoutedEventArgs e) => ViewModel?.CopyDetail();
+    private async void ExportFiltered_Click(object sender, RoutedEventArgs e) { if (ViewModel != null) await ViewModel.ExportFilteredAsync(); }
+    private async void ExportAll_Click(object sender, RoutedEventArgs e) { if (ViewModel != null) await ViewModel.ExportAllAsync(); }
 }

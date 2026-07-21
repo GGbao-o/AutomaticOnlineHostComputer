@@ -1517,6 +1517,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     throw new Exception($"取料失败: 2次充磁后X11仍=0");
                 }
                 currentZ += 5;
+                loadState.ZMayBeDown = true; // Z已降到低位，即使后续异常也不能横移X
                 Console.WriteLine($"│ [取料] ⚠ X11=0 未吸到, 准备下探5mm重试");
             }
             //天车这时候在安全位置
@@ -1625,6 +1626,22 @@ public sealed class Line1RearFlowEngine : IDisposable
                             "原业务在异常收尾中吞掉退磁异常；实际退磁结果未知", true,
                             holdingWorkpiece: holdingWorkpiece);
                         Console.WriteLine($"│ [上料] ⚠ X11未确认有版,退磁失败: {offEx.Message}");
+                    }
+                }
+                // X11未确认吸住时Z还在取料低位。退磁后先将Z拉回原点，
+                // 防止finally做X+1000退避时低位横移。
+                if (cr != null)
+                {
+                    try
+                    {
+                        await cr.MoveAbsoluteAsync(-1, -1, 0, ct: CancellationToken.None);
+                        loadState.ZMayBeDown = false; // Z已安全，finally可以退避
+                        Console.WriteLine("│ [上料] X11=0恢复: Z已回原点");
+                    }
+                    catch (Exception zEx)
+                    {
+                        loadState.ZMayBeDown = true; // Z回升失败，禁止退避
+                        Console.WriteLine($"│ [上料] X11=0恢复: Z→0失败({zEx.Message}), 禁止X退避, 已直接释放锁");
                     }
                 }
                 bed.St = SkewState.Idle;

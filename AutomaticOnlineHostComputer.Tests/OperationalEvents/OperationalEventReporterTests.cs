@@ -593,6 +593,8 @@ public sealed class OperationalEventReporterTests
     private sealed class ThrowingStore : IOperationalEventStore
     {
         public event Action? Changed { add { } remove { } }
+        public long CurrentVersion => 0;
+        public OperationalEventDiagnostics GetDiagnosticsSnapshot() => throw new InvalidOperationException();
         public void Record(OperationalEventContext context, DateTime occurredAtUtc, long observationSequence, string fingerprint) =>
             throw new InvalidOperationException("record failed");
         public void RecordReporterFailure(DateTime occurredAtUtc, string reason) =>
@@ -606,6 +608,8 @@ public sealed class OperationalEventReporterTests
     {
         public OperationalEventContext? Context { get; private set; }
         public event Action? Changed { add { } remove { } }
+        public long CurrentVersion => 0;
+        public OperationalEventDiagnostics GetDiagnosticsSnapshot() => new(0, 0, 0, 0, null, "");
         public void Record(OperationalEventContext context, DateTime occurredAtUtc, long observationSequence, string fingerprint) => Context = context;
         public void RecordReporterFailure(DateTime occurredAtUtc, string reason) { }
         public void RecordStateEviction(OperationalEventTrackerKind trackerKind, DateTime occurredAtUtc) { }
@@ -641,6 +645,8 @@ public sealed class OperationalEventReporterTests
         public void RecordStateEviction(OperationalEventTrackerKind trackerKind, DateTime occurredAtUtc) =>
             _inner.RecordStateEviction(trackerKind, occurredAtUtc);
 
+        public long CurrentVersion => _inner.CurrentVersion;
+        public OperationalEventDiagnostics GetDiagnosticsSnapshot() => _inner.GetDiagnosticsSnapshot();
         public OperationalEventStoreSnapshot Snapshot() => _inner.Snapshot();
     }
 
@@ -662,6 +668,8 @@ public sealed class OperationalEventReporterTests
         public void RecordStateEviction(OperationalEventTrackerKind trackerKind, DateTime occurredAtUtc) =>
             throw new InvalidOperationException("state eviction diagnostic failed");
 
+        public long CurrentVersion => 0;
+        public OperationalEventDiagnostics GetDiagnosticsSnapshot() => new(0, 0, 0, 0, null, "");
         public OperationalEventStoreSnapshot Snapshot() => throw new NotSupportedException();
     }
 

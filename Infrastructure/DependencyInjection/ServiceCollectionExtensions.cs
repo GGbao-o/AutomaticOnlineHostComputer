@@ -106,6 +106,12 @@ services.AddSingleton<HomeViewModel>();
         services.AddSingleton<OperationalEventFormatter>();
         services.AddSingleton<AttentionEventCenter>();
 
+        // ── 3.2 UI 抽象（测试可注入内存版本）──────────────────────────────
+        services.AddSingleton<Presentation.Services.IUiDispatcher, Presentation.Services.WpfUiDispatcher>();
+        services.AddSingleton<Presentation.Services.IClipboardService, Presentation.Services.WpfClipboardService>();
+        services.AddSingleton<Presentation.Services.IOperationalEventSaveDialog, Presentation.Services.WpfOperationalEventSaveDialog>();
+        services.AddSingleton<Presentation.Services.IOperationalEventExportService, Presentation.Services.OperationalEventExportService>();
+
         // ── 4. 注册工件跟踪/设备数据写库服务（天车实时坐标不再持久化）─────────
         services.AddSingleton<PositionUpdateService>(
             _ => new PositionUpdateService(connectionString));
@@ -118,7 +124,20 @@ services.AddSingleton<HomeViewModel>();
         services.AddSingleton<HomeViewModel>();
 
         // ── 6.1 异常监控页面 VM（Singleton）──────────────────────────────
-        services.AddSingleton<AttentionMonitorViewModel>();
+        services.AddSingleton<Presentation.ViewModels.Home.OperationalEventNavigationState>();
+        services.AddSingleton(provider =>
+        {
+            var store = provider.GetRequiredService<IOperationalEventStore>();
+            var formatter = provider.GetRequiredService<OperationalEventFormatter>();
+            var dispatcher = provider.GetRequiredService<Presentation.Services.IUiDispatcher>();
+            var clipboard = provider.GetRequiredService<Presentation.Services.IClipboardService>();
+            var saveDialog = provider.GetRequiredService<Presentation.Services.IOperationalEventSaveDialog>();
+            var export = provider.GetRequiredService<Presentation.Services.IOperationalEventExportService>();
+            var attention = provider.GetRequiredService<AttentionEventCenter>();
+            var nav = provider.GetRequiredService<Presentation.ViewModels.Home.OperationalEventNavigationState>();
+            return new Presentation.ViewModels.Home.AttentionMonitorViewModel(
+                store, formatter, dispatcher, clipboard, saveDialog, export, attention, nav);
+        });
 
         // ── 6.2 运行诊断页面 VM（Singleton）──────────────────────────────
         // 该VM只消费HomeViewModel提供的内存快照，不持有设备连接，也不创建后台轮询。

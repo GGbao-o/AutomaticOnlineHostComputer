@@ -61,6 +61,7 @@
                 Header="在制工件"
                 Tag="inProcessWorkpieces" />
             <MenuItem
+                x:Name="AttentionMonitorMenuItem"
                 Click="MenuItem_Click"
                 Header="异常监控"
                 Tag="attentionMonitor" />
