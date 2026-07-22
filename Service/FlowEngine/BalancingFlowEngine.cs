@@ -685,12 +685,7 @@ public sealed class BalancingFlowEngine : IDisposable
         {
             _m2 = _manipulatorCache.GetOrCreateService(2);
             if (!_m2.IsConnected) await _m2.ConnectAsync(ct);
-            // 机械手速度配置只设一次 (避免每个Flow重复写9个寄存器)
-            var spd2 = _cfg.GetManipulatorSpeed(2);
-            //设置机械手2速度
-            await _m2.SetAbsSpeedAsync(spd2.X.Speed, spd2.X.Accel, spd2.X.Decel,
-                spd2.Y.Speed, spd2.Y.Accel, spd2.Y.Decel, spd2.Z.Speed, spd2.Z.Accel, spd2.Z.Decel, ct);
-            Console.WriteLine("[平衡引擎] 机械手2 ✓ (速度已配置)");
+            Console.WriteLine("[平衡引擎] 机械手2 ✓ (每趟M2任务取料前按配置设置速度)");
         }
         catch (Exception ex)
         {
@@ -701,12 +696,7 @@ public sealed class BalancingFlowEngine : IDisposable
         {
             _m3 = _manipulatorCache.GetOrCreateService(3);
             if (!_m3.IsConnected) await _m3.ConnectAsync(ct);
-            //配置文件拿速度
-            var spd3 = _cfg.GetManipulatorSpeed(3);
-            //设置机械手3速度
-            await _m3.SetAbsSpeedAsync(spd3.X.Speed, spd3.X.Accel, spd3.X.Decel,
-                spd3.Y.Speed, spd3.Y.Accel, spd3.Y.Decel, spd3.Z.Speed, spd3.Z.Accel, spd3.Z.Decel, ct);
-            Console.WriteLine("[平衡引擎] 机械手3 ✓ (速度已配置)");
+            Console.WriteLine("[平衡引擎] 机械手3 ✓ (每趟M3任务取料前按配置设置速度)");
         }
         catch (Exception ex)
         {
@@ -1118,6 +1108,8 @@ public sealed class BalancingFlowEngine : IDisposable
                 Console.WriteLine("[平衡引擎]   拒绝取料, 请人工确认机械手2状态后手动处理");
                 throw new InvalidOperationException("机械手2 X11=1(磁铁已有工件), 拒绝取料防止碰撞");
             }
+            // 每趟M2搬运只在首次物理移动前完整下发一次速度；后续Y/Z、X11重试和放料复用本次参数。
+            await ConfigureManipulatorAbsSpeedAsync(_m2!, 2, "M2", ct);
             Console.WriteLine($"[平衡引擎] [M2] ① 取料 {pickReg}({pickCode}) {trackedWorkpiece.IdentityText} Y={pickY} Z={pzDown}");
             // 先Y移到取料位(机械手只移YZ轴)
             await _m2.MoveAbsoluteAsync(-1, pickY, -1, ct: ct);
@@ -1603,6 +1595,8 @@ public sealed class BalancingFlowEngine : IDisposable
                 Console.WriteLine("[平衡引擎]   拒绝取料, 请人工确认机械手3状态后手动处理");
                 throw new InvalidOperationException("机械手3 X11=1(磁铁已有工件), 拒绝取料防止碰撞");
             }
+            // 每趟M3搬运只在首次物理移动前完整下发一次速度；后续Y/Z、X11重试和放料复用本次参数。
+            await ConfigureManipulatorAbsSpeedAsync(_m3!, 3, "M3", ct);
             Console.WriteLine($"[平衡引擎] [M3] ① 取料 {pickReg}({pickCode}) {sourceIdentity} Y={pickY} Z={pzDown}");
             // 先Y移到取料位(机械手只移YZ轴)
             await _m3.MoveAbsoluteAsync(-1, pickY, -1, ct: ct);
@@ -1968,6 +1962,21 @@ public sealed class BalancingFlowEngine : IDisposable
                 ClearM3Display(actionVersion);
             FinishM3Action(actionVersion, actionCompletion);
         }
+    }
+
+    /// <summary>
+    /// 每趟新的机械手搬运在首次物理移动前设置一次绝对速度。
+    /// 同一趟任务后续的Y/Z移动、X11下探重试、放料和回安全位复用该次设置，避免重复写九个Modbus寄存器。
+    /// </summary>
+    private async Task ConfigureManipulatorAbsSpeedAsync(
+        CraneService manipulator, int manipulatorNo, string taskName, CancellationToken ct)
+    {
+        var speed = _cfg.GetManipulatorSpeed(manipulatorNo);
+        Console.WriteLine($"[平衡引擎] [{taskName}] 按当前配置设置机械手{manipulatorNo}绝对速度");
+        await manipulator.SetAbsSpeedAsync(
+            speed.X.Speed, speed.X.Accel, speed.X.Decel,
+            speed.Y.Speed, speed.Y.Accel, speed.Y.Decel,
+            speed.Z.Speed, speed.Z.Accel, speed.Z.Decel, ct);
     }
 
     /// <summary>Z下降公式: 台面Z - Round[(d/2/zFactor1)+(d/2/zFactor2)] — 机械手取料/放料用</summary>
