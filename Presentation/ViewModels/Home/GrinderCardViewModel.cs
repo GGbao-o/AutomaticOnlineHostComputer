@@ -114,6 +114,8 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
         bool fault   = snapshot.Alarm;
         bool stone1  = snapshot.GrindStone1Alarm;
         bool stone2  = snapshot.GrindStone2Alarm;
+        bool stoneAlarm = stone1 || stone2;
+        int stoneNo = stone1 ? 1 : 2;
         bool reqData = snapshot.ReqData;
         bool reqLoad = snapshot.ReqLoad;
         bool clamped = snapshot.Clamped;
@@ -122,9 +124,11 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
         bool busy    = snapshot.Busy;
         bool door    = snapshot.Door;
 
-        ConnectedBrush = fault ? Brushes.Red : Brushes.LimeGreen;
-        Line1Brush = fault ? Brushes.Red : Brushes.Green;
-        Line1 = fault ? "已连接 | ⚠ 故障" : "已连接，就绪";
+        ConnectedBrush = fault || stoneAlarm ? Brushes.Red : Brushes.LimeGreen;
+        Line1Brush = fault || stoneAlarm ? Brushes.Red : Brushes.Green;
+        Line1 = stoneAlarm
+            ? $"已连接 | ⚠ 磨石{stoneNo}厚度报警 · 已停止自动分配"
+            : fault ? "已连接 | ⚠ 故障" : "已连接，就绪";
 
         Line2 = reqUnld ? "请求下料 → 等待天车取料" :
                 reqLoad ? "请求上料 → 等待天车送料" :

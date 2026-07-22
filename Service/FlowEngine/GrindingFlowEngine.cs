@@ -711,6 +711,8 @@ public sealed class GrindingFlowEngine : IDisposable
                         extra = g.LastMachining ? ",加工中" : ",加工完";
                         if (g.LastR7304 != 0) extra += "+请求下料";
                     }
+                    if (g.HasGrindStoneAlarm)
+                        extra += $",磨石{(g.LastGrindStone1Alarm ? "1" : "2")}报警/停止自动分配";
                     if (g.LastDoorOpen && (g.State == GrinderState.Loading || g.State == GrinderState.Machining || g.State == GrinderState.WaitingForUnload))
                         extra += ",门开";
                     string conn = g.Svc?.IsConnected == true ? "✓" : "✗";
@@ -1111,7 +1113,7 @@ public sealed class GrindingFlowEngine : IDisposable
             if (g.GrinderType == PlcGrinderService.GrinderType.TypeA)
             {
                 var s = await g.Svc.ReadTypeAStatusSnapshotAsync(ct);
-                TryCommitGrinderSignals(g, scanVersion, s.RawDI, s.ReqData, s.ReqUnload ? 1 : 0, s.Busy, s.Door);
+                CommitTypeAGrinderSignals(g, scanVersion, s, "状态扫描");
             }
             // ── TypeB(新代): 一次批量读R7301~R7308快照, 避免多次读导致新旧信号混用 ──
             else
@@ -1133,8 +1135,59 @@ public sealed class GrindingFlowEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// 提交西门子 TypeA 的完整快照，并把磨石报警作为“仅本机禁止新任务分配”的状态。
+    /// 锁覆盖旧扫描和取料前二次确认，防止较早的正常扫描覆盖刚读取到的报警。
+    /// </summary>
+    private void CommitTypeAGrinderSignals(GrinderContext g, long scanVersion,
+        PlcGrinderService.TypeAStatusSnapshot snapshot, string source)
+    {
+        lock (g.GrindStoneAlarmGate)
+        {
+            bool wasAlarm = g.HasGrindStoneAlarm;
+            if (!TryCommitGrinderSignals(g, scanVersion, snapshot.RawDI, snapshot.ReqData,
+                    snapshot.ReqUnload ? 1 : 0, snapshot.Busy, snapshot.Door,
+                    snapshot.GrindStone1Alarm, snapshot.GrindStone2Alarm))
+                return;
+
+            LogGrindStoneAlarmState(g, wasAlarm, source);
+        }
+    }
+
+    /// <summary>
+    /// 磨石厚度是单机维护信号：只禁止该机接收新的自动上料，绝不暂停整个研磨引擎。
+    /// 报警进入/恢复只输出一次；持续报警每分钟提示一次，避免轮询刷屏。
+    /// </summary>
+    private static void LogGrindStoneAlarmState(GrinderContext g, bool wasAlarm, string source)
+    {
+        bool hasAlarm = g.HasGrindStoneAlarm;
+        string stones = string.Join("、", new[]
+        {
+            g.LastGrindStone1Alarm ? "磨石1" : null,
+            g.LastGrindStone2Alarm ? "磨石2" : null,
+        }.Where(x => x != null));
+        var now = DateTime.UtcNow;
+
+        if (hasAlarm != wasAlarm)
+        {
+            g.LastGrindStoneAlarmHeartbeatAtUtc = now;
+            if (hasAlarm)
+                Console.WriteLine($"[GrindingEngine] [{g.Name}] ⚠ {stones}厚度报警({source})，仅停止本机自动分配；其他研磨机继续运行");
+            else
+                Console.WriteLine($"[GrindingEngine] [{g.Name}] ✓ 磨石厚度报警已恢复({source})，本机恢复自动分配资格");
+            return;
+        }
+
+        if (hasAlarm && now - g.LastGrindStoneAlarmHeartbeatAtUtc >= TimeSpan.FromMinutes(1))
+        {
+            g.LastGrindStoneAlarmHeartbeatAtUtc = now;
+            Console.WriteLine($"[GrindingEngine] [{g.Name}] ⏳ {stones}厚度仍报警，持续停止本机自动分配；其他研磨机继续运行");
+        }
+    }
+
     private static bool TryCommitGrinderSignals(GrinderContext g, long scanVersion, int rawDi,
-        bool requestData, int requestUnload, bool machining, bool doorOpen)
+        bool requestData, int requestUnload, bool machining, bool doorOpen,
+        bool grindStone1Alarm = false, bool grindStone2Alarm = false)
     {
         if (Interlocked.Read(ref g.SignalScanVersion) != scanVersion)
         {
@@ -1147,12 +1200,14 @@ public sealed class GrindingFlowEngine : IDisposable
         g.LastR7304 = requestUnload;
         g.LastMachining = machining;
         g.LastDoorOpen = doorOpen;
+        g.LastGrindStone1Alarm = grindStone1Alarm;
+        g.LastGrindStone2Alarm = grindStone2Alarm;
         return true;
     }
 
     /// <summary>
-    /// 按优先级找可用的研磨机(Idle+PLC联机就绪+无PendingWorkpiece)。
-    /// 条件: State=Idle, LastRequestData=1(PLC就绪), Svc已连接, 无在途工件
+    /// 按优先级找可用的研磨机(Idle+PLC联机就绪+无PendingWorkpiece+无磨石报警)。
+    /// 磨石报警是单机维护信号，只排除报警机的新上料，不影响其他机台和已完成工件下料。
     /// </summary>
     private bool ShouldLogWaiting(string key)
     {
@@ -1170,7 +1225,8 @@ public sealed class GrindingFlowEngine : IDisposable
             && g.LastRequestData                   // PLC已联机(请求数据=1)
             && g.Svc != null                      // 共享服务已注入(GrinderPoll)
             && g.Svc.IsConnected                  // Modbus已连接
-            && g.PendingWorkpiece == null);        // 无在途工件(后台流程跑完会清)
+            && g.PendingWorkpiece == null          // 无在途工件(后台流程跑完会清)
+            && !g.HasGrindStoneAlarm);             // 磨石厚度报警：仅本机停止自动分配
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1226,7 +1282,7 @@ public sealed class GrindingFlowEngine : IDisposable
     /// 天车取料 + 送料到研磨机 + 握手全流程（由主循环 fire-and-forget 调用）。
     /// <para>14 个步骤：</para>
     /// <para>  ① 等待研磨机请求数据（避免 PLC 未就绪就写参数）</para>
-    /// <para>  ② 检查磨石厚度报警（仅 TypeA，有报警则暂停引擎）</para>
+    /// <para>  ② 检查磨石厚度报警（仅 TypeA；报警机停止新任务分配，其他机继续）</para>
     /// <para>  ③ 写工件参数 + 数据传输完成(3s长信号) — 通知 PLC 参数已下发</para>
     /// <para>  ④ 天车 XY+Z 到上料架 ST709（坐标从数据库读）</para>
     /// <para>  ⑤ 充磁取料（轮询 X6=1 确认充磁到位）</para>
@@ -1292,25 +1348,24 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}]   ① 请求数据=1 ✓ PLC已就绪");
 
             // ── ② 检查磨石厚度报警(仅西门子TypeA) ──
-            //    有报警→暂停引擎+提示更换磨石, 工件放回缓存(还没取料)
-            //    有报警则暂停引擎并提示更换磨石，不继续写入
+            //    正式取料前重新读完整快照，覆盖扫描与动作之间才出现的报警。
+            //    报警只是本机维护信号：工件仍在ST709，退回缓存并停止本机自动分配；不暂停研磨引擎。
             if (grinder.GrinderType == PlcGrinderService.GrinderType.TypeA)
             {
-                bool stoneAlarm = await grinder.Svc!.HasAnyGrindStoneAlarmAsync(ct);
-                if (stoneAlarm)
+                var snapshot = await grinder.Svc!.ReadTypeAStatusSnapshotAsync(ct);
+                CommitTypeAGrinderSignals(grinder, Interlocked.Increment(ref grinder.SignalScanVersion), snapshot,
+                    "取料前二次确认");
+                if (grinder.HasGrindStoneAlarm)
                 {
                     Console.WriteLine($"══════════════════════════════════════════════");
-                    Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠⚠⚠ 磨石厚度报警！暂停流程，请更换磨石 ⚠⚠⚠");
+                    Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠⚠⚠ 磨石厚度报警！停止本机自动分配，请更换磨石 ⚠⚠⚠");
                     Console.WriteLine($"══════════════════════════════════════════════");
-                    Console.WriteLine($"[GrindingEngine] ⚠ 磨石报警！暂停引擎");
-                    _paused = true;
-                    OnSafetyAlarm?.Invoke($"{grinder.Name}磨石厚度报警。研磨引擎已暂停，工件{wp.IdentityText}已放回缓存，请更换磨石后恢复。");
                     grinder.State = GrinderState.Idle;
                     grinder.StateChangedAt = DateTime.UtcNow;
                     grinder.PendingWorkpiece = null; // 清PendingWorkpiece, 否则FindReadyGrinder永久排除此研磨机
                     // 工件还在 ST709 架上，放回缓存（finally 会释放锁）
                     RequeueWorkpiece(wp);
-                    Console.WriteLine($"[GrindingEngine] ↩ 工件 d={wp.Diameter} 放回缓存（磨石报警，未取料）");
+                    Console.WriteLine($"[GrindingEngine] ↩ 工件 d={wp.Diameter} 放回缓存（磨石报警，未取料；其他研磨机继续分配）");
                     return;  // 中止上料流程
                 }
             }
@@ -2379,6 +2434,16 @@ public sealed class GrinderContext
     public bool LastMachining { get; set; }
     /// <summary>最近一次门开信号: TypeA=40001-15 / TypeB=R7307。研磨机防护门已开=1</summary>
     public bool LastDoorOpen { get; set; }
+    /// <summary>TypeA最近一次磨石1厚度报警: 40001-1。仅禁止本机接收新的自动上料。</summary>
+    public bool LastGrindStone1Alarm { get; set; }
+    /// <summary>TypeA最近一次磨石2厚度报警: 40001-2。仅禁止本机接收新的自动上料。</summary>
+    public bool LastGrindStone2Alarm { get; set; }
+    /// <summary>任一磨石报警时为true；不影响本机已加工工件的下料。</summary>
+    public bool HasGrindStoneAlarm => LastGrindStone1Alarm || LastGrindStone2Alarm;
+    /// <summary>保护磨石报警状态与取料前二次确认，避免旧扫描覆盖新报警。</summary>
+    internal object GrindStoneAlarmGate { get; } = new();
+    /// <summary>持续磨石报警的最近一次心跳日志UTC时间。</summary>
+    public DateTime LastGrindStoneAlarmHeartbeatAtUtc { get; set; } = DateTime.MinValue;
     /// <summary>状态扫描版本。超时/失败会递增版本, 防止旧扫描任务晚返回后覆盖已清空的信号。</summary>
     public long SignalScanVersion;
     /// <summary>进入当前状态的时间戳(UTC), 用于卡死检测:超过HandshakeTimeoutMs强制回Idle</summary>

@@ -152,3 +152,13 @@
 - 用户澄清第3项的安全范围是 M817→ST008 路径穿过 ST020/M818 区域，故 M817 取料须同时确认2号与4号后天车都离开；当前代码仅按来源检查2号，已将此前按“来源对应天车”得出的结论更正为问题属实。
 - 已按确认方案修复：M817派发要求M817缓存；M817路径改为同时确认2、4号后天车；1号线后天车持板后M720=0改为持锁轮询等待，读取异常仍抛入原安全异常路径。新增3项静态行为契约测试，定向测试3/3通过。
 - 最终验证：全量xUnit测试162/162通过；`dotnet build AutomaticOnlineHostComputer.csproj --no-restore`为0警告、0错误；`git diff --check`未发现空白错误，仅有既有LF/CRLF转换提示。
+# 2026-07-22 研磨机磨石报警单机禁派发
+
+- 用户已确认实施：TypeA磨石1/2报警只禁止该机自动分配，不暂停研磨引擎；其他研磨机照常派发，已在机内工件仍可下料。
+- 已写入设计：`Docs/superpowers/specs/2026-07-22-grinder-stone-alarm-dispatch-design.md`。
+- 已写入执行计划：`Docs/superpowers/plans/2026-07-22-grinder-stone-alarm-single-machine-dispatch.md`。
+- 下一步：先建立回归契约，再修改调度扫描/二次确认、设备总览和全流程状态，最后同步文档并运行全量验证。
+- 已新增 `GrindingStoneAlarmDispatchContractTests`；初次红灯为3项缺失，实施后有一次测试断言将局部变量名` s `写死，改为实际` snapshot `字段后通过。
+- 已实现单机禁派发、取料前二次确认、进入/恢复/一分钟心跳日志，以及设备总览/全流程状态红色主状态。
+- 已更新业务、协议、技术、前置条件、异常处理与日志审查文档。
+- 验证：定向契约3/3通过；完整测试168/168通过；`dotnet build AutomaticOnlineHostComputer.csproj --no-restore --verbosity minimal`为0警告、0错误；`git diff --check`无空白错误（仅LF/CRLF提示）。

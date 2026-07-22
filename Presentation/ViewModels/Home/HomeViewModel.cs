@@ -670,9 +670,10 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>将第三部分机械手卡片的状态镜像到第四部分 StatusCard（不建新连接，复用已有 VM）。</summary>
     private static string To01(bool b) => b ? "1" : "0";
 
-    private static string BuildGrinderOverviewState(bool fault, bool statusAlarm, bool reqData, bool reqLoad,
-        bool clamped, bool reqUnload, bool unclamp, bool busy, int? machineStatus = null)
+    private static string BuildGrinderOverviewState(bool fault, bool statusAlarm, bool stoneAlarm, int stoneNo,
+        bool reqData, bool reqLoad, bool clamped, bool reqUnload, bool unclamp, bool busy, int? machineStatus = null)
     {
+        if (stoneAlarm) return $"⚠ 磨石{stoneNo}厚度报警 · 已停止自动分配";
         if (fault || statusAlarm) return statusAlarm ? "报警" : "故障";
         if (reqUnload) return "请求下料";
         if (reqLoad) return "请求上料";
@@ -2880,8 +2881,10 @@ public sealed class HomeViewModel : ObservableObject
                     bool busy    = snapshot.Busy;
                     bool door    = snapshot.Door;
 
-                    string state = BuildGrinderOverviewState(fault, false, reqData, reqLoad, clamped, reqUnld, unclamp, busy);
-                    stationCard.ConnectedBrush = fault ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.LimeGreen;
+                    int stoneNo = stone1 ? 1 : 2;
+                    string state = BuildGrinderOverviewState(fault, false, stone1 || stone2, stoneNo,
+                        reqData, reqLoad, clamped, reqUnld, unclamp, busy);
+                    stationCard.ConnectedBrush = fault || stone1 || stone2 ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.LimeGreen;
                     stationCard.Status1 = state;
                     stationCard.Status1Brush = GetSignalStateBrush(state);
                     stationCard.Status2 = $"DI=0x{snapshot.RawDI:X4} b12={To01(reqUnld)} 数据={To01(reqData)} 上料={To01(reqLoad)} 锁紧={To01(clamped)} 下料={To01(reqUnld)} 松开={To01(unclamp)} 加工={To01(busy)} 门={(door ? "开" : "关")} 磨石1={To01(stone1)} 磨石2={To01(stone2)}";
@@ -2908,7 +2911,8 @@ public sealed class HomeViewModel : ObservableObject
                     bool busy    = snapshot.Busy;
                     bool door    = snapshot.Door;
 
-                    string state = BuildGrinderOverviewState(false, status == 2, reqData, reqLoad, clamped, reqUnld, unclamp, busy, status);
+                    string state = BuildGrinderOverviewState(false, status == 2, false, 0,
+                        reqData, reqLoad, clamped, reqUnld, unclamp, busy, status);
                     stationCard.ConnectedBrush = status == 2 ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.LimeGreen;
                     stationCard.Status1 = state;
                     stationCard.Status1Brush = GetSignalStateBrush(state);
