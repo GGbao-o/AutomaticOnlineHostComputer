@@ -17,7 +17,7 @@ namespace AutomaticOnlineHostComputer.Service;
 // ///   本引擎负责动平衡侧的搬运。
 // ///
 // /// 【机械手2流程 — 动平衡料架搬运】
-// ///   M817有板，或ST020满足M823允许取料且M818软件缓存存在
+// ///   M817有板且M817软件缓存存在，或ST020满足M823允许取料且M818软件缓存存在
 // ///   → Z↓取料位(充磁+X11检测→Z↑安全高度)
 // ///   → XY→ST008动平衡料架1 → Z↓台面 → 退磁 → Z↑安全 → Y回安全位
 // ///   工件直径从 OnBalancingRackPlaced 回调缓存读取, 取不到则暂停人工确认
@@ -834,13 +834,16 @@ public sealed class BalancingFlowEngine : IDisposable
                 }
 
                 
+                bool m817Cached = HasBalWp("M817");
                 bool m818Cached = HasBalWp("M818");
                 bool m821Cached = HasBalWp("M821");
-                bool m2HasSource = (_m823CanPick && m818Cached) || (_m817 && !m818Cached);
+                bool m2HasSource = (_m823CanPick && m818Cached) || (_m817 && m817Cached && !m818Cached);
                 bool m3HasSource = (_m825CanPick && m821Cached) || (_m700 && !m821Cached);
 
                 if (_cycleCount % 10 == 1)
                 {
+                    if (_m817 && !m817Cached)
+                        Console.WriteLine("[平衡引擎] M2等: M817=1(1号线有板)但M817软件缓存不存在, 禁止盲取");
                     if (_m823CanPick && !m818Cached)
                         Console.WriteLine("[平衡引擎] M2等: M823=1(ST020允许取料)但M818软件缓存不存在, 禁止盲取");
                     if (m818Cached && !_m823CanPick)
@@ -851,19 +854,23 @@ public sealed class BalancingFlowEngine : IDisposable
                         Console.WriteLine("[平衡引擎] M3等: M821缓存存在, 等M825=1允许取ST021");
                 }
 
-                // ── ⑤ 机械手2触发条件: M817有版或ST020(M823允许取+M818缓存存在) + 后天车已离开 + ST008(M710=1允许放版) ──
+                // ── ⑤ 机械手2触发条件: M817有板+M817缓存，或ST020(M823允许取+M818缓存存在) + 路径后天车已离开 + ST008(M710=1允许放版) ──
                 if (!M2Busy && _m2?.IsConnected == true && m2HasSource)
                 {
                     Console.WriteLine("[平衡引擎] 进入机械手2触发区域 ");
                     // 检查对应后天车是否已离开动平衡区域。
                     // M2优先取ST020: M817位置更远, 且去M817需要穿过ST020区域并多拿一把路径锁。
                     // 只要M818缓存存在就认为ST020有实体工件, 等M823允许后先清ST020, 不绕行取M817。
-                    bool useM817 = !m818Cached && _m817;
-                    int rearCraneNo = useM817 ? 2 : 4; // M817→1号线后天车(2号), M818→2号线后天车(4号)
-                    if (!await IsCraneAtSafeXAsync(rearCraneNo, ct))
+                    bool useM817 = !m818Cached && _m817 && m817Cached;
+                    bool rearCranesSafe = useM817
+                        ? await AreM817PathRearCranesAtSafeXAsync(ct)
+                        : await IsCraneAtSafeXAsync(4, ct);
+                    if (!rearCranesSafe)
                     {
                         if (_cycleCount % 10 == 1)
-                            Console.WriteLine($"[平衡引擎] M2等: 天车{rearCraneNo}号未离开动平衡区域");
+                            Console.WriteLine(useM817
+                                ? "[平衡引擎] M2等: M817→ST008路径上的2号或4号后天车未离开动平衡区域"
+                                : "[平衡引擎] M2等: ST020来源的4号后天车未离开动平衡区域");
                     }
                     
                     else if (!_m710) // ST008未给允许放版信号(M710=0) → 等
@@ -929,6 +936,13 @@ public sealed class BalancingFlowEngine : IDisposable
     private void ClearM2Busy() => System.Threading.Volatile.Write(ref _m2BusyFlag, 0);
     private void ClearM3Busy() => System.Threading.Volatile.Write(ref _m3BusyFlag, 0);
 
+    /// <summary>M817→ST008路径会经过ST020/M818区域，2号和4号后天车都必须离开。</summary>
+    private async Task<bool> AreM817PathRearCranesAtSafeXAsync(CancellationToken ct)
+    {
+        if (!await IsCraneAtSafeXAsync(2, ct)) return false;
+        return await IsCraneAtSafeXAsync(4, ct);
+    }
+
     /// <summary>检查指定天车是否已离开动平衡/研磨区域(X <= 配置安全阈值) safex设置的-2000</summary>
     private async Task<bool> IsCraneAtSafeXAsync(int craneNo, CancellationToken ct)
     {
@@ -949,7 +963,7 @@ public sealed class BalancingFlowEngine : IDisposable
 
     // ═══════════════════════════════════════════════════════════════════
     //  机械手2流程 (M2Flow): 动平衡下料架→取料→ST008放料→Y回安全位
-    //    触发: 主循环⑤ M817有版或ST020(M823允许取+M818缓存存在) + 后天车X≤safeX + M710(ST008)允许放版
+    //    触发: 主循环⑤ M817有板+M817缓存，或ST020(M823允许取+M818缓存存在) + 路径后天车X≤safeX + M710(ST008)允许放版
     //    直径: 从_balWps缓存读(后天车DoUnload→OnBalancingRackPlaced写入), 取不到则暂停人工确认
     //    信号: 放料完成后写M711=1(MC65)通知PLC工件已送到
     //    ⚠ 缓存Remove移至放料成功后, 防止放料失败时缓存丢失

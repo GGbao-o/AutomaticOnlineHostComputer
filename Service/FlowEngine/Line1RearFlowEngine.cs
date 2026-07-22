@@ -2382,7 +2382,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     // 注意: 多把锁从获取前就进入finally保护, 第二把等待异常/取消时也会释放第一把, 避免死锁。
                     if (_lockM817 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M817)..."); await operation.AcquireAsync("M817", _lockM817, ct); gotM817 = true; }
                     if (_lockM720 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M720)..."); await operation.AcquireAsync("M720", _lockM720, ct); gotM720 = true; }
-                    await ConfirmM720EmptyBeforePlaceAsync(ct);
+                    await WaitForM720CanPlaceBeforePlaceAsync(wp, ct);
                 }
 
                 // ③ XY移动+放料(持锁中)
@@ -3044,8 +3044,27 @@ public sealed class Line1RearFlowEngine : IDisposable
         if (busy) throw new InvalidOperationException("M817二次确认=有版, 禁止放料");
     }
 
-    /// <summary>二次确认M720允许放版。与步骤④预检一致，直接读M720所在字。</summary>
-    private async Task ConfirmM720EmptyBeforePlaceAsync(CancellationToken ct)
+    /// <summary>
+    /// 后天车已持板并取得分流锁后，M720=0只是目标位暂时不可用：保持持板等待，
+    /// 不移动、不退磁、不暂停。MC65读取失败仍向外抛出，走既有安全异常路径。
+    /// </summary>
+    private async Task WaitForM720CanPlaceBeforePlaceAsync(WorkpieceCache wp, CancellationToken ct)
+    {
+        int waitCount = 0;
+        while (!await ReadM720CanPlaceBeforePlaceAsync(ct))
+        {
+            waitCount++;
+            if (waitCount == 1 || waitCount % 10 == 0)
+                Console.WriteLine($"│ [分流] ⚠ {wp.IdentityText} M720二次确认=不可放料，保持持板等待（{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1}秒）");
+            await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
+        }
+
+        if (waitCount > 0)
+            Console.WriteLine($"│ [分流] ✓ {wp.IdentityText} M720恢复可放料，结束持板等待，继续放料");
+    }
+
+    /// <summary>读取M720允许放版状态。读取失败和报文异常由调用方按安全异常处理。</summary>
+    private async Task<bool> ReadM720CanPlaceBeforePlaceAsync(CancellationToken ct)
     {
         using var t = new CancellationTokenSource(3000);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, t.Token);
@@ -3053,8 +3072,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         var r = await mc65.ReadMAlignedWordAsync(720, 1, linked.Token);
         int m720 = r.IntValues.Length > 0 ? r.IntValues[0] : throw new InvalidOperationException("MC65 M720二次确认返回字数不足");
         bool canPlace = (m720 & 1) != 0;
-        Console.WriteLine($"│ [分流] 二次确认M720={(canPlace ? "可放料" : "不可放料")} rawM720=0x{m720:X4}");
-        if (!canPlace) throw new InvalidOperationException("M720二次确认=不可放料, 禁止放料");
+        return canPlace;
     }
 
     /// <summary>Z下降公式: 台面Z - Round[(d/2/zFactor1)+(d/2/zFactor2)] — 用于取料/放料</summary>
