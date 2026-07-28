@@ -601,6 +601,8 @@ public sealed class FineTuneInstrumentationContractTests
     {
         var config = new MotionConfig();
         config.AbsMove.TimeoutMs = 30_000;
+        // XY fine tune now uses the per-crane XY phase timeout, not the retired shared TimeoutMs.
+        config.GetCraneSpeed(99).XyTimeoutMs = 30_000;
         config.XAbsFineTune.Enabled = true;
         config.XAbsFineTune.ToleranceMm = 5;
         config.XAbsFineTune.MaxAdjustMm = 50;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 
 namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
@@ -16,9 +17,15 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
 public sealed class CraneConnectionCache
 {
     private readonly object _lock = new();
+    private readonly MotionConfig _motionConfig;
 
     private readonly Dictionary<int, (string Name, string Ip)> _ipMappings = new();
     private readonly Dictionary<int, CraneService> _services = new();
+
+    public CraneConnectionCache(MotionConfig motionConfig)
+    {
+        _motionConfig = motionConfig ?? throw new ArgumentNullException(nameof(motionConfig));
+    }
 
     /// <summary>
     /// 从数据库 machine 表行装载天车 IP 映射（1~5 号）。
@@ -88,7 +95,9 @@ public sealed class CraneConnectionCache
             if (!_ipMappings.TryGetValue(craneNo, out var info))
                 throw new InvalidOperationException($"[CraneCache] 未找到 {craneNo} 号天车映射，无法创建服务");
 
-            var service = new CraneService(info.Name, info.Ip);
+            var motion = _motionConfig.GetCraneSpeed(craneNo);
+            var service = new CraneService(info.Name, info.Ip,
+                xyTimeoutMs: motion.XyTimeoutMs, zTimeoutMs: motion.ZTimeoutMs);
             _services[craneNo] = service;
             Console.WriteLine($"[CraneCache] 新建服务：{craneNo}号 {info.Name} {info.Ip}");
             return service;

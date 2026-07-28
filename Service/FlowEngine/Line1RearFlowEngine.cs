@@ -1170,7 +1170,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     private static string ActiveOperationText(SkewCtx bed)
         => bed.ActiveOperation == null
             ? "无"
-            : $"{bed.ActiveOperation.Name} v{bed.ActiveOperation.Version}(后天车锁={YN(bed.ActiveOperation.IsHeld("RearCrane"))} ZoneMT={YN(bed.ActiveOperation.IsHeld("ZoneMT"))} ZoneTS={YN(bed.ActiveOperation.IsHeld("ZoneTS"))} 分流M817={YN(bed.ActiveOperation.IsHeld("M817"))} 分流M720={YN(bed.ActiveOperation.IsHeld("M720"))})";
+            : $"{bed.ActiveOperation.Name} v{bed.ActiveOperation.Version}(后天车锁={YN(bed.ActiveOperation.IsHeld("RearCrane"))} ZoneMT={YN(bed.ActiveOperation.IsHeld("ZoneMT"))} ZoneTS={YN(bed.ActiveOperation.IsHeld("ZoneTS"))} 分流M817={YN(bed.ActiveOperation.IsHeld("M817"))} 分流M720={YN(bed.ActiveOperation.IsHeld("M720"))} 安全占用={YN(bed.ActiveOperation.RequiresManualSafetyRecovery)})";
 
     private static EmergencyActionLease BeginSkewOperation(SkewCtx bed, string name, CancellationToken parent, bool holdsTransferRack)
     {
@@ -1185,7 +1185,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     {
         // 被应急作废的动作保留在ActiveOperation，直到应急流程确认退出并释放残留锁。
         // 正常动作仍按原逻辑清空，不影响正常上/下料。
-        if (operation.IsValid && ReferenceEquals(bed.ActiveOperation, operation)) bed.ActiveOperation = null;
+        if (operation.IsValid && !operation.RequiresManualSafetyRecovery && ReferenceEquals(bed.ActiveOperation, operation)) bed.ActiveOperation = null;
         operation.Complete();
     }
 
@@ -1586,6 +1586,22 @@ public sealed class Line1RearFlowEngine : IDisposable
         {
             Console.WriteLine($"│ [上料] ⚠ {bed.Code} 当前动作已被应急取消, 不再继续写CNC/天车动作");
         }
+        catch (CraneMotionTimeoutException ex)
+        {
+            // 运动超时意味着天车最终物理位置未知，绝不能再回零、恢复来源缓存或释放碰撞区锁。
+            // 由斜床应急处理在操作员确认现场后统一释放本动作租约中的安全占用。
+            _paused = true;
+            operation.HoldForManualSafetyRecovery(ex.Message);
+            bed.St = SkewState.Loading;
+            bed.Wp = wp;
+            SetRearCraneTask(wp, "运动超时，位置未知", rs, bed.Code, true,
+                $"{ex.Stage}超时；未到位轴={string.Join("/", ex.UnreachedAxes)}；等待人工确认");
+            pendingSafetyAlarm = $"1号线后天车给{bed.Code}上料时{ex.Stage}运动超时。" +
+                $"目标=({ex.XTarget},{ex.YTarget},{ex.ZTarget})，最后坐标={ex.LastKnownStatus?.XPos}/{ex.LastKnownStatus?.YPos}/{ex.LastKnownStatus?.ZPos}，" +
+                $"未到位轴={string.Join("/", ex.UnreachedAxes)}，D4518停止={(ex.EmergencyStopCommandSucceeded ? "已发送" : "发送失败")}。" +
+                "引擎已暂停；中转架缓存和本动作持有的区域锁已保留为安全占用，禁止自动重试。";
+            Console.WriteLine($"│ [上料] ⚠ {pendingSafetyAlarm}");
+        }
         catch (Exception ex)
         {
             Console.WriteLine($"│ [上料] ❌ 异常: {wp.IdentityText} {ex.Message}");
@@ -1707,6 +1723,17 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         finally
         {
+            if (operation.RequiresManualSafetyRecovery)
+            {
+                string held = $"后天车={YN(operation.IsHeld("RearCrane"))} ZoneMT={YN(operation.IsHeld("ZoneMT"))} ZoneTS={YN(operation.IsHeld("ZoneTS"))} M817={YN(operation.IsHeld("M817"))} M720={YN(operation.IsHeld("M720"))}";
+                string alarm = (pendingSafetyAlarm ?? operation.ManualSafetyHoldReason ?? "后天车运动超时") +
+                    $" 当前安全占用：{held}。请先现场确认，再执行斜床应急恢复；恢复前不得直接启动引擎。";
+                Console.WriteLine($"│ [上料] ⚠ {alarm}");
+                OnRearCraneSafetyAlarm?.Invoke(alarm);
+                _fastNextCycle = true;
+            }
+            else
+            {
             // 以下布尔值只观察动作租约在原finally前后的状态，不参与锁释放判断。
             bool zoneTsHeldBeforeCleanup = operation.IsHeld("ZoneTS");
             bool zoneMtHeldBeforeCleanup = operation.IsHeld("ZoneMT");
@@ -1845,6 +1872,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             _fastNextCycle = true; // 刚完成上料, 通知主循环快速检查下料任务
             Console.WriteLine("│ [上料] 释放后天车锁" + (!string.IsNullOrWhiteSpace(sharedCleanupText) ? " + Zone锁收尾" : ""));
             Console.WriteLine("└── [上料] 结束 ──────────────────────────");
+            }
             EndSkewOperation(bed, operation);
         }
     }
@@ -2613,6 +2641,20 @@ public sealed class Line1RearFlowEngine : IDisposable
         {
             Console.WriteLine($"│ [下料] ⚠ {bed.Code} 当前动作已被应急取消, 不再继续写CNC/天车动作");
         }
+        catch (CraneMotionTimeoutException ex)
+        {
+            _paused = true;
+            operation.HoldForManualSafetyRecovery(ex.Message);
+            bed.St = SkewState.Unloading;
+            if (bed.Wp is { } timeoutWp)
+                SetRearCraneTask(timeoutWp, "运动超时，位置未知", bed.Code, "分流目的地", true,
+                    $"{ex.Stage}超时；未到位轴={string.Join("/", ex.UnreachedAxes)}；等待人工确认");
+            pendingSafetyAlarm = $"1号线后天车从{bed.Code}下料时{ex.Stage}运动超时。" +
+                $"目标=({ex.XTarget},{ex.YTarget},{ex.ZTarget})，最后坐标={ex.LastKnownStatus?.XPos}/{ex.LastKnownStatus?.YPos}/{ex.LastKnownStatus?.ZPos}，" +
+                $"未到位轴={string.Join("/", ex.UnreachedAxes)}，D4518停止={(ex.EmergencyStopCommandSucceeded ? "已发送" : "发送失败")}。" +
+                "引擎已暂停；工件状态和本动作持有的区域锁已保留为安全占用，禁止自动重试。";
+            Console.WriteLine($"│ [下料] ⚠ {pendingSafetyAlarm}");
+        }
         catch (Exception ex)
         {
             Console.WriteLine($"│ [下料] ❌ 异常: {bed.Wp?.IdentityText ?? "版号=未知"} {ex.Message}");
@@ -2661,6 +2703,17 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         finally
         {
+            if (operation.RequiresManualSafetyRecovery)
+            {
+                string held = $"后天车={YN(operation.IsHeld("RearCrane"))} ZoneMT={YN(operation.IsHeld("ZoneMT"))} ZoneTS={YN(operation.IsHeld("ZoneTS"))} M817={YN(operation.IsHeld("M817"))} M720={YN(operation.IsHeld("M720"))}";
+                string alarm = (pendingSafetyAlarm ?? operation.ManualSafetyHoldReason ?? "后天车运动超时") +
+                    $" 当前安全占用：{held}。请先现场确认，再执行斜床应急恢复；恢复前不得直接启动引擎。";
+                Console.WriteLine($"│ [下料] ⚠ {alarm}");
+                OnRearCraneSafetyAlarm?.Invoke(alarm);
+                _fastNextCycle = true;
+            }
+            else
+            {
             string sharedCleanupText = string.Empty;
             if (sharedLocked)
             {
@@ -2728,6 +2781,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             _fastNextCycle = true;
             Console.WriteLine("│ [下料] 后天车锁收尾完成" + (!string.IsNullOrWhiteSpace(sharedCleanupText) ? " + ZoneTS收尾完成" : ""));
             Console.WriteLine("└── [下料] 结束 ──────────────────────────");
+            }
             EndSkewOperation(bed, operation);
         }
     }

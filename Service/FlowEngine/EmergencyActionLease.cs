@@ -16,6 +16,7 @@ internal sealed class EmergencyActionLease : IDisposable
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _valid = 1;
     private int _disposed;
+    private string? _manualSafetyHoldReason;
 
     public EmergencyActionLease(long version, string name, CancellationToken parent)
     {
@@ -30,6 +31,12 @@ internal sealed class EmergencyActionLease : IDisposable
     public CancellationToken Token => Cancellation.Token;
     public Task Completion => _completion.Task;
     public bool IsValid => Volatile.Read(ref _valid) != 0;
+    /// <summary>
+    /// A motion command timed out after its actual position became unknown.  The owner must
+    /// retain every held physical-area lock until an operator completes emergency recovery.
+    /// </summary>
+    public bool RequiresManualSafetyRecovery => Volatile.Read(ref _manualSafetyHoldReason) != null;
+    public string? ManualSafetyHoldReason => Volatile.Read(ref _manualSafetyHoldReason);
 
     public bool IsHeld(string key) => _heldLocks.ContainsKey(key);
 
@@ -66,6 +73,13 @@ internal sealed class EmergencyActionLease : IDisposable
         Interlocked.Exchange(ref _valid, 0);
         try { Cancellation.Cancel(); }
         catch (ObjectDisposedException) { }
+    }
+
+    public void HoldForManualSafetyRecovery(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException("安全占用原因不能为空", nameof(reason));
+        Interlocked.CompareExchange(ref _manualSafetyHoldReason, reason, null);
     }
 
     public void ThrowIfInvalid()

@@ -2397,7 +2397,17 @@ public sealed class Line1FrontFlowEngine : IDisposable
         catch (Exception ex)
         {
             Console.WriteLine($"[Line1Front] [前天车] ✘ 异常：{ex.GetType().Name} — {ex.Message}");
-            if (ex is TransferRackCacheException rackEx)
+            if (ex is CraneMotionTimeoutException timeout)
+            {
+                // XY/Z运动超时后即使尚未充磁，也无法证明天车仍处于安全位置；禁止把任务回队列自动重试。
+                _paused = true;
+                SetFrontCraneTask(wp, "运动超时，位置未知", "流程中", "未知", true,
+                    $"{timeout.Stage}超时；未到位轴={string.Join("/", timeout.UnreachedAxes)}；等待人工确认");
+                OnSafetyAlarm?.Invoke($"1号线前天车{timeout.Stage}运动超时。目标=({timeout.XTarget},{timeout.YTarget},{timeout.ZTarget})，" +
+                    $"最后坐标={timeout.LastKnownStatus?.XPos}/{timeout.LastKnownStatus?.YPos}/{timeout.LastKnownStatus?.ZPos}，未到位轴={string.Join("/", timeout.UnreachedAxes)}。" +
+                    "D4518停止指令已尝试发送；引擎已暂停，禁止自动回队列或重试，请人工确认天车、工件及碰撞区后恢复。");
+            }
+            else if (ex is TransferRackCacheException rackEx)
             {
                 // 工件已经不在天车/叉上, 不能回队列; 保持暂停, 等人工确认中转架缓存。
                 // 前天车处理的是上一块工件；此时下一块工件可能已经进入货叉/双头镗。

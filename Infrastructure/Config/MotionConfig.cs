@@ -55,6 +55,11 @@ public sealed class MotionConfig
     public sealed class AbsMoveSection
     {
         public int Tolerance { get; set; } = 5;
+        /// <summary>天车仅移动X/Y时、以及复合动作XY阶段的最长等待时间。</summary>
+        public int XyTimeoutMs { get; set; } = 120_000;
+        /// <summary>天车仅移动Z时、以及复合动作Z阶段的最长等待时间。</summary>
+        public int ZTimeoutMs { get; set; } = 120_000;
+        /// <summary>兼容旧调用方的统一超时值；新天车流程改用XyTimeoutMs/ZTimeoutMs。</summary>
         public int TimeoutMs { get; set; } = 240_000;
         public int PollIntervalMs { get; set; } = 500;
         /// <summary>X轴绝对速度</summary>

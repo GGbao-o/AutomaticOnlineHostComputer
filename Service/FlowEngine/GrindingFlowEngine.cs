@@ -1718,6 +1718,18 @@ public sealed class GrindingFlowEngine : IDisposable
             wp.ReportStage($"{grinder.Name} 加工中");
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ═══ 上料完成，研磨机开始加工 {wp.IdentityText} ═══");
         }
+        catch (CraneMotionTimeoutException timeout)
+        {
+            // 位置未知不能按“尚未充磁”回写FIFO；保留工件身份并暂停，等待人工确认。
+            if (!IsGrindingActionCurrent(actionVersion)) return;
+            _paused = true;
+            grinder.State = placedInGrinder ? (loadDoneNotified ? GrinderState.Machining : GrinderState.Loading) : GrinderState.Loading;
+            grinder.StateChangedAt = DateTime.UtcNow;
+            grinder.PendingWorkpiece = wp;
+            OnSafetyAlarm?.Invoke($"研磨天车给{grinder.Name}上料时{timeout.Stage}运动超时。目标=({timeout.XTarget},{timeout.YTarget},{timeout.ZTarget})，" +
+                $"最后坐标={timeout.LastKnownStatus?.XPos}/{timeout.LastKnownStatus?.YPos}/{timeout.LastKnownStatus?.ZPos}，未到位轴={string.Join("/", timeout.UnreachedAxes)}。" +
+                "D4518停止指令已尝试发送；研磨引擎已暂停，工件未回FIFO，禁止自动重试。请人工确认天车和工件位置。");
+        }
         catch (PressureStopException pEx)
         {
             // ═══ 下压急停: 天车Z↓时磁铁碰到工件/障碍物, PLC触发D4523 ═══
@@ -2191,6 +2203,17 @@ public sealed class GrindingFlowEngine : IDisposable
             grinder.PendingWorkpiece = null;
             workpiece.ReportStage("已完成", "已完成");
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ═══ 下料完成，研磨机空闲 {workpiece.IdentityText} ═══");
+        }
+        catch (CraneMotionTimeoutException timeout)
+        {
+            if (!IsGrindingActionCurrent(actionVersion)) return;
+            _paused = true;
+            grinder.State = placedOnUnloadRack && unloadDoneNotified ? GrinderState.Idle : GrinderState.Unloading;
+            grinder.StateChangedAt = DateTime.UtcNow;
+            grinder.PendingWorkpiece = placedOnUnloadRack && unloadRackNotified && unloadDoneNotified ? null : wp;
+            OnSafetyAlarm?.Invoke($"研磨天车从{grinder.Name}下料时{timeout.Stage}运动超时。目标=({timeout.XTarget},{timeout.YTarget},{timeout.ZTarget})，" +
+                $"最后坐标={timeout.LastKnownStatus?.XPos}/{timeout.LastKnownStatus?.YPos}/{timeout.LastKnownStatus?.ZPos}，未到位轴={string.Join("/", timeout.UnreachedAxes)}。" +
+                "D4518停止指令已尝试发送；研磨引擎已暂停，工件状态未自动清除，禁止自动重试。请人工确认天车和工件位置。");
         }
         catch (PressureStopException pEx)
         {

@@ -1,6 +1,8 @@
 {
   "absMove": {
     "tolerance": 5,
+    "xyTimeoutMs": 120000,
+    "zTimeoutMs": 120000,
     "timeoutMs": 240000,
     "pollIntervalMs": 500,
     "x": {

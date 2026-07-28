@@ -18,6 +18,41 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
     }
 
     /// <summary>
+    /// 绝对移动在规定时间内未到位。异常只保存设备事实，业务层据此暂停所属引擎并决定工件和锁的处置。
+    /// </summary>
+    public sealed class CraneMotionTimeoutException : TimeoutException
+    {
+        public string CraneName { get; }
+        public string Stage { get; }
+        public int XTarget { get; }
+        public int YTarget { get; }
+        public int ZTarget { get; }
+        public int Tolerance { get; }
+        public CraneStatus? LastKnownStatus { get; }
+        public IReadOnlyList<string> UnreachedAxes { get; }
+        public bool EmergencyStopCommandSucceeded { get; }
+
+        public CraneMotionTimeoutException(string craneName, string stage, int xTarget, int yTarget, int zTarget,
+            int tolerance, CraneStatus? lastKnownStatus, IReadOnlyList<string> unreachedAxes,
+            bool emergencyStopCommandSucceeded)
+            : base($"[CraneService] [{craneName}] 绝对移动超时，阶段={stage}，目标 X={xTarget} Y={yTarget} Z={zTarget}，" +
+                   $"未到位轴={string.Join(",", unreachedAxes)}，最后坐标=" +
+                   (lastKnownStatus == null ? "读取失败" : $"X={lastKnownStatus.XPos} Y={lastKnownStatus.YPos} Z={lastKnownStatus.ZPos}") +
+                   $"，伺服停止命令={(emergencyStopCommandSucceeded ? "已成功返回" : "失败或结果未知")}")
+        {
+            CraneName = craneName;
+            Stage = stage;
+            XTarget = xTarget;
+            YTarget = yTarget;
+            ZTarget = zTarget;
+            Tolerance = tolerance;
+            LastKnownStatus = lastKnownStatus;
+            UnreachedAxes = unreachedAxes.ToArray();
+            EmergencyStopCommandSucceeded = emergencyStopCommandSucceeded;
+        }
+    }
+
+    /// <summary>
     /// 天车通信服务（汇川 PLC，Modbus TCP）。
     /// <para>
     /// 每台天车实例化一个 CraneService，传入对应 IP 地址。<br/>
@@ -37,6 +72,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         // ── 字段 ─────────────────────────────────────────────────────
         private readonly ModbusTcpClient _client;
         private readonly string _name; // 天车名称，调试输出用
+        private readonly int _xyTimeoutMs;
+        private readonly int _zTimeoutMs;
         private readonly SemaphoreSlim _connectionLock = new(1, 1); // 连接/断开串行化，防止UI和引擎同时重连同一设备
         private readonly object _statusLogLock = new(); // UI与流程会共享服务，保护状态日志节流字段
         private bool _manualModeSet;   // 是否已确认 PLC 处于手动模式，避免重复写 D4500
@@ -48,10 +85,13 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <param name="name">天车名称（如"1号线天车前"），仅用于日志输出</param>
         /// <param name="ip">PLC IP 地址</param>
         /// <param name="port">Modbus TCP 端口，默认 502</param>
-        public CraneService(string name, string ip, int port = 502)
+        public CraneService(string name, string ip, int port = 502,
+            int xyTimeoutMs = 240_000, int zTimeoutMs = 240_000)
         {
             _name   = name;
             _client = new ModbusTcpClient(ip, port, unitId: 1, timeoutMs: 3000);
+            _xyTimeoutMs = ValidateTimeout(xyTimeoutMs, nameof(xyTimeoutMs));
+            _zTimeoutMs = ValidateTimeout(zTimeoutMs, nameof(zTimeoutMs));
             Console.WriteLine($"[CraneService] [{_name}] 创建实例，IP={ip}:{port}");
         }
 
@@ -758,16 +798,19 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// </summary>
         public async Task MoveAbsoluteAsync(
             int xTarget, int yTarget, int zTarget,
-            int tolerance = 5, int timeoutMs = 240_000, CancellationToken ct = default)
+            int tolerance = 5, int? timeoutMs = null, CancellationToken ct = default)
         {
+            int xyTimeoutMs = timeoutMs ?? _xyTimeoutMs;
+            int zTimeoutMs = timeoutMs ?? _zTimeoutMs;
             var activeAxes = new List<string>();
             if (xTarget != -1) activeAxes.Add("X");
             if (yTarget != -1) activeAxes.Add("Y");
             if (zTarget != -1) activeAxes.Add("Z");
             Console.WriteLine($"[CraneService] [{_name}] ▶ 绝对移动 目标 X={xTarget} Y={yTarget} Z={zTarget} 轴={string.Join(",", activeAxes)}");
-
+            
+            //确保在手动模式
             await EnsureManualModeAsync(ct);
-
+            
             // ── 1. 写入所有目标坐标 ──────────────────────────────────────
             if (xTarget != -1)
                 await WriteDintAsync(Addr.D_XAbsTarget, xTarget, "X绝对目标 D3102~D3103", ct);
@@ -779,6 +822,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             // ── 2. 读取当前 Z，判断升降方向 ──────────────────────────────
             bool hasZMove = zTarget != -1;
             bool zGoingDown = false, zGoingUp = false;
+            //判断z是上升还是下降
             if (hasZMove)
             {
                 var curStatus = await ReadStatusAsync(ct);
@@ -818,7 +862,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     await Task.Delay(500, ct);
                     if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
                     if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
-                    await PollAxesAsync(xTarget, yTarget, -1, tolerance, timeoutMs / 2, ct);
+                    await PollAxesAsync(xTarget, yTarget, -1, tolerance, xyTimeoutMs, "XY先行", ct);
                     if (zTarget != -1)
                     {
                         await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
@@ -835,7 +879,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                         await Task.Delay(500, ct);
                         await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
                     }
-                    await PollAxesAsync(-1, -1, zTarget, tolerance, timeoutMs / 2, ct, monitorPressure: false);
+                    await PollAxesAsync(-1, -1, zTarget, tolerance, zTimeoutMs, "Z先行", ct, monitorPressure: false);
                     if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
                     if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
                     await Task.Delay(500, ct);
@@ -853,9 +897,18 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
                     if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
                 }
-
-                // ── 4. 轮询等待所有轴到位 ──────────────────────────────────
-                await PollAxesAsync(xTarget, yTarget, zTarget, tolerance, timeoutMs, ct, monitorPressure: zGoingDown);
+ 
+                // ── 4. 轮询等待当前安全阶段的所有参与轴到位 ──────────────
+                //  XY-only最多XyTimeoutMs；Z-only最多ZTimeoutMs；复合动作已在前置阶段
+                //  完成另一组轴，所以最终只等待尚未完成的安全阶段。
+                // ──────────────────────────────────
+                if (zGoingDown)
+                    await PollAxesAsync(-1, -1, zTarget, tolerance, zTimeoutMs, "Z下降", ct, monitorPressure: true);
+                else if (zGoingUp)
+                    await PollAxesAsync(xTarget, yTarget, -1, tolerance, xyTimeoutMs, "XY后行", ct);
+                else
+                    await PollAxesAsync(xTarget, yTarget, zTarget, tolerance,
+                        zTarget == -1 ? xyTimeoutMs : Math.Max(xyTimeoutMs, zTimeoutMs), "并行动作", ct);
             }
             finally
             {
@@ -926,9 +979,10 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <param name="monitorPressure">仅 Z 下降时检测 X2 下压信号；Z 上升时不检测，防止回升途中 X2 延迟释放导致误急停。</param>
         /// </summary>
         private async Task PollAxesAsync(int xTarget, int yTarget, int zTarget,
-            int tolerance, int timeoutMs, CancellationToken ct, bool monitorPressure = false)
+            int tolerance, int timeoutMs, string stage, CancellationToken ct, bool monitorPressure = false)
         {
             var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            CraneStatus? lastStatus = null;
             while (DateTime.UtcNow < deadline)
             {
                 ct.ThrowIfCancellationRequested();
@@ -978,6 +1032,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
                 var status = await ReadStatusAsync(ct);
                 if (status == null) continue;
+                lastStatus = status;
 
                 bool xOk = xTarget == -1 || Math.Abs(status.XPos - xTarget) <= tolerance;
                 bool yOk = yTarget == -1 || Math.Abs(status.YPos - yTarget) <= tolerance;
@@ -990,7 +1045,47 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 }
             }
 
-            throw new TimeoutException($"[CraneService] [{_name}] 绝对移动超时，目标 X={xTarget} Y={yTarget} Z={zTarget}");
+            throw await CreateMotionTimeoutExceptionAsync(
+                xTarget, yTarget, zTarget, tolerance, stage, lastStatus).ConfigureAwait(false);
+        }
+
+        private async Task<CraneMotionTimeoutException> CreateMotionTimeoutExceptionAsync(
+            int xTarget, int yTarget, int zTarget, int tolerance, string stage, CraneStatus? lastStatus)
+        {
+            bool stopped = await TryTriggerManualEmergencyStopAsync().ConfigureAwait(false);
+            CraneStatus? finalStatus = await ReadStatusAsync(CancellationToken.None).ConfigureAwait(false) ?? lastStatus;
+            var unreachedAxes = new List<string>();
+            if (xTarget != -1 && (finalStatus == null || Math.Abs(finalStatus.XPos - xTarget) > tolerance)) unreachedAxes.Add("X");
+            if (yTarget != -1 && (finalStatus == null || Math.Abs(finalStatus.YPos - yTarget) > tolerance)) unreachedAxes.Add("Y");
+            if (zTarget != -1 && (finalStatus == null || Math.Abs(finalStatus.ZPos - zTarget) > tolerance)) unreachedAxes.Add("Z");
+            return new CraneMotionTimeoutException(_name, stage, xTarget, yTarget, zTarget, tolerance,
+                finalStatus, unreachedAxes, stopped);
+        }
+
+        private async Task<bool> TryTriggerManualEmergencyStopAsync()
+        {
+            var safetyCt = CancellationToken.None;
+            try
+            {
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 运动超时，触发D4518伺服急停");
+                await WriteRegAsync(Addr.D_ManualEStop, 2, "运动超时伺服急停 D4518(触发)", safetyCt);
+                await Task.Delay(500, safetyCt);
+                await WriteRegAsync(Addr.D_ManualEStop, 0, "运动超时伺服急停 D4518(复位)", safetyCt);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 运动超时伺服急停写入失败: {ex.Message}");
+                try { await WriteRegAsync(Addr.D_ManualEStop, 0, "运动超时伺服急停 D4518(兜底复位)", safetyCt); }
+                catch { }
+                return false;
+            }
+        }
+
+        private static int ValidateTimeout(int timeoutMs, string parameterName)
+        {
+            if (timeoutMs <= 0) throw new ArgumentOutOfRangeException(parameterName, timeoutMs, "运动超时必须大于0");
+            return timeoutMs;
         }
 
         private bool ShouldLogStatus(CraneStatus status)

@@ -465,7 +465,8 @@ internal static class XAbsFineTuneHelper
                 int moveTolerance = Math.Max(1, movingAxes.Max(correction => correction.Axis.Tolerance));
                 Console.WriteLine($"[XYAbsFineTune] [{context}] {stationCode} 发起一次XY微调: X={(targetX == -1 ? "保持" : targetX)}, Y={(targetY == -1 ? "保持" : targetY)}");
                 evidence?.CommandPrepared(targetX, targetY, movingAxes);
-                await execution.MoveAbsoluteAsync(targetX, targetY, -1, moveTolerance, cfg.AbsMove.TimeoutMs, ct);
+                await execution.MoveAbsoluteAsync(targetX, targetY, -1, moveTolerance,
+                    cfg.GetCraneSpeed(craneNo).XyTimeoutMs, ct);
                 evidence?.CommandAcknowledged(movingAxes);
 
                 int maxDelta = movingAxes.Max(correction => Math.Abs(correction.Delta));

@@ -212,9 +212,9 @@ public sealed class HomeViewModel : ObservableObject
         _positionService = positionService;
         _attentionEvents = attentionEvents;
         _exceptionReporter = exceptionReporter;
-        _craneCache = new CraneConnectionCache();
-        _manipulatorCache = new ManipulatorConnectionCache();
         _cfg = MotionConfig.Load();  // 提前加载，引擎创建和UI同步都要用
+        _craneCache = new CraneConnectionCache(_cfg);
+        _manipulatorCache = new ManipulatorConnectionCache();
 
         // 引擎依赖天车/机械手缓存，由 HomeVM 创建并持有引用
         _flowEngine = new ProductionFlowEngine(_craneCache, _manipulatorCache, _positionService, _cfg, _exceptionReporter);
