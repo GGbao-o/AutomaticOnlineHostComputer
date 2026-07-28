@@ -1325,6 +1325,7 @@ public sealed class HomeViewModel : ObservableObject
             string detail = rack.HasIdentityMismatch
                 ? $"{physical}，软件身份={(rack.Workpiece?.IdentityText ?? "缺失")}；请人工核对，页面不会清理缓存"
                 : $"{physical}，软件身份={(rack.Workpiece?.IdentityText ?? "缺失")}";
+            if (rack.IsReserved) detail += $"；{rack.ReservationText}";
 
             items.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.TransferRack,
                 filterScope, flowScope, rack.StationCode, "等待后天车/斜床",
@@ -1399,7 +1400,8 @@ public sealed class HomeViewModel : ObservableObject
                 return snapshot.PhysicalHasPlate ? $"{snapshot.StationCode}：物理有板，但软件身份缺失" : $"{snapshot.StationCode}：物理无板";
             var wp = snapshot.Workpiece;
             var prefix = snapshot.HasIdentityMismatch ? "物理/软件状态不一致" : (snapshot.PhysicalHasPlate ? "物理有板" : "软件缓存存在");
-            return $"{snapshot.StationCode}：{prefix}\n工件：{wp.IdentityText}\nD={wp.Diameter}mm  L={wp.Length}mm";
+            string reservation = snapshot.IsReserved ? $"\n{snapshot.ReservationText}" : string.Empty;
+            return $"{snapshot.StationCode}：{prefix}\n工件：{wp.IdentityText}\nD={wp.Diameter}mm  L={wp.Length}mm{reservation}";
         }));
     }
 

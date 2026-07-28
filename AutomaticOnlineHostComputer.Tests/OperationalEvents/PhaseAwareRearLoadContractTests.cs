@@ -34,6 +34,18 @@ public sealed class PhaseAwareRearLoadContractTests
         Assert.Contains("已发送物理命令的动作不能降级为自动等待重试", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Transfer_rack_ledger_reserves_before_pick_and_removes_only_after_pick_confirmation()
+    {
+        string source = Read("Service", "FlowEngine", "TransferRackWorkpieceLedger.cs");
+
+        Assert.Contains("TryReserve", source, StringComparison.Ordinal);
+        Assert.Contains("CommitPickup", source, StringComparison.Ordinal);
+        Assert.Contains("ReleaseReservation", source, StringComparison.Ordinal);
+        Assert.Contains("_workpieces.Remove(rackCode, out workpiece)", source, StringComparison.Ordinal);
+        Assert.Contains("_reservations[rackCode] = operationId", source, StringComparison.Ordinal);
+    }
+
     private static string Read(params string[] parts)
         => File.ReadAllText(Path.Combine([RepositoryRoot.Find(), .. parts]));
 }

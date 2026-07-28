@@ -1000,6 +1000,17 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     bool x2Pressed = await ReadXBitAsync(Addr.D_X2_MagnetLimit, ct);
                     if (x2Pressed)
                     {
+                        // X2 可能恰好在目标高度接触工件才亮。先读实际位置：若 Z 已在
+                        // 目标±容差内，本次下降已经到位，不能把正常到位误判为异常停机。
+                        // 读取失败或 Z 仍未到位时才按位置未知执行急停并抛异常。
+                        CraneStatus? pressureStatus = await ReadStatusAsync(ct);
+                        if (pressureStatus != null && zTarget != -1 &&
+                            Math.Abs(pressureStatus.ZPos - zTarget) <= tolerance)
+                        {
+                            Console.WriteLine($"[CraneService] [{_name}] ✔ X2下压触发但Z已到位 " +
+                                $"Z={pressureStatus.ZPos}(目标{zTarget}, 容差±{tolerance})，按正常到位返回");
+                            return;
+                        }
                         Console.WriteLine($"══════════════════════════════════════");
                         Console.WriteLine($"  [CraneService] [{_name}] ⚠⚠⚠ 磁铁下压限位 X2=1 ⚠⚠⚠");
                         Console.WriteLine($"  磁铁已接触工件/障碍物！");

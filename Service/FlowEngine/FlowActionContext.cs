@@ -100,6 +100,9 @@ internal sealed class FlowActionContext
         Detail = detail;
     }
 
+    /// <summary>尚未取得可用坐标时的阶段标记；不会伪造零坐标。</summary>
+    public void BeginStep(FlowActionStep step) => BeginStep(step, FlowActionPosition.Unknown, Detail);
+
     public void MarkCommandSent() => CommandState = FlowCommandState.SentAwaitingEvidence;
 
     public void Confirm(FlowActionPosition lastKnownPosition, string detail)
@@ -109,6 +112,9 @@ internal sealed class FlowActionContext
         Detail = detail;
     }
 
+    /// <summary>调用方没有新位置快照时，只确认命令已正常返回。</summary>
+    public void Confirm() => Confirm(LastKnownPosition, Detail);
+
     public void MarkCommandResponseUnknown(FlowActionPosition lastKnownPosition, string detail)
     {
         LastKnownPosition = lastKnownPosition;
@@ -116,11 +122,15 @@ internal sealed class FlowActionContext
         Detail = detail;
     }
 
+    public void MarkCommandResponseUnknown(string detail) => MarkCommandResponseUnknown(LastKnownPosition, detail);
+
     public void SetOwnership(FlowWorkpieceOwnership ownership, string detail)
     {
         Ownership = ownership;
         Detail = detail;
     }
+
+    public void SetOwnership(FlowWorkpieceOwnership ownership) => SetOwnership(ownership, Detail);
 
     public void WaitRetry(string detail)
     {
