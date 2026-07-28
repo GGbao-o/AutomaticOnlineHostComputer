@@ -1541,6 +1541,7 @@ public sealed class GrindingFlowEngine : IDisposable
                     {
                         operationalTracker.MarkZUnknown("ST709 X11重试下探触发下压保护，恢复后实际位置未知");
                         await crane.RecoverFromPressureStopAsync(ct);
+                        throw;
                     }
                     operationalTracker.BeginMagnetOn();
                     try
@@ -2031,6 +2032,7 @@ public sealed class GrindingFlowEngine : IDisposable
                     {
                         operationalTracker.MarkZUnknown($"{grinder.StationCode} X11重试下探触发下压保护，恢复后实际位置未知");
                         await crane.RecoverFromPressureStopAsync(ct);
+                        throw;
                     }
                     await CraneOpAsync(crane, async c =>
                     {

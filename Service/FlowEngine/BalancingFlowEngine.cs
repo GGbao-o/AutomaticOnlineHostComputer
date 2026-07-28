@@ -1124,6 +1124,7 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 operationalTracker.MarkZUnknown("Z下降触发下压保护，恢复后位置等待安全高度确认");
                 await _m2.RecoverFromPressureStopAsync(ct);
+                throw;
             }
 
             // X11检测: 充磁→等3s→查X11→没吸到就退磁→Z↓5mm→充磁→再查, 最多2次(与后天车一致)
@@ -1180,6 +1181,7 @@ public sealed class BalancingFlowEngine : IDisposable
                     {
                         operationalTracker.MarkZUnknown("M2 X11重试下探触发下压保护，恢复后实际位置未知");
                         await _m2.RecoverFromPressureStopAsync(ct);
+                        throw;
                     }
 
                     operationalTracker.BeginMagnetOn();
@@ -1262,6 +1264,7 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 operationalTracker.MarkZUnknown("ST008/M710放料Z下降触发下压保护，恢复后实际位置需人工确认");
                 await _m2.RecoverFromPressureStopAsync(ct);
+                throw;
             }
             catch (Exception)
             {
@@ -1611,6 +1614,7 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 operationalTracker.MarkZUnknown("Z下降触发下压保护，恢复后位置等待安全高度确认");
                 await _m3.RecoverFromPressureStopAsync(ct);
+                throw;
             }
 
             // X11检测: 充磁→等3s→查X11→没吸到就退磁→Z↓5mm→充磁→再查, 最多2次(与后天车一致)
@@ -1667,6 +1671,7 @@ public sealed class BalancingFlowEngine : IDisposable
                     {
                         operationalTracker.MarkZUnknown("M3 X11重试下探触发下压保护，恢复后实际位置未知");
                         await _m3.RecoverFromPressureStopAsync(ct);
+                        throw;
                     }
 
                     operationalTracker.BeginMagnetOn();
@@ -1773,6 +1778,7 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 operationalTracker.MarkZUnknown("ST010/M720放料Z下降触发下压保护，恢复后实际位置需人工确认");
                 await _m3.RecoverFromPressureStopAsync(ct);
+                throw;
             }
             catch (Exception)
             {

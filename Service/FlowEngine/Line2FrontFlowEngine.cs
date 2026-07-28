@@ -2197,6 +2197,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 pos3OperationalTracker.MarkZUnknown("货叉Pos3取料Z下降触发下压保护，恢复后实际位置需后续安全高度确认");
                 Console.WriteLine("[Line2Front] [前天车]   ⚡ 下压触发→恢复");
                 await crane.RecoverFromPressureStopAsync(ct);
+                throw;
             }
 
             // X11检测: 充磁→等3s→查X11(63497)→没吸到就退磁→Z↓5mm→充磁→再查, 最多2次
@@ -2252,6 +2253,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     {
                         pos3OperationalTracker.MarkZUnknown("货叉Pos3重试下探触发下压保护，恢复后实际位置需后续安全高度确认");
                         await crane.RecoverFromPressureStopAsync(ct);
+                        throw;
                     }
 
                     pos3OperationalTracker.BeginMagnetOn();
@@ -2490,6 +2492,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
             pos3OperationalTracker.MarkZUnknown("打号机放料Z下降触发下压保护，恢复后实际位置需后续安全高度确认");
             Console.WriteLine("[Line2Front] [打号机] ⚡ 下压触发(已接触)→恢复"); 
             await crane.RecoverFromPressureStopAsync(ct);
+            throw;
         }
         catch (Exception)
         {
@@ -2619,6 +2622,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
             markerOperationalTracker.MarkZUnknown("打号机取回Z下降触发下压保护，恢复后实际位置需后续安全高度确认");
             Console.WriteLine("[Line2Front] [打号机] ⚡ 下压触发(取料)→恢复"); 
             await crane.RecoverFromPressureStopAsync(ct);
+            throw;
         }
 
         // X11检测: 充磁→等3s→查X11, 没吸到就退磁→Z↓5mm→充磁→再查, 最多2次
@@ -2672,6 +2676,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 {
                     markerOperationalTracker.MarkZUnknown("打号机取回重试下探触发下压保护，恢复后实际位置需后续安全高度确认");
                     await crane.RecoverFromPressureStopAsync(ct);
+                    throw;
                 }
                 markerOperationalTracker.BeginMagnetOn();
                 try
@@ -2793,6 +2798,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 operationalTracker.MarkZUnknown("中转架放料Z下降触发下压保护，恢复后实际位置需后续安全高度确认");
                 Console.WriteLine("[Line2Front] [中转架] ⚡ 下压触发(已接触)→恢复");
                 await crane.RecoverFromPressureStopAsync(ct);
+                throw;
             }
             catch (Exception)
             {
