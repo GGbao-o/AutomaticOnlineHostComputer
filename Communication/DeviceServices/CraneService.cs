@@ -68,6 +68,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
     public class CraneService
     {
         private const int MaxIoAttempts = 3;
+        // 写请求若在PLC执行后丢失响应，重发会重复触发运动、磁铁或握手；只能发送一次。
+        private const int MaxWriteIoAttempts = 1;
 
         // ── 字段 ─────────────────────────────────────────────────────
         private readonly ModbusTcpClient _client;
@@ -1121,7 +1123,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// </summary>
         private async Task WriteDintAsync(int startAddr, int value, string label, CancellationToken ct)
         {
-            await SafeIoAsync(token => _client.WriteInt32Async(startAddr, value, token), $"{label} D{startAddr}~D{startAddr + 1}", ct);
+            await SafeIoAsync(token => _client.WriteInt32Async(startAddr, value, token), $"{label} D{startAddr}~D{startAddr + 1}", ct, MaxWriteIoAttempts);
             Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{startAddr}~D{startAddr + 1}={value}");
         }
 
@@ -1133,7 +1135,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             try
             {
                 // 使用公共 WriteAsync（FC06 单寄存器写入）
-                await SafeIoAsync(token => _client.WriteAsync(address, value, token), $"{label} D{address}", ct);
+                await SafeIoAsync(token => _client.WriteAsync(address, value, token), $"{label} D{address}", ct, MaxWriteIoAttempts);
                 Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{address}={value}");
             }
             catch (Exception ex)
@@ -1143,10 +1145,15 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             }
         }
 
-        private async Task<T> SafeIoAsync<T>(Func<CancellationToken, Task<T>> action, string desc, CancellationToken ct)
+        /// <summary>
+        /// 读取可在断线后重连重试；写调用传入一次尝试，避免PLC已执行而客户端丢失响应时重放物理命令。
+        /// 每一次尝试仍会在发送前确保连接存在，故“尚未发送即断线”的短暂故障可在上层下一轮安全重试。
+        /// </summary>
+        private async Task<T> SafeIoAsync<T>(Func<CancellationToken, Task<T>> action, string desc, CancellationToken ct,
+            int maxAttempts = MaxIoAttempts)
         {
             Exception? last = null;
-            for (int attempt = 1; attempt <= MaxIoAttempts; attempt++)
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 ct.ThrowIfCancellationRequested();
                 try
@@ -1163,22 +1170,23 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 catch (Exception ex)
                 {
                     last = ex;
-                    if (attempt >= MaxIoAttempts) break;
-                    Console.WriteLine($"[CraneService] [{_name}] {desc} 通信异常 attempt={attempt}/{MaxIoAttempts}: {ex.Message} → 重连后重试");
+                    if (attempt >= maxAttempts) break;
+                    Console.WriteLine($"[CraneService] [{_name}] {desc} 通信异常 attempt={attempt}/{maxAttempts}: {ex.Message} → 重连后重试");
                     try { await DisconnectAsync(); } catch { }
                     await Task.Delay(200, ct);
                 }
             }
 
-            throw new InvalidOperationException($"{desc} {MaxIoAttempts}次重连重试仍失败: {last?.Message}", last);
+            throw new InvalidOperationException($"{desc} {maxAttempts}次通信尝试仍失败: {last?.Message}", last);
         }
 
-        private Task SafeIoAsync(Func<CancellationToken, Task> action, string desc, CancellationToken ct)
+        private Task SafeIoAsync(Func<CancellationToken, Task> action, string desc, CancellationToken ct,
+            int maxAttempts = MaxIoAttempts)
             => SafeIoAsync(async token =>
             {
                 await action(token);
                 return true;
-            }, desc, ct);
+            }, desc, ct, maxAttempts);
     }
 
     // ═══════════════════════════════════════════════════════════════

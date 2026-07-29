@@ -2913,6 +2913,7 @@ public sealed class Line2RearFlowEngine : IDisposable
         catch (Exception ex)
         {
             Console.WriteLine($"│ [下料] ❌ 异常: {bed.Wp?.IdentityText ?? "版号=未知"} {ex.Message}");
+            FlowActionExceptionConclusion exceptionConclusion = FlowActionExceptionConclusion.WaitRetry;
             if (operationalPlaced && (!operationalCacheNotified || !operationalDownstreamNotified))
             {
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PHYSICAL_HANDOFF_NOT_CLOSED",
@@ -2923,10 +2924,12 @@ public sealed class Line2RearFlowEngine : IDisposable
                     downstreamNotified: null,
                     handoffClosed: false);
             }
-            if (action.CommandState != FlowCommandState.NotSent && !placedToDestination && !_paused)
+            if (!placedToDestination)
             {
-                action.MarkCommandResponseUnknown(ex.Message);
-                action.PauseForManualResolution(ex.Message);
+                exceptionConclusion = FlowActionExceptionResolver.Resolve(action, ex);
+            }
+            if (exceptionConclusion == FlowActionExceptionConclusion.PauseLineManual)
+            {
                 _paused = true;
                 requiresManualConfirmation = true;
             }
@@ -2940,6 +2943,16 @@ public sealed class Line2RearFlowEngine : IDisposable
                     SetRearCraneTask(heldWp, "已持件，目标位未完成放料", bed.Code, "分流目的地", true, "X11已确认持件，请人工确认天车和工件位置");
                 Console.WriteLine("│ ⚠ X11已确认工件离开斜床但未完成目标位放料/通知, 引擎已暂停, 请人工确认后天车和工件位置");
                 pendingSafetyAlarm = $"2号线后天车从{bed.Code}下料时发生异常，X11已确认工件在天车上，但目标位放料或通知尚未完成。引擎已暂停，请人工确认天车和工件位置。异常：{ex.Message}";
+            }
+            else if (exceptionConclusion == FlowActionExceptionConclusion.PauseLineManual && !placedToDestination)
+            {
+                bed.St = SkewState.Unloading;
+                if (bed.Wp is { } unknownWp)
+                    SetRearCraneTask(unknownWp, "物理命令响应未知", bed.Code, "分流目的地", true,
+                        "命令已发送但X11/目标交接未确认，禁止自动重试");
+                pendingSafetyAlarm = $"2号线后天车从{bed.Code}下料时，物理命令已发送但X11、工件位置或目标交接未确认。" +
+                    $"引擎已暂停，禁止自动重试；请人工确认天车、磁铁、工件和目标位。异常：{ex.Message}";
+                Console.WriteLine($"│ ⚠ {pendingSafetyAlarm}");
             }
             else if (magnetOn)
             {

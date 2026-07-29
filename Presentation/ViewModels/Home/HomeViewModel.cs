@@ -1755,6 +1755,8 @@ public sealed class HomeViewModel : ObservableObject
             if (!await EnsureCranePositionsReadyForStartAsync(
                     new[] { (1, "1号线前天车"), (2, "1号线后天车") }, "1号线引擎启动/恢复前"))
                 return;
+            if (!EnsureNoPendingManualActionsForLine(1))
+                return;
 
             lock (_lineSafetyPopupLock) _line1SafetyPopupShown = false;
 
@@ -1790,6 +1792,8 @@ public sealed class HomeViewModel : ObservableObject
         {
             if (!await EnsureCranePositionsReadyForStartAsync(
                     new[] { (3, "2号线前天车"), (4, "2号线后天车") }, "2号线引擎启动/恢复前"))
+                return;
+            if (!EnsureNoPendingManualActionsForLine(2))
                 return;
 
             lock (_lineSafetyPopupLock) _line2SafetyPopupShown = false;
@@ -1836,6 +1840,30 @@ public sealed class HomeViewModel : ObservableObject
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// 安全告警的弹窗和引擎暂停可能发生在不同线程；恢复前以动作账本作最后一道门禁。
+    /// 不在此处猜测性清理快照，必须先走对应引擎的人工结案入口。
+    /// </summary>
+    private bool EnsureNoPendingManualActionsForLine(int line)
+    {
+        string linePrefix = $"{line}号线";
+        FlowActionSnapshot[] pending = FlowActionManualRegistry.Snapshot()
+            .Where(item => item.ManualConfirmationRequired &&
+                           item.FlowScope.StartsWith(linePrefix, StringComparison.Ordinal))
+            .ToArray();
+        if (pending.Length == 0)
+            return true;
+
+        string actions = string.Join("\n", pending.Select(item =>
+            $"- {item.OperationId}：{item.FlowScope} / {item.WorkpieceIdentity} / {item.PauseReason}"));
+        string message = $"{line}号线仍有 {pending.Length} 条物理动作等待人工确认，禁止启动或恢复。\n\n" +
+            actions + "\n\n请先在应急中心按现场事实完成对应动作的人工结案；不能通过再次点击启动绕过此门禁。";
+        Console.WriteLine($"[HomeViewModel] ⚠ {message}");
+        MessageBox.Show(message, $"{line}号线待人工确认 - 禁止恢复",
+            MessageBoxButton.OK, MessageBoxImage.Warning);
+        return false;
     }
 
     /// <summary>按天车归属暂停对应引擎，并在主页面线程显示明确告警。</summary>

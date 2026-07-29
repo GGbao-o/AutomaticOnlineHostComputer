@@ -2649,11 +2649,10 @@ public sealed class Line2FrontFlowEngine : IDisposable
         {
             Console.WriteLine($"[Line2Front] [前天车] ✘ 异常：{ex.GetType().Name} — {ex.Message}");
             // 中转架缓存异常已经知道物理板在目标位，必须先写目标归属，不能先按“天车持件”冻结。
-            if (ex is not TransferRackCacheException && !action.IsFinalized && action.CommandState != FlowCommandState.NotSent)
-            {
-                action.MarkCommandResponseUnknown(ex.Message);
-                action.PauseForManualResolution(ex.Message);
-            }
+            // 其余最终异常统一裁决：物理命令已发则只允许人工暂停，绝不能同时留下自动回队路径。
+            FlowActionExceptionConclusion exceptionConclusion = ex is TransferRackCacheException
+                ? FlowActionExceptionConclusion.PauseLineManual
+                : FlowActionExceptionResolver.Resolve(action, ex);
             if (ex is CraneMotionTimeoutException timeout)
             {
                 // XY/Z运动超时后即使尚未充磁，也无法证明天车仍处于安全位置；禁止把任务回队列自动重试。
@@ -2689,9 +2688,17 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 Console.WriteLine($"[Line2Front] [前天车] 货叉—双头镗阶段保持={_forkPhase}，相关门闩未清除；ZoneMT/ZoneTS已按finally释放，前天车锁将在调度finally释放");
                 OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时流程中断，工件可能在天车、打号机或后续位置。引擎已暂停，货叉—双头镗阶段保持={_forkPhase}、相关门闩未清除。ZoneMT/ZoneTS碰撞区锁已释放，前天车锁将在任务退出时释放。请人工退磁/处理旧工件并将前天车升到安全位置后再恢复。异常：{ex.Message}");
             }
+            else if (exceptionConclusion == FlowActionExceptionConclusion.PauseLineManual)
+            {
+                _paused = true;
+                SetFrontCraneTask(wp, "物理命令响应未知", "流程中", "未知", true,
+                    "命令已发送但响应或后续确认未知，禁止自动回队");
+                Console.WriteLine("[Line2Front] ⚠⚠⚠ 前天车物理命令已发送但响应/确认未知；已暂停，禁止自动回队或重试！");
+                OnSafetyAlarm?.Invoke($"2号线前天车处理{wp.IdentityText}时，物理命令已发送但响应或后续确认未知。引擎已暂停，禁止自动回队或重试；请人工确认天车、工件、货叉Pos3及碰撞区后，通过应急结案入口恢复。异常：{ex.Message}");
+            }
             else
             {
-                // 未充磁→工件还在叉Pos3上→放回天车队列等重试
+                // 唯一允许自动重试的结论：本次尚未发送任何物理命令，工件仍在叉Pos3。
                 //   _forkPhase保持WaitingForkReturnFromBoring/Skip: 叉在Pos3带工件, 阻塞新取料
                 //   R6108若已发送则不重发，天车重试只负责把Pos3工件取走
                 //   天车重试时从Pos3正常取走工件, 通知货叉回待机, 状态自动恢复
