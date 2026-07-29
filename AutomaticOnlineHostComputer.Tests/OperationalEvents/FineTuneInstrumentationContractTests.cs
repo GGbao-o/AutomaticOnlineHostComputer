@@ -487,7 +487,9 @@ public sealed class FineTuneInstrumentationContractTests
                 ["Line2FrontFlowEngine.cs"] = FormulaCounts(7, 0, 0, 0),
                 ["Line1RearFlowEngine.cs"] = FormulaCounts(0, 4, 0, 0),
                 ["Line2RearFlowEngine.cs"] = FormulaCounts(0, 4, 0, 0),
-                ["GrindingFlowEngine.cs"] = FormulaCounts(2, 0, 7, 2)
+                // 账本也需要记录偏移后的真实目标坐标；新增的4处ApplyOffsetZ只用于
+                // 快照坐标，不改变原有研磨装卸的业务Z公式或运动顺序。
+                ["GrindingFlowEngine.cs"] = FormulaCounts(2, 0, 11, 2)
             };
 
         foreach ((string fileName, IReadOnlyDictionary<string, int> counts) in expected)

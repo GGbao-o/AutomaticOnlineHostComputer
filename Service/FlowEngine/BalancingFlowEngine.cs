@@ -271,6 +271,101 @@ public sealed class BalancingFlowEngine : IDisposable
             "提示: 这里只清上位机缓存和本引擎明确持有的锁; 不会写PLC信号, 不会控制磁铁/机械手动作。";
     }
 
+    /// <summary>
+    /// 机械手2/3暂停动作的人工账本结案。不得调用原“清位置应急”代替本方法：
+    /// 原应急会删除缓存，而这里必须按已确认的物理位置保留来源、在途或目标待交接事实。
+    /// 不发送机械手/PLC命令，不释放由其它正常流程持有的锁，不自动恢复动平衡引擎。
+    /// </summary>
+    public string ResolveManualAction(string operationId, FlowActionManualResolution resolution)
+    {
+        if (!FlowActionManualRegistry.TryGet(operationId, out FlowActionSnapshot snapshot) ||
+            (snapshot.FlowScope != "动平衡机械手2取料送ST008" && snapshot.FlowScope != "动平衡机械手3取料送ST010"))
+            return $"动平衡动作账本不存在或不是待结案的机械手2/3动作: {operationId}";
+
+        bool isM2 = snapshot.FlowScope.StartsWith("动平衡机械手2", StringComparison.Ordinal);
+        string source = snapshot.Source;
+        WorkpieceCache? workpiece;
+        lock (_emergencyLock)
+            workpiece = isM2 ? _m2DisplayWorkpiece : _m3DisplayWorkpiece;
+        if (!workpiece.HasValue && source != "M700")
+            return $"动作={operationId}缺少保留的工件身份，不能凭快照重建{source}缓存；请先人工补录后再结案。";
+
+        _paused = true;
+        string result;
+        switch (resolution)
+        {
+            case FlowActionManualResolution.StillAtSource:
+                // M817/M818/M821都有完整软件缓存；M700是人工动平衡后的物理来源，
+                // 没有可靠版号时只保留占用/展示，绝不能伪造新的缓存身份。
+                if (source != "M700" && workpiece.HasValue)
+                    SetBalancingWp(source, workpiece.Value);
+                if (isM2) SetM2EmergencySource(source); else SetM3EmergencySource(source);
+                result = source == "M700"
+                    ? "确认仍在M700：保留M3来源占用和展示身份；M700没有可靠版号缓存，未伪造缓存"
+                    : $"确认仍在{source}：来源缓存已保留/恢复；待用户恢复引擎后按一次全新任务重新二次确认";
+                break;
+            case FlowActionManualResolution.OnCarrier:
+                if (isM2) SetM2EmergencySource(source); else SetM3EmergencySource(source);
+                result = $"确认工件在机械手{(isM2 ? "2" : "3")}上：保留来源关联、展示任务牌和忙标志，禁止自动派发";
+                break;
+            case FlowActionManualResolution.AtTargetPendingHandoff:
+                if (isM2) SetM2EmergencySource(source); else SetM3EmergencySource(source);
+                result = $"确认工件已在目标{snapshot.Target}待交接：保留来源关联和展示任务牌，不伪造M711/M721或研磨缓存完成";
+                break;
+            case FlowActionManualResolution.RemovedManually:
+                if (source != "M700")
+                {
+                    lock (_balWpsLock) _balWps.Remove(source);
+                }
+                if (isM2)
+                {
+                    ClearM2Busy();
+                    ClearM2EmergencyContext();
+                    ClearM2Display(_m2DisplayVersion);
+                }
+                else
+                {
+                    ClearM3Busy();
+                    ClearM3EmergencyContext();
+                    ClearM3Display(_m3DisplayVersion);
+                }
+                result = $"确认工件已人工移走：{source}来源缓存/忙标志/展示任务牌已清；未写PLC信号";
+                break;
+            default:
+                return $"不支持的人工结论: {resolution}";
+        }
+
+        // 只有“机械手持件/目标待交接”仍代表未完成的物理搬运，必须继续占用忙标志。
+        // “仍在来源位”已经把工件重新归属到来源缓存；引擎本身仍保持暂停，用户随后
+        // 点击恢复时必须能按一趟全新的取料动作重新读取PLC、缓存和安全条件，不能因
+        // Busy=1 永久跳过来源而形成无报警的软死锁。
+        if (resolution == FlowActionManualResolution.OnCarrier ||
+            resolution == FlowActionManualResolution.AtTargetPendingHandoff)
+        {
+            if (isM2) Interlocked.Exchange(ref _m2BusyFlag, 1);
+            else Interlocked.Exchange(ref _m3BusyFlag, 1);
+        }
+        else if (resolution == FlowActionManualResolution.StillAtSource)
+        {
+            if (isM2)
+            {
+                ClearM2Busy();
+                ClearM2EmergencyContext();
+                ClearM2Display(_m2DisplayVersion);
+            }
+            else
+            {
+                ClearM3Busy();
+                ClearM3EmergencyContext();
+                ClearM3Display(_m3DisplayVersion);
+            }
+        }
+        FlowActionManualRegistry.Remove(operationId);
+        string message = $"[平衡引擎#{EngineId}] [人工账本结案] 动作={operationId}; 工件={workpiece?.IdentityText ?? snapshot.WorkpieceIdentity}; {result}; 动平衡引擎保持暂停。";
+        Console.WriteLine(message);
+        return message;
+    }
+
     public async Task<string> EmergencyClearBalancingPositionAsync(
         string position, bool resumeAfterClear, CancellationToken ct = default)
     {
@@ -980,6 +1075,7 @@ public sealed class BalancingFlowEngine : IDisposable
         bool keepDisplayForManualConfirmation = false; // 只控制页面证据清理，不参与任何动作判断
         WorkpieceCache? displayWorkpiece = null;
         string operationalActionId = $"BAL-M2-{actionVersion}";
+        FlowActionContext? action = null;
         var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled(operationalActionId);
         var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
             "动平衡", "动平衡引擎", "机械手", "M2", "来源未确定",
@@ -993,12 +1089,14 @@ public sealed class BalancingFlowEngine : IDisposable
             if (gotM818)
             {
                 if (ConsumeM2Lock("M818")) _lockM818?.Release();
+                action?.TryReleaseLock("M818");
                 gotM818 = false;
                 released = true;
             }
             if (gotM817)
             {
                 if (ConsumeM2Lock("M817")) _lockM817?.Release();
+                action?.TryReleaseLock("M817");
                 gotM817 = false;
                 released = true;
             }
@@ -1057,6 +1155,10 @@ public sealed class BalancingFlowEngine : IDisposable
                 throw new InvalidOperationException($"M2检测到{pickReg}=有板但工件缓存缺失, 当前Keys=[{CacheKeysText}], 已暂停, 禁止默认160mm取料");
             }
             var trackedWorkpiece = trackedWp.Value;
+            action = new FlowActionContext(operationalActionId, "动平衡机械手2取料送ST008", "机械手2",
+                trackedWorkpiece.IdentityText, pickReg, "ST008/M710", pickReg);
+            if (gotM817) action.RegisterLock("M817");
+            if (gotM818) action.RegisterLock("M818");
             displayWorkpiece = trackedWorkpiece;
             operationalSite = operationalSite with
             {
@@ -1109,16 +1211,25 @@ public sealed class BalancingFlowEngine : IDisposable
                 throw new InvalidOperationException("机械手2 X11=1(磁铁已有工件), 拒绝取料防止碰撞");
             }
             // 每趟M2搬运只在首次物理移动前完整下发一次速度；后续Y/Z、X11重试和放料复用本次参数。
+            action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "设置机械手2本任务绝对速度");
+            action.MarkCommandSent();
             await ConfigureManipulatorAbsSpeedAsync(_m2!, 2, "M2", ct);
+            action.Confirm();
             Console.WriteLine($"[平衡引擎] [M2] ① 取料 {pickReg}({pickCode}) {trackedWorkpiece.IdentityText} Y={pickY} Z={pzDown}");
             // 先Y移到取料位(机械手只移YZ轴)
+            action.BeginStep(FlowActionStep.MoveXYToSource, new FlowActionPosition(null, pickY, 0), $"Y到{pickReg}来源位");
+            action.MarkCommandSent();
             await _m2.MoveAbsoluteAsync(-1, pickY, -1, ct: ct);
+            action.Confirm(new FlowActionPosition(null, pickY, 0), "来源Y到位");
             operationalTracker.BeginZDown(pzDown);
             try
             {
                 //再Z下降取料
+                action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(null, pickY, pzDown), "来源Z下降取料");
+                action.MarkCommandSent();
                 await _m2.MoveAbsoluteAsync(-1, -1, pzDown, ct: ct);
                 operationalTracker.CompleteZDown();
+                action.Confirm(new FlowActionPosition(null, pickY, pzDown), "来源取料Z到位");
             }
             catch (PressureStopException)
             {
@@ -1139,6 +1250,8 @@ public sealed class BalancingFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOn();
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(null, pickY, curZ), "来源首次充磁");
+                        action.MarkCommandSent();
                         await _m2.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
                     }
@@ -1151,6 +1264,8 @@ public sealed class BalancingFlowEngine : IDisposable
                         throw;
                     }
                     mag = true;
+                    action.Confirm(new FlowActionPosition(null, pickY, curZ), "首次充磁调用成功返回");
+                    action.RecordFeedback(FlowActionPosition.Unknown, null, true, "首次充磁调用成功返回");
                 }
                 else
                 {
@@ -1159,8 +1274,11 @@ public sealed class BalancingFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOff();
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(null, pickY, curZ), $"{pickCode}X11重试前退磁");
+                        action.MarkCommandSent();
                         await _m2.MagnetOffAsync(ct);
                         operationalTracker.CompleteMagnetOff();
+                        action.Confirm(new FlowActionPosition(null, pickY, curZ), "X11重试前退磁成功返回");
                     }
                     catch (Exception ex)
                     {
@@ -1174,8 +1292,11 @@ public sealed class BalancingFlowEngine : IDisposable
                     operationalTracker.BeginZDown(curZ);
                     try
                     {
+                        action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(null, pickY, curZ), "M2 X11重试下探Z");
+                        action.MarkCommandSent();
                         await _m2.MoveAbsoluteAsync(-1, -1, curZ, ct: ct);
                         operationalTracker.CompleteZDown();
+                        action.Confirm(new FlowActionPosition(null, pickY, curZ), "M2 X11重试下探Z到位");
                     }
                     catch (PressureStopException)
                     {
@@ -1187,8 +1308,11 @@ public sealed class BalancingFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOn();
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(null, pickY, curZ), $"{pickCode}X11重试后充磁");
+                        action.MarkCommandSent();
                         await _m2.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
+                        action.Confirm(new FlowActionPosition(null, pickY, curZ), "X11重试后充磁成功返回");
                     }
                     catch (Exception ex)
                     {
@@ -1223,6 +1347,10 @@ public sealed class BalancingFlowEngine : IDisposable
                 {
                     Console.WriteLine($"[平衡引擎] [M2] ✓ X11=1 已吸到(保持在取料位Z={curZ})");
                     holdingWorkpiece = true;
+                    action.BeginStep(FlowActionStep.ConfirmPickup, new FlowActionPosition(null, pickY, curZ), "X11确认机械手2持件");
+                    action.RecordFeedback(new FlowActionPosition(null, pickY, curZ), true, true, "X11=1确认持件");
+                    action.SetOwnership(FlowWorkpieceOwnership.OnCarrier, "X11=1确认工件由机械手2持有");
+                    action.Confirm(new FlowActionPosition(null, pickY, curZ), "X11确认持件");
                     SetM2Display(actionVersion, trackedWorkpiece, $"已从{pickReg}吸住，前往ST008/M710");
                     break;
                 }
@@ -1240,10 +1368,18 @@ public sealed class BalancingFlowEngine : IDisposable
 
             // ── ② 放料: Z↑安全→XY→ST008→Z↓台面→退磁→Z↑安全 ──
             // (缓存不移除: 放料失败时工件还在磁铁上, 缓存需保留供人工确认)
+            action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, pickY, safeZ), "持件后Z上升安全高度");
+            action.MarkCommandSent();
             await _m2.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
+            action.Confirm(new FlowActionPosition(null, pickY, safeZ), "持件后Z安全到位");
             operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "M2取料后Z升安全命令成功返回");
             if (!useM817)
+            {
+                action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(null, pickY, safeZ), "M824通知ST020已取料");
+                action.MarkCommandSent();
                 await WriteMc63HandshakeBitAsync(RackAddr.Bit_ST020_PickDone, "M824(ST020机械手2取料完成)", ct);
+                action.Confirm(new FlowActionPosition(null, pickY, safeZ), "M824写入成功返回");
+            }
             // 目的位M710在主循环里已经预检过一次; 但从预检到机械手真正放料之间,
             // 现场PLC信号/人工状态可能变化。这里在抱板去ST008前再读一次真实M710,
             // 失败或有板都不继续放料, 走现有“工件在机械手上”暂停路径, 防止叠料。
@@ -1251,14 +1387,20 @@ public sealed class BalancingFlowEngine : IDisposable
             //获得yz距离
             var (destY, destZ) = GetArmCoord("M710", "ST008", _m2OffsetY, _m2OffsetZ);
             Console.WriteLine($"[平衡引擎] [M2] ② 放料 M710(ST008) Y={destY}");
+            action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(null, destY, safeZ), "持件Y到ST008/M710目标位");
+            action.MarkCommandSent();
             await _m2.MoveAbsoluteAsync(-1, destY, -1, ct: ct);
+            action.Confirm(new FlowActionPosition(null, destY, safeZ), "目标Y到位");
             int placeZ = Pz(destZ, d);
             Console.WriteLine($"[平衡引擎] [M2]   放料Z公式: {destZ} - Round(...) = {placeZ}");
             operationalTracker.BeginZDown(placeZ);
             try
             {
+                action.BeginStep(FlowActionStep.MoveZDownToPlace, new FlowActionPosition(null, destY, placeZ), "ST008/M710下降放料");
+                action.MarkCommandSent();
                 await _m2.MoveAbsoluteAsync(-1, -1, placeZ, ct: ct);
                 operationalTracker.CompleteZDown();
+                action.Confirm(new FlowActionPosition(null, destY, placeZ), "目标放料Z到位");
             }
             catch (PressureStopException)
             {
@@ -1276,6 +1418,8 @@ public sealed class BalancingFlowEngine : IDisposable
             operationalTracker.BeginPlacementMagnetOff("ST008/M710");
             try
             {
+                action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(null, destY, placeZ), "ST008/M710退磁放料");
+                action.MarkCommandSent();
                 await _m2.MagnetOffAsync(ct);
                 operationalTracker.CompletePlacementMagnetOff("ST008/M710");
                 operationalPlacementCommitted = true;
@@ -1293,12 +1437,18 @@ public sealed class BalancingFlowEngine : IDisposable
                 throw;
             }
             mag = false;
+            action.Confirm(new FlowActionPosition(null, destY, placeZ), "目标退磁成功返回");
+            action.RecordFeedback(FlowActionPosition.Unknown, null, false, "目标退磁成功返回");
+            action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff, "退磁成功，工件已在ST008/M710等待M711闭环");
             Console.WriteLine("[平衡引擎] [M2] 退磁 ✓");
             // 工件已退磁放到M710/ST008, M2后续只需Z升安全和Y回配置安全位。
             // 此时已不再占用M817/M818来源/路径区域, 可提前释放下料架位置锁, 让后天车/后续流程不被无谓阻塞。
             ReleaseM2RackLocks("M710退磁完成");
             //退磁完成回安全位置
+            action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, destY, safeZ), "ST008/M710放料后Z升安全高度");
+            action.MarkCommandSent();
             await _m2.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
+            action.Confirm(new FlowActionPosition(null, destY, safeZ), "ST008/M710放料后Z安全到位");
             operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST008/M710放料后Z升安全命令成功返回");
             placedOnM710 = true; // 工件已物理放到ST008, 后续M711失败必须暂停人工确认
             holdingWorkpiece = false;
@@ -1322,9 +1472,12 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 try
                 {
+                    action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(null, destY, safeZ), "M711通知ST008/M710放料完成");
+                    action.MarkCommandSent();
                     operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M711",
                         "M711写入调用已开始，PLC是否收到结果未知");
                     await _mc65.WriteMBitInWordAsync(700, 11, true, ct);
+                    action.Confirm(new FlowActionPosition(null, destY, safeZ), "M711写入成功返回");
                     operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M711",
                         "M711写入成功返回，PLC放料通知已确认");
                     m711Notified = true;
@@ -1349,13 +1502,27 @@ public sealed class BalancingFlowEngine : IDisposable
             int safeY = _cfg.SkewBed.Manipulator2SafeY;
             Console.WriteLine($"[平衡引擎] [M2] Y→安全位{safeY}");
             //回安全y轴
+            action.BeginStep(FlowActionStep.ReturnSafe, new FlowActionPosition(null, safeY, safeZ), "机械手2回配置安全Y");
+            action.MarkCommandSent();
             await _m2.MoveAbsoluteAsync(-1, safeY, -1, ct: ct);
+            action.Confirm(new FlowActionPosition(null, safeY, safeZ), "机械手2安全Y到位");
+            action.Complete("机械手2已完成M711通知并回到安全位");
             Console.WriteLine("[平衡引擎] [M2] ═══ 完成 ═══");
         }
         catch (Exception ex)
         {
             // holdingWorkpiece=true: X11已确认工件在机械手上; 未放到目的位前必须暂停, 防止释放busy后继续派发。
             Console.WriteLine($"[平衡引擎] [M2] ✘ 异常: {ex.Message}");
+            if (action is { IsFinalized: false } && action.CommandState != FlowCommandState.NotSent)
+            {
+                action.MarkCommandResponseUnknown(ex.Message);
+                action.PauseForManualResolution(ex.Message);
+            }
+            if (action != null)
+                OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
+                    operationalSite with { ActionStage = "机械手2动作最终异常" }, operationalTracker, ex,
+                    "机械手2已暂停，异常页面应以动作账本确认工件归属、步骤和锁。", true,
+                    actionSnapshot: action.Snapshot());
             if (operationalPlacementCommitted && !m711Notified)
             {
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PHYSICAL_HANDOFF_NOT_CLOSED",
@@ -1450,6 +1617,7 @@ public sealed class BalancingFlowEngine : IDisposable
         bool keepDisplayForManualConfirmation = false; // 只控制页面证据清理，不参与任何动作判断
         WorkpieceCache? displayWorkpiece = null;
         string operationalActionId = $"BAL-M3-{actionVersion}";
+        FlowActionContext? action = null;
         var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled(operationalActionId);
         var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
             "动平衡", "动平衡引擎", "机械手", "M3", "来源未确定",
@@ -1549,6 +1717,10 @@ public sealed class BalancingFlowEngine : IDisposable
                 Length = 0
             };
             displayWorkpiece = m3DisplayWorkpiece;
+            action = new FlowActionContext(operationalActionId, "动平衡机械手3取料送ST010", "机械手3",
+                sourceIdentity, pickReg, "ST010/M720", pickReg);
+            if (gotM821) action.RegisterLock("M821");
+            if (gotM720) action.RegisterLock("M720");
             operationalSite = operationalSite with
             {
                 Station = pickCode,
@@ -1599,16 +1771,25 @@ public sealed class BalancingFlowEngine : IDisposable
                 throw new InvalidOperationException("机械手3 X11=1(磁铁已有工件), 拒绝取料防止碰撞");
             }
             // 每趟M3搬运只在首次物理移动前完整下发一次速度；后续Y/Z、X11重试和放料复用本次参数。
+            action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "设置机械手3本任务绝对速度");
+            action.MarkCommandSent();
             await ConfigureManipulatorAbsSpeedAsync(_m3!, 3, "M3", ct);
+            action.Confirm();
             Console.WriteLine($"[平衡引擎] [M3] ① 取料 {pickReg}({pickCode}) {sourceIdentity} Y={pickY} Z={pzDown}");
             // 先Y移到取料位(机械手只移YZ轴)
+            action.BeginStep(FlowActionStep.MoveXYToSource, new FlowActionPosition(null, pickY, 0), $"Y到{pickReg}来源位");
+            action.MarkCommandSent();
             await _m3.MoveAbsoluteAsync(-1, pickY, -1, ct: ct);
+            action.Confirm(new FlowActionPosition(null, pickY, 0), "来源Y到位");
             operationalTracker.BeginZDown(pzDown);
             try
             {
                 //再Z下降取料
+                action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(null, pickY, pzDown), "来源Z下降取料");
+                action.MarkCommandSent();
                 await _m3.MoveAbsoluteAsync(-1, -1, pzDown, ct: ct);
                 operationalTracker.CompleteZDown();
+                action.Confirm(new FlowActionPosition(null, pickY, pzDown), "来源取料Z到位");
             }
             catch (PressureStopException)
             {
@@ -1629,6 +1810,8 @@ public sealed class BalancingFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOn();
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(null, pickY, curZ), "来源首次充磁");
+                        action.MarkCommandSent();
                         await _m3.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
                     }
@@ -1641,6 +1824,8 @@ public sealed class BalancingFlowEngine : IDisposable
                         throw;
                     }
                     mag = true;
+                    action.Confirm(new FlowActionPosition(null, pickY, curZ), "首次充磁调用成功返回");
+                    action.RecordFeedback(FlowActionPosition.Unknown, null, true, "首次充磁调用成功返回");
                 }
                 else
                 {
@@ -1649,8 +1834,11 @@ public sealed class BalancingFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOff();
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(null, pickY, curZ), $"{pickCode}X11重试前退磁");
+                        action.MarkCommandSent();
                         await _m3.MagnetOffAsync(ct);
                         operationalTracker.CompleteMagnetOff();
+                        action.Confirm(new FlowActionPosition(null, pickY, curZ), "X11重试前退磁成功返回");
                     }
                     catch (Exception ex)
                     {
@@ -1664,8 +1852,11 @@ public sealed class BalancingFlowEngine : IDisposable
                     operationalTracker.BeginZDown(curZ);
                     try
                     {
+                        action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(null, pickY, curZ), "M3 X11重试下探Z");
+                        action.MarkCommandSent();
                         await _m3.MoveAbsoluteAsync(-1, -1, curZ, ct: ct);
                         operationalTracker.CompleteZDown();
+                        action.Confirm(new FlowActionPosition(null, pickY, curZ), "M3 X11重试下探Z到位");
                     }
                     catch (PressureStopException)
                     {
@@ -1677,8 +1868,11 @@ public sealed class BalancingFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOn();
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(null, pickY, curZ), $"{pickCode}X11重试后充磁");
+                        action.MarkCommandSent();
                         await _m3.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
+                        action.Confirm(new FlowActionPosition(null, pickY, curZ), "X11重试后充磁成功返回");
                     }
                     catch (Exception ex)
                     {
@@ -1713,6 +1907,10 @@ public sealed class BalancingFlowEngine : IDisposable
                 {
                     Console.WriteLine($"[平衡引擎] [M3] ✓ X11=1 已吸到(保持在取料位Z={curZ})");
                     holdingWorkpiece = true;
+                    action.BeginStep(FlowActionStep.ConfirmPickup, new FlowActionPosition(null, pickY, curZ), "X11确认机械手3持件");
+                    action.RecordFeedback(new FlowActionPosition(null, pickY, curZ), true, true, "X11=1确认持件");
+                    action.SetOwnership(FlowWorkpieceOwnership.OnCarrier, "X11=1确认工件由机械手3持有");
+                    action.Confirm(new FlowActionPosition(null, pickY, curZ), "X11确认持件");
                     SetM3Display(actionVersion, m3DisplayWorkpiece, $"已从{pickReg}吸住，前往ST010/M720");
                     break;
                 }
@@ -1728,10 +1926,18 @@ public sealed class BalancingFlowEngine : IDisposable
                 Console.WriteLine($"[平衡引擎] [M3] ⚠ X11=0 未吸到, 准备下探5mm重试");
             }
             //z移动安全位置
+            action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, pickY, safeZ), "持件后Z上升安全高度");
+            action.MarkCommandSent();
             await _m3.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
+            action.Confirm(new FlowActionPosition(null, pickY, safeZ), "持件后Z安全到位");
             operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "M3取料后Z升安全命令成功返回");
             if (!useM700)
+            {
+                action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(null, pickY, safeZ), "M826通知ST021已取料");
+                action.MarkCommandSent();
                 await WriteMc63HandshakeBitAsync(RackAddr.Bit_ST021_PickDone, "M826(ST021机械手3取料完成)", ct);
+                action.Confirm(new FlowActionPosition(null, pickY, safeZ), "M826写入成功返回");
+            }
 
             // ── M701=1: 仅M700来源需要通知PLC“动平衡料架2已被天车取走” ──
             // 必须等X11确认吸住且Z已升到安全高度后再写, 否则PLC可能清M700而工件实际仍在ST009。
@@ -1742,7 +1948,10 @@ public sealed class BalancingFlowEngine : IDisposable
                 {
                     try
                     {
+                        action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(null, pickY, safeZ), "M701通知M700/ST009来源已取料");
+                        action.MarkCommandSent();
                         await _mc65.WriteMBitInWordAsync(700, 1, true, ct);
+                        action.Confirm(new FlowActionPosition(null, pickY, safeZ), "M701写入成功返回");
                         Console.WriteLine($"[平衡引擎] [M3] M701=1 通知PLC M700取料完成 {sourceIdentity}");
                     }
                     catch (Exception ex)
@@ -1764,15 +1973,21 @@ public sealed class BalancingFlowEngine : IDisposable
             var (destY, destZ) = GetArmCoord("M720", "ST010", _m3OffsetY, _m3OffsetZ);
             Console.WriteLine($"[平衡引擎] [M3] ② 放料 ST010 Y={destY}");
             //移动y
+            action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(null, destY, safeZ), "持件Y到ST010/M720目标位");
+            action.MarkCommandSent();
             await _m3.MoveAbsoluteAsync(-1, destY, -1, ct: ct);
+            action.Confirm(new FlowActionPosition(null, destY, safeZ), "目标Y到位");
             int placeZ = Pz(destZ, d);
             Console.WriteLine($"[平衡引擎] [M3]   放料Z公式: {destZ} - Round(...) = {placeZ}");
             operationalTracker.BeginZDown(placeZ);
             try
             {
                 //移动z
+                action.BeginStep(FlowActionStep.MoveZDownToPlace, new FlowActionPosition(null, destY, placeZ), "ST010/M720下降放料");
+                action.MarkCommandSent();
                 await _m3.MoveAbsoluteAsync(-1, -1, placeZ, ct: ct);
                 operationalTracker.CompleteZDown();
+                action.Confirm(new FlowActionPosition(null, destY, placeZ), "目标放料Z到位");
             }
             catch (PressureStopException)
             {
@@ -1789,6 +2004,8 @@ public sealed class BalancingFlowEngine : IDisposable
             operationalTracker.BeginPlacementMagnetOff("ST010/M720");
             try
             {
+                action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(null, destY, placeZ), "ST010/M720退磁放料");
+                action.MarkCommandSent();
                 await _m3.MagnetOffAsync(ct);
                 operationalTracker.CompletePlacementMagnetOff("ST010/M720");
                 operationalPlacementCommitted = true;
@@ -1806,8 +2023,14 @@ public sealed class BalancingFlowEngine : IDisposable
                 throw;
             }
             mag = false;
+            action.Confirm(new FlowActionPosition(null, destY, placeZ), "目标退磁成功返回");
+            action.RecordFeedback(FlowActionPosition.Unknown, null, false, "目标退磁成功返回");
+            action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff, "退磁成功，工件已在ST010/M720等待M721和研磨缓存闭环");
             Console.WriteLine("[平衡引擎] [M3] 退磁 ✓");
+            action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, destY, safeZ), "ST010/M720放料后Z升安全高度");
+            action.MarkCommandSent();
             await _m3.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
+            action.Confirm(new FlowActionPosition(null, destY, safeZ), "ST010/M720放料后Z安全到位");
             operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST010/M720放料后Z升安全命令成功返回");
             placedOnM720 = true; // 工件已物理放到研磨上料位并且Z已离开, 后续信号失败需人工补确认
             holdingWorkpiece = false;
@@ -1818,9 +2041,12 @@ public sealed class BalancingFlowEngine : IDisposable
             {
                 try
                 {
+                    action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(null, destY, safeZ), "M721通知ST010/M720放料完成");
+                    action.MarkCommandSent();
                     operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721",
                         "M721写入调用已开始，PLC是否收到结果未知");
                     await _mc65.WriteMBitInWordAsync(720, 1, true, ct); 
+                    action.Confirm(new FlowActionPosition(null, destY, safeZ), "M721写入成功返回");
                     operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721",
                         "M721写入成功返回，PLC放料通知已确认");
                     m721Notified = true;
@@ -1889,13 +2115,27 @@ public sealed class BalancingFlowEngine : IDisposable
             // ── ③ 回安全位: Y→配置文件manipulator3SafeY ──
             int safeY = _cfg.SkewBed.Manipulator3SafeY;
             Console.WriteLine($"[平衡引擎] [M3] Y→安全位{safeY}");
+            action.BeginStep(FlowActionStep.ReturnSafe, new FlowActionPosition(null, safeY, safeZ), "机械手3回配置安全Y");
+            action.MarkCommandSent();
             await _m3.MoveAbsoluteAsync(-1, safeY, -1, ct: ct);
+            action.Confirm(new FlowActionPosition(null, safeY, safeZ), "机械手3安全Y到位");
+            action.Complete("机械手3已完成M721、研磨缓存和来源账本闭环并回到安全位");
             Console.WriteLine("[平衡引擎] [M3] ═══ 完成 ═══");
         }
         catch (Exception ex)
         {
             // holdingWorkpiece=true: X11已确认工件在机械手上; 未放到目的位前必须暂停, 防止释放busy后继续派发。
             Console.WriteLine($"[平衡引擎] [M3] ✘ 异常: {ex.Message}");
+            if (action is { IsFinalized: false } && action.CommandState != FlowCommandState.NotSent)
+            {
+                action.MarkCommandResponseUnknown(ex.Message);
+                action.PauseForManualResolution(ex.Message);
+            }
+            if (action != null)
+                OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
+                    operationalSite with { ActionStage = "机械手3动作最终异常" }, operationalTracker, ex,
+                    "机械手3已暂停，异常页面应以动作账本确认工件归属、步骤和锁。", true,
+                    actionSnapshot: action.Snapshot());
             if (operationalPlacementCommitted && (!m721Notified || !grindingCacheNotified || !operationalSourceCacheClosed))
             {
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PHYSICAL_HANDOFF_NOT_CLOSED",
@@ -1951,7 +2191,9 @@ public sealed class BalancingFlowEngine : IDisposable
             //释放两把锁
             // 注意: 实际释放按后拿先放, 先释放M720/ST010锁, 再释放M821锁。
             if (gotM720 && ConsumeM3Lock("M720")) _lockM720?.Release();  // 先释放M720/ST010锁(后拿的先放)
+            action?.TryReleaseLock("M720");
             if (gotM821 && ConsumeM3Lock("M821")) _lockM821?.Release();  // 再释放M821锁(先拿的后放)
+            action?.TryReleaseLock("M821");
             if (IsM3ActionCurrent(actionVersion))
             {
                 ClearM3Busy();

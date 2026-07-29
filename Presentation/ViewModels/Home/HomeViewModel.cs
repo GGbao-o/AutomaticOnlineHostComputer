@@ -2082,6 +2082,122 @@ public sealed class HomeViewModel : ObservableObject
         };
     }
 
+    /// <summary>人工确认来源位异常后的唯一账本结案入口；不会发送设备动作或自动恢复线路。</summary>
+    public string ResolveRearSourceManualReservation(int line, string rackCode, FlowActionManualResolution resolution)
+    {
+        return line switch
+        {
+            1 => _line1RearEngine?.ResolveManualSourceReservation(rackCode, resolution) ?? "1号线后端引擎未初始化",
+            2 => _line2RearEngine?.ResolveManualSourceReservation(rackCode, resolution) ?? "2号线后端引擎未初始化",
+            _ => $"无效线体: {line}"
+        };
+    }
+
+    public string ResolveRearLoadTargetPending(int line, string operationId) => line switch
+    {
+        1 => _line1RearEngine?.ResolveManualLoadTargetPending(operationId) ?? "1号线后端引擎未初始化",
+        2 => _line2RearEngine?.ResolveManualLoadTargetPending(operationId) ?? "2号线后端引擎未初始化",
+        _ => $"无效线体: {line}"
+    };
+
+    /// <summary>后天车斜床下料动作的人工账本结案；不自动恢复后端引擎。</summary>
+    public string ResolveRearUnloadManualAction(int line, string operationId, FlowActionManualResolution resolution)
+    {
+        return line switch
+        {
+            1 => _line1RearEngine?.ResolveManualUnloadAction(operationId, resolution) ?? "1号线后端引擎未初始化",
+            2 => _line2RearEngine?.ResolveManualUnloadAction(operationId, resolution) ?? "2号线后端引擎未初始化",
+            _ => $"无效线体: {line}"
+        };
+    }
+
+    /// <summary>人工确认后补后天车目标缓存和PLC握手；成功前不清原斜床账本。</summary>
+    public Task<string> ResolveRearUnloadTargetPendingAsync(int line, string operationId, CancellationToken ct = default) => line switch
+    {
+        1 => _line1RearEngine?.ResolveManualUnloadTargetPendingAsync(operationId, ct)
+             ?? Task.FromResult("1号线后端引擎未初始化"),
+        2 => _line2RearEngine?.ResolveManualUnloadTargetPendingAsync(operationId, ct)
+             ?? Task.FromResult("2号线后端引擎未初始化"),
+        _ => Task.FromResult($"无效线体: {line}")
+    };
+
+    /// <summary>
+    /// 应急中心的只读动作账本。此处绝不据此发送动作或自动恢复引擎；
+    /// 现场确认后的缓存/Pending/任务牌结案仍必须调用各引擎的专用入口。
+    /// </summary>
+    public string GetPendingManualFlowActions()
+    {
+        IReadOnlyList<FlowActionSnapshot> snapshots = FlowActionManualRegistry.Snapshot();
+        if (snapshots.Count == 0)
+            return "当前没有因物理命令异常而等待人工确认的搬运动作。\n\n" +
+                   "注意：没有待确认动作不等于设备现场安全；仍需按各设备实时诊断确认。";
+
+        var builder = new StringBuilder();
+        builder.AppendLine($"待人工确认动作：{snapshots.Count} 条（只读账本，不执行设备命令）");
+        builder.AppendLine("请先按动作号、工件、最后坐标和X11核对现场；完成对应引擎的专用应急结案后，条目才会消失。");
+        foreach (FlowActionSnapshot item in snapshots)
+        {
+            builder.AppendLine();
+            builder.AppendLine($"动作号: {item.OperationId}");
+            builder.AppendLine($"流程/设备: {item.FlowScope} / {item.DeviceName}");
+            builder.AppendLine($"工件: {item.WorkpieceIdentity}");
+            builder.AppendLine($"来源 → 目标: {item.Source} → {item.Target}；来源账本={item.SourceCacheKey}");
+            builder.AppendLine($"步骤/命令: {item.Step} / {item.CommandState}");
+            builder.AppendLine($"工件归属/结论: {item.Ownership} / {item.Disposition}");
+            builder.AppendLine($"目标坐标: {FormatActionPosition(item.TargetPosition)}；最后坐标: {FormatActionPosition(item.LastKnownPosition)}");
+            builder.AppendLine($"X11: {FormatNullableBool(item.X11)}；磁铁: {FormatNullableBool(item.MagnetOn)}");
+            builder.AppendLine($"异常点锁: {(item.HeldLocks.Count == 0 ? "未登记" : string.Join("、", item.HeldLocks))}");
+            builder.AppendLine($"暂停原因: {item.PauseReason}");
+        }
+        return builder.ToString();
+    }
+
+    /// <summary>研磨天车四种人工结论的唯一页面入口；不自动恢复引擎。</summary>
+    public string ResolveGrindingManualAction(string operationId, FlowActionManualResolution resolution) =>
+        _grindingEngine?.ResolveManualAction(operationId, resolution) ?? "研磨引擎未初始化";
+
+    /// <summary>机械手2/3四种人工结论的唯一页面入口；不自动恢复引擎。</summary>
+    public string ResolveBalancingManualAction(string operationId, FlowActionManualResolution resolution) =>
+        _line1BalancingEngine?.ResolveManualAction(operationId, resolution) ?? "动平衡引擎未初始化";
+
+    /// <summary>仅补前天车“工件已在中转架但缓存未闭环”的目标待交接账本。</summary>
+    public string ResolveFrontCraneTargetPending(int line, string operationId) => line switch
+    {
+        1 => _line1Engine?.ResolveFrontCraneTargetPending(operationId) ?? "1号线前端引擎未初始化",
+        2 => _line2Engine?.ResolveFrontCraneTargetPending(operationId) ?? "2号线前端引擎未初始化",
+        _ => $"无效线体: {line}"
+    };
+
+    /// <summary>前天车非目标待交接的受限人工结案；不会触碰货叉/双头镗状态。</summary>
+    public string ResolveFrontCraneManualAction(int line, string operationId, FlowActionManualResolution resolution) => line switch
+    {
+        1 => resolution switch
+        {
+            FlowActionManualResolution.StillAtSource => _line1Engine?.ResolveFrontCraneStillAtSource(operationId) ?? "1号线前端引擎未初始化",
+            FlowActionManualResolution.RemovedManually => _line1Engine?.ResolveFrontCraneRemovedManually(operationId) ?? "1号线前端引擎未初始化",
+            FlowActionManualResolution.OnCarrier => "前天车确认天车持件后必须保留人工任务牌和动作快照，等待现场移走或转入真实目标缓存结案。",
+            _ => "前天车该结论不支持此入口。"
+        },
+        2 => resolution switch
+        {
+            FlowActionManualResolution.StillAtSource => _line2Engine?.ResolveFrontCraneStillAtSource(operationId) ?? "2号线前端引擎未初始化",
+            FlowActionManualResolution.RemovedManually => _line2Engine?.ResolveFrontCraneRemovedManually(operationId) ?? "2号线前端引擎未初始化",
+            FlowActionManualResolution.OnCarrier => "前天车确认天车持件后必须保留人工任务牌和动作快照，等待现场移走或转入真实目标缓存结案。",
+            _ => "前天车该结论不支持此入口。"
+        },
+        _ => $"无效线体: {line}"
+    };
+
+    private static string FormatActionPosition(FlowActionPosition position) =>
+        $"X={position.X?.ToString() ?? "未知"}, Y={position.Y?.ToString() ?? "未知"}, Z={position.Z?.ToString() ?? "未知"}";
+
+    private static string FormatNullableBool(bool? value) => value switch
+    {
+        true => "1/是",
+        false => "0/否",
+        null => "未知"
+    };
+
     /// <summary>读取1/2号线前端在途实时诊断；只读，不自动暂停或修改状态。</summary>
     public Task<string> GetFrontEmergencyInfoAsync(int line, CancellationToken ct = default)
     {
@@ -2113,8 +2229,44 @@ public sealed class HomeViewModel : ObservableObject
         PauseWholeLineForFrontEmergency(line);
         return line switch
         {
-            1 => _line1Engine == null ? "1号线前端引擎未初始化" : await _line1Engine.EmergencyContinuePlateOnForkAsync(ct),
-            2 => _line2Engine == null ? "2号线前端引擎未初始化" : await _line2Engine.EmergencyContinuePlateOnForkAsync(ct),
+            1 => _line1Engine == null ? "1号线前端引擎未初始化" : await _line1Engine.EmergencyContinuePlateOnForkAsync(ct: ct),
+            2 => _line2Engine == null ? "2号线前端引擎未初始化" : await _line2Engine.EmergencyContinuePlateOnForkAsync(ct: ct),
+            _ => $"无效线体: {line}"
+        };
+    }
+
+    /// <summary>机械手1已在货叉待交接的动作账本结案；复用实时安全复核和M801补写。</summary>
+    public async Task<string> ResolveManipulator1TargetPendingAsync(int line, string operationId, CancellationToken ct = default)
+    {
+        PauseWholeLineForFrontEmergency(line);
+        return line switch
+        {
+            1 => _line1Engine == null ? "1号线前端引擎未初始化" : await _line1Engine.EmergencyContinuePlateOnForkAsync(operationId, ct),
+            2 => _line2Engine == null ? "2号线前端引擎未初始化" : await _line2Engine.EmergencyContinuePlateOnForkAsync(operationId, ct),
+            _ => $"无效线体: {line}"
+        };
+    }
+
+    /// <summary>机械手1动作账本的非目标结案；不会发送运动或PLC命令。</summary>
+    public string ResolveManipulator1ManualAction(int line, string operationId, FlowActionManualResolution resolution)
+    {
+        PauseWholeLineForFrontEmergency(line);
+        return line switch
+        {
+            1 => resolution switch
+            {
+                FlowActionManualResolution.StillAtSource => _line1Engine?.ResolveManipulator1StillAtSource(operationId) ?? "1号线前端引擎未初始化",
+                FlowActionManualResolution.OnCarrier => _line1Engine?.ResolveManipulator1OnCarrier(operationId) ?? "1号线前端引擎未初始化",
+                FlowActionManualResolution.RemovedManually => _line1Engine?.ResolveManipulator1RemovedManually(operationId) ?? "1号线前端引擎未初始化",
+                _ => "机械手1目标待交接必须使用带实时复核的专用结案入口。"
+            },
+            2 => resolution switch
+            {
+                FlowActionManualResolution.StillAtSource => _line2Engine?.ResolveManipulator1StillAtSource(operationId) ?? "2号线前端引擎未初始化",
+                FlowActionManualResolution.OnCarrier => _line2Engine?.ResolveManipulator1OnCarrier(operationId) ?? "2号线前端引擎未初始化",
+                FlowActionManualResolution.RemovedManually => _line2Engine?.ResolveManipulator1RemovedManually(operationId) ?? "2号线前端引擎未初始化",
+                _ => "机械手1目标待交接必须使用带实时复核的专用结案入口。"
+            },
             _ => $"无效线体: {line}"
         };
     }

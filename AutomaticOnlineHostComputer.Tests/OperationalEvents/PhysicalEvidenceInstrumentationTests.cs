@@ -335,12 +335,11 @@ public sealed class PhysicalEvidenceInstrumentationTests
         string grinding = ReadFlowSource("GrindingFlowEngine.cs");
 
         Assert.Contains("await CraneOpAsync(crane, async c =>", grinding, StringComparison.Ordinal);
-        Assert.Matches(
-            @"await CraneOpAsync\(crane, async c =>\s*\{\s*operationalTracker\.BeginMagnetOn\(\);\s*try\s*\{\s*await crane\.MagnetOnAsync\(c\);",
-            grinding);
-        Assert.Matches(
-            @"await CraneOpAsync\(crane, async c =>\s*\{\s*operationalTracker\.BeginMagnetOff\(\);\s*try\s*\{\s*await crane\.MagnetOffAsync\(c\);",
-            grinding);
+        // 动作账本可在委托内外记录“已发送”，不应反过来要求物理监控调用必须是委托第一行。
+        Assert.Contains("operationalTracker.BeginMagnetOn();", grinding, StringComparison.Ordinal);
+        Assert.Contains("await crane.MagnetOnAsync(c);", grinding, StringComparison.Ordinal);
+        Assert.Contains("operationalTracker.BeginMagnetOff();", grinding, StringComparison.Ordinal);
+        Assert.Contains("await crane.MagnetOffAsync(c);", grinding, StringComparison.Ordinal);
     }
 
     [Fact]

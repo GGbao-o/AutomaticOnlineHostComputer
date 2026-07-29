@@ -413,7 +413,8 @@ internal static class OperationalEventContextFactory
         bool? placed = null,
         bool? cacheNotified = null,
         bool? downstreamNotified = null,
-        bool? handoffClosed = null)
+        bool? handoffClosed = null,
+        FlowActionSnapshot? actionSnapshot = null)
     {
         try
         {
@@ -493,6 +494,56 @@ internal static class OperationalEventContextFactory
                 placedEvidence,
                 cacheEvidence,
                 commitments);
+            if (actionSnapshot != null)
+            {
+                FlowActionSnapshot action = actionSnapshot;
+                workpiece = workpiece with
+                {
+                    Source = Text(action.Source, "动作账本来源"),
+                    Target = Text(action.Target, "动作账本目标"),
+                    SoftwareOwner = Text($"{action.Ownership}；步骤={action.Step}；命令={action.CommandState}", "动作账本"),
+                    LastConfirmedLocation = Text(ActionLocation(action.LastKnownPosition), "动作账本最后坐标"),
+                    EvidenceSource = "FlowActionContext动作账本"
+                };
+                motion = motion with
+                {
+                    X11LastValue = action.X11.HasValue
+                        ? EvidenceValue<int>.Confirmed(action.X11.Value ? 1 : 0, "动作账本最后X11")
+                        : EvidenceValue<int>.Unknown("动作账本尚未读取X11"),
+                    X11ReadValid = OptionalBool(action.X11.HasValue, "动作账本X11读取有效性", "动作账本尚未读取X11")
+                };
+                business = new BusinessStateEvidence(
+                    business.Availability,
+                    business.Reason,
+                    Text($"{action.Step}/{action.CommandState}: {action.Detail}", "动作账本当前阶段"),
+                    business.StateBefore,
+                    Text($"{action.Disposition}; 人工确认={action.ManualConfirmationRequired}; 原因={action.PauseReason}", "动作账本异常结论"),
+                    business.CacheBefore,
+                    business.CacheAfter,
+                    business.OwnerBefore,
+                    Text(action.Ownership.ToString(), "动作账本工件归属"),
+                    business.HoldingWorkpiece,
+                    business.Placed,
+                    business.CacheNotified,
+                    business.PhysicalCommitments.Concat(new[]
+                    {
+                        new PhysicalCommitmentEvidence(
+                            "动作账本步骤/命令",
+                            EvidenceValue<bool>.Confirmed(action.CommandState == FlowCommandState.Confirmed,
+                                $"{action.Step} / {action.CommandState}：{action.Detail}"),
+                            "确认表示本步骤收到设备反馈；未确认或响应未知时不得自动重试"),
+                        new PhysicalCommitmentEvidence(
+                            "动作账本工件归属",
+                            EvidenceValue<bool>.Confirmed(action.Ownership == FlowWorkpieceOwnership.OnCarrier,
+                                $"{action.Ownership}；异常结论={action.Disposition}"),
+                            "用于人工确认工件在来源、载具或目标待交接的位置"),
+                        new PhysicalCommitmentEvidence(
+                            "人工确认是否必需",
+                            EvidenceValue<bool>.Confirmed(action.ManualConfirmationRequired,
+                                action.ManualConfirmationRequired ? action.PauseReason : "当前快照未进入人工确认暂停"),
+                            "需要人工确认时不能通过清空PLC状态直接恢复自动派发")
+                    }));
+            }
             LockEvidence locks = string.IsNullOrWhiteSpace(site.LockName)
                 ? new LockEvidence(EvidenceAvailability.Unknown, "调用点没有锁证据", Array.Empty<LockItemEvidence>())
                 : new LockEvidence(
@@ -506,6 +557,19 @@ internal static class OperationalEventContextFactory
                             EvidenceValue<bool>.Unknown("finally尚未执行完成，释放结果未知"),
                             "确认相关设备和工件已离开碰撞区域后，再核对锁最终状态")
                     });
+            if (actionSnapshot != null)
+            {
+                locks = new LockEvidence(
+                    EvidenceAvailability.Confirmed,
+                    "动作账本在异常点登记的实际软件锁；释放结果需以finally后的最终事件为准",
+                    actionSnapshot.HeldLocks.Select(lockName => new LockItemEvidence(
+                        lockName,
+                        EvidenceValue<bool>.Confirmed(true, "异常点动作账本仍登记持有"),
+                        EvidenceValue<bool>.Unknown("当前事件在finally前生成，释放结果尚未知"),
+                        actionSnapshot.ManualConfirmationRequired
+                            ? "暂停后请人工确认现场，再执行对应应急处置"
+                            : "按正常动作收尾")));
+            }
             OperatorGuidance guidance = new(
                 EvidenceAvailability.Confirmed,
                 "来自稳定事件目录",
@@ -561,7 +625,8 @@ internal static class OperationalEventContextFactory
         OperationalPhysicalEventSite site,
         OperationalPhysicalCycleTracker tracker,
         RearLoadX11Finalization finalization,
-        Exception? exception)
+        Exception? exception,
+        FlowActionSnapshot? actionSnapshot = null)
     {
         try
         {
@@ -577,6 +642,17 @@ internal static class OperationalEventContextFactory
                     site.Owner,
                     snapshot.LastConfirmedLocation)
                 : UnknownWorkpiece("后天车上料调用点没有计划工件");
+            if (actionSnapshot != null)
+            {
+                workpiece = workpiece with
+                {
+                    Source = Text(actionSnapshot.Source, "动作账本来源"),
+                    Target = Text(actionSnapshot.Target, "动作账本目标"),
+                    SoftwareOwner = Text($"{actionSnapshot.Ownership}；步骤={actionSnapshot.Step}；命令={actionSnapshot.CommandState}", "动作账本"),
+                    LastConfirmedLocation = Text(ActionLocation(actionSnapshot.LastKnownPosition), "动作账本最后坐标"),
+                    EvidenceSource = "FlowActionContext动作账本"
+                };
+            }
 
             var recoverySteps = new[]
             {
@@ -618,6 +694,23 @@ internal static class OperationalEventContextFactory
                 EvidenceValue<bool>.Confirmed(false, "X11未确认持件，未执行放料"),
                 cacheRestored,
                 commitments);
+            if (actionSnapshot != null)
+            {
+                business = new BusinessStateEvidence(
+                    business.Availability,
+                    business.Reason,
+                    Text($"{actionSnapshot.Step}/{actionSnapshot.CommandState}: {actionSnapshot.Detail}", "动作账本当前阶段"),
+                    business.StateBefore,
+                    Text($"{actionSnapshot.Disposition}; 人工确认={actionSnapshot.ManualConfirmationRequired}; 原因={actionSnapshot.PauseReason}", "动作账本异常结论"),
+                    business.CacheBefore,
+                    business.CacheAfter,
+                    business.OwnerBefore,
+                    Text(actionSnapshot.Ownership.ToString(), "动作账本工件归属"),
+                    business.HoldingWorkpiece,
+                    business.Placed,
+                    business.CacheNotified,
+                    business.PhysicalCommitments);
+            }
             var locks = new LockEvidence(
                 EvidenceAvailability.Confirmed,
                 "最终事件在原finally锁释放调用完成后生成",
@@ -697,8 +790,12 @@ internal static class OperationalEventContextFactory
                         snapshot.ZMayStillBeLow,
                         snapshot.MagnetOnCommand,
                         snapshot.MagnetOffCommand,
-                        snapshot.X11LastValue,
-                        snapshot.X11ReadValid,
+                        actionSnapshot?.X11 is bool x11
+                            ? EvidenceValue<int>.Confirmed(x11 ? 1 : 0, "动作账本最后X11")
+                            : snapshot.X11LastValue,
+                        actionSnapshot?.X11.HasValue == true
+                            ? EvidenceValue<bool>.Confirmed(true, "动作账本X11读取有效性")
+                            : snapshot.X11ReadValid,
                         snapshot.X11Attempts,
                         snapshot.X11ReadAtUtc),
                     BusinessState = business,
@@ -764,6 +861,9 @@ internal static class OperationalEventContextFactory
         EvidenceValue<string>.Unknown(reason),
         EvidenceValue<string>.Unknown(reason),
         reason);
+
+    private static string ActionLocation(FlowActionPosition position) =>
+        $"X={position.X?.ToString() ?? "未知"} Y={position.Y?.ToString() ?? "未知"} Z={position.Z?.ToString() ?? "未知"}";
 
     private static EvidenceValue<bool> OptionalBool(bool? value, string confirmedReason, string unknownReason) =>
         value.HasValue

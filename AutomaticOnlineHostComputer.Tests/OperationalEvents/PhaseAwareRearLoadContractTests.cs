@@ -43,7 +43,8 @@ public sealed class PhaseAwareRearLoadContractTests
         Assert.Contains("CommitPickup", source, StringComparison.Ordinal);
         Assert.Contains("ReleaseReservation", source, StringComparison.Ordinal);
         Assert.Contains("_workpieces.Remove(rackCode, out workpiece)", source, StringComparison.Ordinal);
-        Assert.Contains("_reservations[rackCode] = operationId", source, StringComparison.Ordinal);
+        Assert.Contains("_reservations[rackCode] = reservation ?? Reservation.Active(operationId)", source, StringComparison.Ordinal);
+        Assert.Contains("Reservation.Active(operationId)", source, StringComparison.Ordinal);
     }
 
     private static string Read(params string[] parts)

@@ -192,7 +192,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             signalAvailable && RackHasPhysicalPlateSnapshot(code),
             cached.TryGetValue(code, out var wp) ? WorkpieceDisplaySnapshot.From(wp) : null,
             front?.SnapshotAtUtc ?? default, sourcePaused,
-            _rackLedger.IsReserved(code, out string reservationOperationId), reservationOperationId);
+            _rackLedger.IsReserved(code, out string reservationOperationId), reservationOperationId,
+            _rackLedger.IsHeldForManualResolution(code, out _, out string manualReason), manualReason);
     }
 
     private void SetRearCraneTask(WorkpieceCache wp, string stage, string source, string target, bool manual = false, string manualText = "")
@@ -284,14 +285,153 @@ public sealed class Line1RearFlowEngine : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// 仅处理已被冻结的中转架来源账本。调用方必须先在现场确认真实位置；
+    /// 本方法不发送任何天车、磁铁或CNC命令，也不会自动恢复引擎。
+    /// </summary>
+    public string ResolveManualSourceReservation(string rackCode, FlowActionManualResolution resolution)
+    {
+        if (!_rackLedger.IsHeldForManualResolution(rackCode, out string operationId, out string reason))
+            return $"1号线{rackCode}没有待人工结案的来源缓存";
+        if (!_rackLedger.TryResolveManualReservation(rackCode, operationId, resolution, out WorkpieceCache wp, out _))
+            return $"1号线{rackCode}来源缓存结案失败；请刷新后重试";
+
+        string result = resolution switch
+        {
+            FlowActionManualResolution.StillAtSource => "确认工件仍在来源位：保留缓存，解除冻结，允许后续重新派发",
+            FlowActionManualResolution.OnCarrier => "确认工件在后天车：已从来源账本移除，保留人工任务牌，禁止自动派发",
+            FlowActionManualResolution.AtTargetPendingHandoff => "确认工件已在目标待交接：已从来源账本移除，保留人工任务牌，禁止自动派发",
+            FlowActionManualResolution.RemovedManually => "确认工件已人工移走：已从来源账本移除",
+            _ => throw new ArgumentOutOfRangeException(nameof(resolution), resolution, null)
+        };
+        if (resolution is FlowActionManualResolution.OnCarrier or FlowActionManualResolution.AtTargetPendingHandoff)
+            SetRearCraneTask(wp, resolution == FlowActionManualResolution.OnCarrier ? "人工确认天车持件" : "人工确认目标待交接",
+                rackCode, "人工确认目标", true, result);
+        else if (GetCraneTaskSnapshot().SourceStation == rackCode)
+            ClearRearCraneTask();
+
+        // 先完成来源缓存和任务牌的真实结案，再移除仅供诊断的暂停快照；
+        // 不能反过来先删快照，否则页面会失去人工正在处理哪一板的证据。
+        FlowActionManualRegistry.Remove(operationId);
+
+        string message = $"[Line1Rear] {rackCode} 动作={operationId} 原因={reason}；{result}。后端保持暂停，需人工复核后再恢复。";
+        Console.WriteLine(message);
+        return message;
+    }
+
+    /// <summary>后天车上料已在斜床待交接时，仅转换软件账本；不补发CNC握手或恢复引擎。</summary>
+    public string ResolveManualLoadTargetPending(string operationId)
+    {
+        if (!FlowActionManualRegistry.TryGet(operationId, out FlowActionSnapshot action) ||
+            action.FlowScope != "1号线后天车上料" || action.Ownership != FlowWorkpieceOwnership.AtTargetPendingHandoff)
+            return "1号线后天车上料目标结案拒绝：动作不是斜床目标待交接。";
+        SkewCtx? bed = _beds.FirstOrDefault(x => x?.Code == action.Target);
+        if (bed == null || !_rackLedger.TryResolveManualReservation(action.Source, operationId,
+                FlowActionManualResolution.AtTargetPendingHandoff, out WorkpieceCache wp, out _))
+            return "1号线后天车上料目标结案失败：斜床或来源预约与动作账本不一致。";
+        bed.Wp = wp;
+        bed.St = SkewState.Loading;
+        bed.CompletionExported = false;
+        _paused = true;
+        SetRearCraneTask(wp, "人工确认斜床待交接", action.Source, bed.Code, true, "不自动补发CNC握手");
+        FlowActionManualRegistry.Remove(operationId);
+        return $"1号线后天车已确认工件在{bed.Code}待交接：来源账本已消费，斜床置Loading并保留人工任务牌；后端保持暂停。";
+    }
+
+    /// <summary>
+    /// 后天车斜床下料动作的人工结案。这里只做不需要伪造 PLC/缓存事实的状态转换：
+    /// “仍在斜床”恢复 WaitingUnload；“天车持件”保留 Unloading 和任务牌；
+    /// “人工移走”才清斜床工件账本。目标待交接必须由目标缓存的专用结案器处理，
+    /// 因为仅凭人工文字不能判断 M817/M720 缓存或 PLC 通知是否已经成功。
+    /// </summary>
+    public string ResolveManualUnloadAction(string operationId, FlowActionManualResolution resolution)
+    {
+        if (!FlowActionManualRegistry.TryGet(operationId, out FlowActionSnapshot snapshot) ||
+            snapshot.FlowScope != "1号线后天车下料")
+            return $"1号线后天车下料动作账本不存在: {operationId}";
+        SkewCtx? bed = _beds.FirstOrDefault(x => x != null && x.Code == snapshot.Source);
+        if (bed?.Wp is not { } wp || wp.IdentityText != snapshot.WorkpieceIdentity)
+            return "后天车下料结案拒绝：斜床当前工件与动作账本不一致，未改动任何状态。";
+
+        _paused = true;
+        switch (resolution)
+        {
+            case FlowActionManualResolution.StillAtSource:
+                bed.St = SkewState.WaitingUnload;
+                ClearRearCraneTask();
+                FlowActionManualRegistry.Remove(operationId);
+                return $"1号线后天车确认{bed.Code}工件仍在斜床：保留工件账本并回WaitingUnload；引擎保持暂停，恢复后会重新下料派发。";
+            case FlowActionManualResolution.OnCarrier:
+                bed.St = SkewState.Unloading;
+                SetRearCraneTask(wp, "人工确认天车持件", bed.Code, snapshot.Target, true,
+                    "工件仍由后天车持有；禁止自动重试，等待后续专用应急处理。");
+                FlowActionManualRegistry.Remove(operationId);
+                return $"1号线后天车确认工件在天车上：斜床账本和人工任务牌保留，后端保持暂停。";
+            case FlowActionManualResolution.RemovedManually:
+                bed.St = SkewState.Idle;
+                bed.Wp = null;
+                ClearRearCraneTask();
+                FlowActionManualRegistry.Remove(operationId);
+                return $"1号线后天车确认{bed.Code}工件已人工移走：斜床工件账本已清，后端保持暂停。";
+            case FlowActionManualResolution.AtTargetPendingHandoff:
+                return "后天车目标待交接不能直接结案：请先按实际目标补齐/核对M817、M720及PLC通知；动作账本、斜床账本和暂停状态均已保留。";
+            default:
+                return $"不支持的人工结论: {resolution}";
+        }
+    }
+
+    /// <summary>
+    /// 人工已确认工件在分流目标位时，补齐正常流程尚未完成的目标缓存/PLC握手。
+    /// 仅在每一步成功返回后才清斜床账本和动作快照；失败保留全部证据，绝不假装完成。
+    /// </summary>
+    public async Task<string> ResolveManualUnloadTargetPendingAsync(string operationId, CancellationToken ct = default)
+    {
+        if (!FlowActionManualRegistry.TryGet(operationId, out FlowActionSnapshot snapshot) ||
+            snapshot.FlowScope != "1号线后天车下料" ||
+            snapshot.Ownership != FlowWorkpieceOwnership.AtTargetPendingHandoff)
+            return $"1号线后天车目标待交接动作账本不存在: {operationId}";
+        SkewCtx? bed = _beds.FirstOrDefault(x => x != null && x.Code == snapshot.Source);
+        if (bed?.Wp is not { } wp || wp.IdentityText != snapshot.WorkpieceIdentity)
+            return "目标待交接结案拒绝：斜床当前工件与动作账本不一致，未改动任何状态。";
+        _paused = true;
+        try
+        {
+            switch (snapshot.Target)
+            {
+                case "ST019":
+                    if (OnBalancingRackPlaced == null) return "M817动平衡缓存回调未绑定；账本和斜床状态保留。";
+                    OnBalancingRackPlaced("M817", wp);
+                    break;
+                case "ST010":
+                    var mc65 = await EnsureMc65Async(ct);
+                    await mc65.WriteMBitInWordAsync(720, 1, true, ct);
+                    if (OnGrindingRackPlaced == null) return "M720研磨缓存回调未绑定；M721已成功写入，账本和斜床状态保留。";
+                    wp.BoreType = 1;
+                    OnGrindingRackPlaced(wp);
+                    break;
+                default:
+                    return $"1号线目标待交接站号无效: {snapshot.Target}；未改动账本。";
+            }
+            bed.St = SkewState.Idle;
+            bed.Wp = null;
+            ClearRearCraneTask();
+            FlowActionManualRegistry.Remove(operationId);
+            return $"1号线后天车确认工件已在{snapshot.Target}：目标缓存/必要PLC通知补齐成功，斜床账本已结案；后端保持暂停。";
+        }
+        catch (Exception ex)
+        {
+            return $"1号线{snapshot.Target}目标待交接补齐失败: {ex.Message}；动作账本、斜床工件和人工任务牌均保留，后端保持暂停。";
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  主循环
     // ═══════════════════════════════════════════════════════════════════
     private async Task Loop(CancellationToken ct)
     {
-        // 每次启动清空上次遗留状态
-        _rackLedger.Clear();
-        Console.WriteLine($"[后引擎] 工件缓存已清空");
+        // 不得因暂停后重新启动而清空来源账本；否则PLC仍显示有板、软件却失去身份，
+        // 后天车会永久无法取料。人工应急只能通过明确的结案结果改变缓存。
+        Console.WriteLine($"[后引擎] 保留来源工件账本，当前缓存={CachedCount}");
         Console.WriteLine("[后引擎] ═══ 开始初始化设备连接 ═══");
         await Init(ct);
         Console.WriteLine("[后引擎] ══════ 主循环启动 ══════");
@@ -1232,8 +1372,6 @@ public sealed class Line1RearFlowEngine : IDisposable
     private async Task DoLoad(SkewCtx bed, string rs, CancellationToken ct)
     {
         string actionId = OperationalEventContextFactory.NewActionId("L1-REAR-LOAD");
-        // 记录单次动作的阶段和所有权，避免外层 catch 用零散布尔值猜测现场结果。
-        var action = new FlowActionContext(actionId, "1号线后天车上料", "2号天车", "待确认", rs, bed.Code, rs);
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         bool transferLocked = false; // 新Zone模型下不再使用_transferRackLock作为中转架业务互斥
         WorkpieceCache wp;
@@ -1246,6 +1384,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             Console.WriteLine($"[上料] ❌ 失败: 中转架{rs}没有可用工件缓存（为空或已被其它动作预约）");
             return;
         }
+        // 预约成功后才拥有真实工件身份；后续异常一律以这个动作账本的事实为准。
+        var action = new FlowActionContext(actionId, "1号线后天车上料", "2号天车", wp.IdentityText, rs, bed.Code, rs);
         action.BeginStep(FlowActionStep.SourceReserved);
         action.SetOwnership(FlowWorkpieceOwnership.ReservedAtSource);
         if (!_cfg.SkewBed.CanProcessLength(bed.Code, wp.Length))
@@ -1300,9 +1440,11 @@ public sealed class Line1RearFlowEngine : IDisposable
             //   - ST108：释放ZoneMT，继续持有ZoneTS到斜床1交互和X+1000退避结束。
             Console.WriteLine("│ [上料] 获取ZoneMT(打号机↔中转架)...");
             await operation.AcquireAsync("ZoneMT", _safety.MarkerTransferCollisionLock, ct);
+            action.RegisterLock("ZoneMT");
             Console.WriteLine("│ ZoneMT已获取 ✓");
             Console.WriteLine("│ [上料] 获取ZoneTS(中转架↔ST108)...");
             await operation.AcquireAsync("ZoneTS", _safety.TransferSkew1CollisionLock, ct);
+            action.RegisterLock("ZoneTS");
             sharedLocked = bed.Code == "ST108";
             Console.WriteLine("│ ZoneTS已获取 ✓，当前可进入中转架取料");
 
@@ -1322,6 +1464,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             Console.WriteLine($"│ [取料] 中转架{rs} 坐标=({rx},{ry},{rz}) 取料Z={pz + _oz} 安全高度={sz}");
             //设置天车速度 (缓存避免4次字典查找)
             var crSpd = _cfg.GetCraneSpeed(CraneRearNo);
+            action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "设置后天车绝对速度");
             physicalCommandStarted = true;
             action.MarkCommandSent();
             await cr.SetAbsSpeedAsync(crSpd.X.Speed, crSpd.X.Accel, crSpd.X.Decel,
@@ -1354,12 +1497,12 @@ public sealed class Line1RearFlowEngine : IDisposable
                 throw new InvalidOperationException("后天车X11=1(磁铁已有工件), 拒绝取料防止碰撞,需人工确认");
             }
             Console.WriteLine("│ [取料] step1: Z回原点");
-            action.BeginStep(FlowActionStep.MoveXYToSource);
+            action.BeginStep(FlowActionStep.ReturnSafe, new FlowActionPosition(null, null, 0), "取料前Z回原点");
             try
             {
                 action.MarkCommandSent();
                 await cr.MoveAbsoluteAsync(-1, -1, 0, ct: ct);
-                action.Confirm();
+                action.Confirm(new FlowActionPosition(null, null, 0), "取料前Z已回原点");
                 physicalTracker?.TryConfirmSafeZ(0, _cfg.AbsMove.Tolerance, "中转架取料前Z回原点命令成功返回");
             }
             catch (PressureStopException)
@@ -1370,9 +1513,12 @@ public sealed class Line1RearFlowEngine : IDisposable
             }
 
             Console.WriteLine($"│ [取料] step2: XY到中转架({rx + _ox},{ry + _oy})");
+            action.BeginStep(FlowActionStep.MoveXYToSource, new FlowActionPosition(rx + _ox, ry + _oy, null), "XY到中转架来源位");
             action.MarkCommandSent();
             await cr.MoveAbsoluteAsync(rx + _ox, ry + _oy, -1, ct: ct);
-            action.Confirm();
+            action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, 0), "来源位XY命令已到位");
+            action.BeginStep(FlowActionStep.FineTuneSource, new FlowActionPosition(rx + _ox, ry + _oy, 0), "来源位XY绝对编码器微调");
+            action.MarkCommandSent();
             await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
                 cr, _cfg, CraneRearNo, rs, $"1号线后天车-{rs}取料前",
                 reporter: _exceptionReporter,
@@ -1385,13 +1531,14 @@ public sealed class Line1RearFlowEngine : IDisposable
                     physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(physicalTracker, true, "Z回原点命令已返回", rs)),
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             Console.WriteLine($"│ [取料] step3: Z下降到{pz + _oz}");
-            action.BeginStep(FlowActionStep.MoveZDownToPick);
+            action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, 0), "来源位XY微调完成");
+            action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(rx + _ox, ry + _oy, pz + _oz), "Z下降取料");
             operationalTracker.BeginZDown(pz + _oz);
             try
             {
                 action.MarkCommandSent();
                 await cr.MoveAbsoluteAsync(-1, -1, pz + _oz, ct: ct);
-                action.Confirm();
+                action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, pz + _oz), "来源位取料Z到位");
                 operationalTracker.CompleteZDown();
             }
             catch (PressureStopException)
@@ -1410,6 +1557,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                 if (retry == 0)
                 {
                     Console.WriteLine("│ [取料] 充磁");
+                    action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "来源位首次充磁");
+                    action.MarkCommandSent();
                     operationalTracker.BeginMagnetOn();
                     try
                     {
@@ -1425,10 +1574,14 @@ public sealed class Line1RearFlowEngine : IDisposable
                         throw;
                     }
                     mag = true;
+                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "首次充磁调用成功返回");
+                    action.RecordFeedback(FlowActionPosition.Unknown, null, true, "首次充磁调用成功返回");
                 }
                 else
                 {
                     Console.WriteLine($"│ [取料] 退磁→Z↓到{currentZ}→充磁");
+                    action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试前退磁");
+                    action.MarkCommandSent();
                     operationalTracker.BeginMagnetOff();
                     try
                     {
@@ -1444,10 +1597,15 @@ public sealed class Line1RearFlowEngine : IDisposable
                         throw;
                     }
                     mag = false;
+                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试前退磁成功返回");
+                    action.RecordFeedback(FlowActionPosition.Unknown, null, false, "X11重试前退磁成功返回");
                     try
                     {
                         operationalTracker.BeginZDown(currentZ);
+                        action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试下探Z");
+                        action.MarkCommandSent();
                         await cr.MoveAbsoluteAsync(-1, -1, currentZ, ct: ct);
+                        action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试下探Z到位");
                     }
                     catch (PressureStopException)
                     {
@@ -1456,6 +1614,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                     }
 
                     operationalTracker.BeginMagnetOn();
+                    action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试后充磁");
+                    action.MarkCommandSent();
                     try
                     {
                         await cr.MagnetOnAsync(ct);
@@ -1470,6 +1630,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                         throw;
                     }
                     mag = true;
+                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试后充磁调用成功返回");
+                    action.RecordFeedback(FlowActionPosition.Unknown, null, true, "X11重试后充磁调用成功返回");
                 }
 
                 Console.WriteLine("│ [取料] 等3s让X11稳定...");
@@ -1490,6 +1652,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                     throw;
                 }
                 physicalTracker?.TryObserveX11(x11);
+                action.BeginStep(FlowActionStep.ConfirmPickup, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), $"充磁后X11第{retry + 1}次读取");
+                action.RecordFeedback(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), x11, mag, $"X11={x11}");
                 Console.WriteLine($"│ [取料] X11={(x11 ? "1(有版)" : "0(无版)")} (第{retry + 1}次)");
                 if (x11)
                 {
@@ -1498,12 +1662,13 @@ public sealed class Line1RearFlowEngine : IDisposable
                     if (!_rackLedger.CommitPickup(rs, actionId, out _, out _))
                         throw new InvalidOperationException($"中转架{rs}工件预约提交失败，不能确认软件身份已随天车转移");
                     action.SetOwnership(FlowWorkpieceOwnership.OnCarrier);
+                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11=1确认工件已由后天车持有");
                     action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece);
                     Console.WriteLine($"│ [取料] ✓ X11=1 吸到! Z↑到安全高度{sz}");
                     //x11=1 z回安全位置
                     action.MarkCommandSent();
                     await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
-                    action.Confirm();
+                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, sz), "取料后Z已升安全高度");
                     physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "中转架取料后Z升安全命令成功返回");
                     break;
                 }
@@ -1534,6 +1699,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                 Console.WriteLine("│ [上料] 普通斜床目标: Z已安全, ZoneTS+ZoneMT已释放");
             }
             //后天车拿着料移动到斜床
+            action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(bx + _ox, by + _oy, sz), "持件XY到斜床目标上方");
+            action.MarkCommandSent();
             await cr.MoveAbsoluteAsync(bx + _ox, by + _oy, -1, ct: ct);
             var posAfter = await cr.ReadStatusAsync(ct);
             if (posAfter == null) throw new InvalidOperationException("后天车状态读取为空, 无法确认XY到位");
@@ -1543,6 +1710,9 @@ public sealed class Line1RearFlowEngine : IDisposable
                 Console.WriteLine("│ [移动] ⚠ XY未到位! 重试...");
                 await cr.MoveAbsoluteAsync(bx + _ox, by + _oy, -1, ct: ct);
             }
+            action.Confirm(new FlowActionPosition(posAfter.XPos, posAfter.YPos, posAfter.ZPos), "持件XY到目标上方已确认");
+            action.BeginStep(FlowActionStep.FineTuneTarget, new FlowActionPosition(bx + _ox, by + _oy, sz), "斜床目标XY绝对编码器微调");
+            action.MarkCommandSent();
             await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
                 cr, _cfg, CraneRearNo, bed.Code, $"1号线后天车-{bed.Code}上料放斜床前",
                 reporter: _exceptionReporter,
@@ -1554,6 +1724,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     owner: "1号线后天车", targetZ: EvidenceValue<int>.Unavailable("业务在微调后的DoHandshake中计算bz-Round(d/2)+_oz"),
                     physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(true, holdingWorkpiece, physicalTracker, "中转架取料X11=1且Z已升安全", "天车/斜床上方")),
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
+            action.Confirm(new FlowActionPosition(bx + _ox, by + _oy, sz), "斜床目标XY微调完成");
 
             // 到这里才绑定斜床工件: X11已确认吸住、Z已升安全、后天车已到目标斜床上方。
             // 在此之前异常按“工件仍在中转架/后天车”处理, 避免Idle斜床残留旧Wp。
@@ -1562,12 +1733,16 @@ public sealed class Line1RearFlowEngine : IDisposable
             bed.CompletionExported = false; // 新工件开始加工前清除job2导出标志, 完工时只追加一次。
             Console.WriteLine("│ [握手] 天车到位,开始与CNC通讯");
             //开始上料握手流程
-            await DoHandshake(cr, bed, wp, sz, bx, by, bz, loadState, operationalTracker, operationalSite, ct);
+            await DoHandshake(cr, bed, wp, sz, bx, by, bz, loadState, action, operationalTracker, operationalSite, ct);
             Console.WriteLine("│ [上料] Z回原点");
+            action.BeginStep(FlowActionStep.ReturnSafe, new FlowActionPosition(null, null, 0), "上料完成后Z回原点");
+            action.MarkCommandSent();
             await cr.MoveAbsoluteAsync(-1, -1, 0, ct: ct);
+            action.Confirm(new FlowActionPosition(null, null, 0), "上料完成后Z已回原点");
             bed.St = SkewState.Machining;
             wp.ReportStage($"1号线 斜床加工中 {bed.Code}");
             ClearRearCraneTask();
+            action.Complete("斜床上料、CNC通知和天车回位均已完成");
             Console.WriteLine($"│ [上料] ✓ 完成 {wp.IdentityText} {bed.Code}→加工中");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1580,8 +1755,12 @@ public sealed class Line1RearFlowEngine : IDisposable
             // 工件身份保留在账本/斜床任务牌中，等待人工确认真实现场状态。
             _paused = true;
             requiresManualConfirmation = true;
-            action.PauseManual(ex.Message);
-            _rackLedger.ReleaseReservation(rs, actionId);
+            action.PauseForManualResolution(ex.Message);
+            _rackLedger.HoldForManualResolution(rs, actionId, ex.Message);
+            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
+                operationalSite with { ActionStage = $"{action.Step}：天车运动超时" }, operationalTracker, ex,
+                "后天车运动超时，动作账本已暂停并保留来源预约，等待人工确认。", true,
+                holdingWorkpiece: holdingWorkpiece, actionSnapshot: action.Snapshot());
             bed.St = SkewState.Loading;
             bed.Wp = wp;
             SetRearCraneTask(wp, "运动超时，位置未知", rs, bed.Code, true,
@@ -1602,8 +1781,12 @@ public sealed class Line1RearFlowEngine : IDisposable
                 _paused = true;
                 requiresManualConfirmation = true;
                 action.MarkCommandResponseUnknown(ex.Message);
-                action.PauseManual(ex.Message);
-                _rackLedger.ReleaseReservation(rs, actionId);
+                action.PauseForManualResolution(ex.Message);
+                _rackLedger.HoldForManualResolution(rs, actionId, ex.Message);
+                OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
+                    operationalSite with { ActionStage = $"{action.Step}：命令响应未知" }, operationalTracker, ex,
+                    "物理命令已开始且响应未知，动作账本已暂停并保留来源预约，等待人工确认。", true,
+                    holdingWorkpiece: holdingWorkpiece, actionSnapshot: action.Snapshot());
                 bed.St = SkewState.Loading;
                 bed.Wp = wp;
                 SetRearCraneTask(wp, holdingWorkpiece ? "持件状态待确认" : "来源位/动作结果待确认", rs, bed.Code, true,
@@ -1709,7 +1892,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 ClearRearCraneTask();
                 bed.Wp = null;
                 // X11未确认吸住时来源缓存从未删除；只解除预约，不能通过“恢复”伪造交接。
-                _rackLedger.ReleaseReservation(rs, actionId);
+                _rackLedger.HoldForManualResolution(rs, actionId, "X11连续三次为0，已完成局部安全恢复，等待人工确认来源位");
                 if (loadState.X11PickupFailed) loadState.X11CacheRestored = true;
                 Console.WriteLine(loadState.X11PickupFailed
                     ? $"│ [上料] X11连续三次为0 → 来源缓存[{rs}]未删除，预约已解除(原顺序{rackArrivalSeq})，等待人工确认后恢复运行"
@@ -1878,7 +2061,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                     operationalSite with { ActionStage = $"{rs}三次X11均未确认持件（最终收尾）" },
                     operationalTracker,
                     finalization,
-                    loadState.X11FailureException);
+                    loadState.X11FailureException,
+                    action.Snapshot());
             }
             
             _fastNextCycle = true; // 刚完成上料, 通知主循环快速检查下料任务
@@ -1894,6 +2078,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     // ═══════════════════════════════════════════════════════════════════
     private async Task DoHandshake(CraneService cr, SkewCtx bed, WorkpieceCache wp, int sz,
         int bx, int by, int bz, LoadHandshakeState loadState,
+        FlowActionContext action,
         OperationalPhysicalCycleTracker operationalTracker,
         OperationalEventContextFactory.OperationalPhysicalEventSite operationalSite,
         CancellationToken ct)
@@ -1904,6 +2089,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         int yT = _cfg.SkewBed.ComputeYOffset(bed.Code, wp.Length, wp.BoreType);
         Console.WriteLine($"│ [握手] 斜床Z={bz} 装料Z={lz}(Z-半径) Y目标={yT}");
         Console.WriteLine("│ [握手] ① 等待CNC请求数据(F1=1)...");
+        action.BeginStep(FlowActionStep.NotifyDownstream, FlowActionPosition.Unknown, "等待CNC请求数据");
         await W(async () => isF ? await bed.F!.IsRequestDataAsync(ct) : await bed.M!.IsRequestDataAsync(ct), "请求数据", ct);
         double skewD = wp.Diameter + _cfg.GetDiameterOffset(bed.Code);
         if (skewD != wp.Diameter)
@@ -1919,16 +2105,20 @@ public sealed class Line1RearFlowEngine : IDisposable
             Console.WriteLine($"│ [握手] ⚠ {bed.Code}已启用对刀模式, 覆盖任务工艺[{wp.SkewBedProcess}] → 加工模式=6");
         }
 
+        action.MarkCommandSent();
         if (!isF)//今洲斜床 ModbusTCP
             await bed.M!.SendMachiningParamsAsync(wp.Length, wp.BoreType, skewD, skewMode, ct);
         else//法兰克系统 FANUC FOCAS
             await bed.F!.SendMachiningParamsAsync(wp.Length, skewD, wp.BoreType, skewMode, ct);
+        action.Confirm(FlowActionPosition.Unknown, "CNC加工参数写入成功返回");
         Console.WriteLine("│ [握手] ③ 等待CNC请求上料(F2=1)...");
         await W(async () => isF ? await bed.F!.IsRequestLoadAsync(ct) : await bed.M!.IsRequestLoadAsync(ct), "请求上料", ct);
         //下降到装料位置
         Console.WriteLine($"│ [握手] ④ Z下降到装料位置{lz + _oz}");
         // 从发送Z下降命令这一刻起，异常收尾不能再假设Z仍在安全位。
         // 即使MoveAbsoluteAsync抛出通信异常，PLC也可能已经收到下降命令，只是响应没有返回。
+        action.BeginStep(FlowActionStep.MoveZDownToPlace, new FlowActionPosition(bx + _ox, by + _oy, lz + _oz), "斜床上料Z下降");
+        action.MarkCommandSent();
         loadState.ZMayBeDown = true;
         operationalTracker.BeginZDown(lz + _oz);
         try
@@ -1936,6 +2126,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             //z移动   下降到装料位置   加上了数据库的偏移
             await cr.MoveAbsoluteAsync(-1, -1, lz + _oz, ct: ct);
             operationalTracker.CompleteZDown();
+            action.Confirm(new FlowActionPosition(bx + _ox, by + _oy, lz + _oz), "斜床上料Z下降到位");
         }
         catch (PressureStopException)
         {
@@ -1952,7 +2143,10 @@ public sealed class Line1RearFlowEngine : IDisposable
         Console.WriteLine($"│ [握手] ⑤ Y移动到顶尖对中位置=数据库Y({by})-偏移({yT})={yAbs} 这个是加过天车偏移的z");
         try
         {
+            action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(bx + _ox, yAbs, lz + _oz), "斜床顶尖对中Y移动");
+            action.MarkCommandSent();
             await cr.MoveAbsoluteAsync(-1, yAbs, -1, ct: ct);
+            action.Confirm(new FlowActionPosition(bx + _ox, yAbs, lz + _oz), "斜床顶尖对中Y到位");
         }
         catch (PressureStopException)
         {
@@ -1976,8 +2170,12 @@ public sealed class Line1RearFlowEngine : IDisposable
         operationalTracker.BeginPlacementMagnetOff(bed.Code);
         try
         {
+            action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(bx + _ox, yAbs, lz + _oz), "斜床夹紧后退磁放料");
+            action.MarkCommandSent();
             await cr.MagnetOffAsync(ct);
             operationalTracker.CompletePlacementMagnetOff(bed.Code);
+            action.Confirm(new FlowActionPosition(bx + _ox, yAbs, lz + _oz), "斜床退磁放料成功返回");
+            action.RecordFeedback(FlowActionPosition.Unknown, null, false, "斜床退磁放料成功返回");
             operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, $"{bed.Code}上料完整交接",
                 $"{bed.Code}目标位退磁成功返回，放料推定成立；等待Z安全回升和CNC上料完成通知");
         }
@@ -1991,7 +2189,11 @@ public sealed class Line1RearFlowEngine : IDisposable
             throw;
         }
         loadState.PlacedOnBed = true; // 退磁成功后工件已经离开后天车, 后续异常必须人工确认斜床状态
+        action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff, "工件已退磁放入斜床，等待CNC上料完成通知");
+        action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(bx + _ox, yAbs, sz), "放料后Z升安全高度");
+        action.MarkCommandSent();
         await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+        action.Confirm(new FlowActionPosition(bx + _ox, yAbs, sz), "放料后Z已升安全高度");
         operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "斜床上料退磁后Z升安全命令成功返回");
         // 只有Z回安全运动成功返回，异常finally才允许ST108执行X+1000退避。
         loadState.ZMayBeDown = false;
@@ -2000,7 +2202,10 @@ public sealed class Line1RearFlowEngine : IDisposable
         if (isF) bed.F!.SafeSetMacro(1102, 0); // 清#1102
         else await bed.M!.ClearTailstockClampAsync(ct); // 清10371=0
         operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, $"{bed.Code}CNC上料完成", "CNC上料完成通知调用已开始，结果未知");
+        action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(bx + _ox, yAbs, sz), "CNC上料完成通知");
+        action.MarkCommandSent();
         if (!isF) await bed.M!.RemoteStartAsync(ct); else await bed.F!.SetCraneLoadDoneAsync(ct);
+        action.Confirm(new FlowActionPosition(bx + _ox, yAbs, sz), "CNC上料完成通知成功返回");
         operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, $"{bed.Code}CNC上料完成", "CNC上料完成通知成功返回");
         operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, $"{bed.Code}上料完整交接",
             $"{bed.Code}退磁、Z安全回升及CNC上料完成通知均成功返回");
@@ -2014,6 +2219,10 @@ public sealed class Line1RearFlowEngine : IDisposable
     private async Task DoUnload(SkewCtx bed, CancellationToken ct)
     {
         string actionId = OperationalEventContextFactory.NewActionId("L1-REAR-UNLOAD");
+        WorkpieceCache initialWorkpiece = bed.Wp ?? throw new InvalidOperationException($"{bed.Code}下料缺少工件账本");
+        var action = new FlowActionContext(actionId, "1号线后天车下料", "2号天车",
+            initialWorkpiece.IdentityText, bed.Code, "ST019/ST010分流目标", bed.Code);
+        action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "斜床下料前检查");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         bool magnetOn = false;
         bool holdingWorkpiece = false;       // X11确认有版后才算工件已经在后天车上, 不能只看是否发过充磁命令
@@ -2038,6 +2247,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             "斜床加工完成等待后天车下料", "ZoneTS/后天车锁/M817/M720"));
         using var operation = BeginSkewOperation(bed, "下料", ct, holdsTransferRack: false);
         ct = operation.Token;
+        action.RegisterLock("RearCrane");
         try
         {
             Console.WriteLine($"\n┌── [下料] 开始 {bed.Wp?.IdentityText ?? "版号=未知"} {bed.Code} ──────────────────");
@@ -2080,6 +2290,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             {
                 Console.WriteLine("│ [下料] 获取ZoneTS(ST108↔中转架)...");
                 await operation.AcquireAsync("ZoneTS", _safety.TransferSkew1CollisionLock, ct);
+                action.RegisterLock("ZoneTS");
                 sharedLocked = true;
                 sharedWasAcquired = true;
                 Console.WriteLine("│ [下料] ZoneTS已获取(ST108) ✓");
@@ -2087,12 +2298,15 @@ public sealed class Line1RearFlowEngine : IDisposable
 
             // 设置天车速度(与DoLoad一致, 防止PLC残留速度导致异常)
             var crSpd = _cfg.GetCraneSpeed(CraneRearNo);
+            action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "设置后天车绝对速度");
+            action.MarkCommandSent();
             await cr.SetAbsSpeedAsync(crSpd.X.Speed, crSpd.X.Accel, crSpd.X.Decel,
                 crSpd.Y.Speed, crSpd.Y.Accel, crSpd.Y.Decel,
                 crSpd.Z.Speed, crSpd.Z.Accel, crSpd.Z.Decel, ct);
+            action.Confirm();
 
             int sz = _cfg.Grinding.SafeZHeight;
-            var wp = bed.Wp ?? throw new Exception("缺少工件数据");
+            var wp = initialWorkpiece;
             if (!TryCoords(bed.Code, out int bx, out int by, out int bz)) throw new Exception($"缺少斜床{bed.Code}坐标");
             bool isF = bed.Code == "ST112";
             int lz = bz - (int)Math.Round(wp.Diameter / 2.0);
@@ -2105,9 +2319,12 @@ public sealed class Line1RearFlowEngine : IDisposable
 
             // ① Z→0 → XY到数据库位置 → Y偏移到顶尖对中 → Z↓充磁取料
             Console.WriteLine($"│ [下料] ① Z→0(避免碰撞)");
+            action.BeginStep(FlowActionStep.ReturnSafe, new FlowActionPosition(null, null, 0), "斜床取料前Z回原点");
             try
             {
+                action.MarkCommandSent();
                 await cr.MoveAbsoluteAsync(-1, -1, 0, ct: ct);
+                action.Confirm(new FlowActionPosition(null, null, 0), "斜床取料前Z已回原点");
                 physicalTracker?.TryConfirmSafeZ(0, _cfg.AbsMove.Tolerance, "斜床取料前Z回原点命令成功返回");
             }
             catch (PressureStopException)
@@ -2120,8 +2337,13 @@ public sealed class Line1RearFlowEngine : IDisposable
             // await cr.MoveAbsoluteAsync(bx + _ox, by + _oy, -1, ct: ct);
             // Console.WriteLine($"│ [下料] ① Y→顶尖对中位置{yPick}");
             //先移动xy   移动到xy指定位置
+            action.BeginStep(FlowActionStep.MoveXYToSource, new FlowActionPosition(bx + _ox, yPick, 0), "XY到斜床取料位");
+            action.MarkCommandSent();
             await cr.MoveAbsoluteAsync(bx + _ox, yPick, -1, ct: ct);
+            action.Confirm(new FlowActionPosition(bx + _ox, yPick, 0), "斜床取料位XY已到位");
             //进行微调
+            action.BeginStep(FlowActionStep.FineTuneSource, new FlowActionPosition(bx + _ox, yPick, 0), "斜床取料位XY微调");
+            action.MarkCommandSent();
             await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
                 cr, _cfg, CraneRearNo, bed.Code, $"1号线后天车-{bed.Code}下料取料前",
                 reporter: _exceptionReporter,
@@ -2135,15 +2357,19 @@ public sealed class Line1RearFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct,
                 yCenterToPickOffsetMm: yOff);
             //下降取料    加上数据库的偏移值   lz是计算公式算的
+            action.Confirm(new FlowActionPosition(bx + _ox, yPick, 0), "斜床取料位XY微调完成");
             int zDown = lz + _oz;
             Console.WriteLine($"│ [下料] ① Z下降到{lz}(Z-半径)+天车偏移({_oz})={zDown} 充磁取料");
             // 从发送Z下降命令起，异常finally不能再假定Z位于安全高度。
             // 即使运动调用报错，也可能是PLC已执行下降而上位机没有收到响应。
             zMayBeDown = true;
             operationalTracker.BeginZDown(zDown);
+            action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(bx + _ox, yPick, zDown), "Z下降到斜床取料高度");
             try
             {
+                action.MarkCommandSent();
                 await cr.MoveAbsoluteAsync(-1, -1, zDown, ct: ct);
+                action.Confirm(new FlowActionPosition(bx + _ox, yPick, zDown), "斜床取料Z已到位");
                 operationalTracker.CompleteZDown();
             }
             catch (PressureStopException)
@@ -2165,8 +2391,11 @@ public sealed class Line1RearFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOn();
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(bx + _ox, yPick, unlz), $"{bed.Code}首次充磁取料");
+                        action.MarkCommandSent();
                         await cr.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
+                        action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "斜床首次充磁调用成功返回");
                     }
                     catch (Exception ex)
                     {
@@ -2185,8 +2414,11 @@ public sealed class Line1RearFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOff();
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(bx + _ox, yPick, unlz), $"{bed.Code}X11重试前退磁");
+                        action.MarkCommandSent();
                         await cr.MagnetOffAsync(ct);
                         operationalTracker.CompleteMagnetOff();
+                        action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "X11重试前退磁成功返回");
                     }
                     catch (Exception ex)
                     {
@@ -2200,7 +2432,10 @@ public sealed class Line1RearFlowEngine : IDisposable
                     try
                     {
                         operationalTracker.BeginZDown(unlz);
+                        action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(bx + _ox, yPick, unlz), $"{bed.Code}X11重试下探Z");
+                        action.MarkCommandSent();
                         await cr.MoveAbsoluteAsync(-1, -1, unlz, ct: ct);
+                        action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "X11重试下探Z到位");
                     }
                     catch (PressureStopException)
                     {
@@ -2211,8 +2446,11 @@ public sealed class Line1RearFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOn();
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(bx + _ox, yPick, unlz), $"{bed.Code}X11重试后充磁");
+                        action.MarkCommandSent();
                         await cr.MagnetOnAsync(ct);
                         operationalTracker.CompleteMagnetOn();
+                        action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "X11重试后充磁调用成功返回");
                     }
                     catch (Exception ex)
                     {
@@ -2248,6 +2486,10 @@ public sealed class Line1RearFlowEngine : IDisposable
                 {
                     bed.X11UnloadMissWarningShown = false;
                     holdingWorkpiece = true; // X11=1才确认工件已由后天车持有, 异常时必须暂停人工处理
+                    action.BeginStep(FlowActionStep.ConfirmPickup, new FlowActionPosition(bx + _ox, yPick, unlz), "X11确认后天车已从斜床持件");
+                    action.RecordFeedback(new FlowActionPosition(bx + _ox, yPick, unlz), true, true, "斜床取料X11=1");
+                    action.SetOwnership(FlowWorkpieceOwnership.OnCarrier, "斜床取料X11=1，工件已由后天车持有");
+                    action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "X11=1确认工件已由后天车持有");
                     Console.WriteLine($"│ [下料] ✓ X11=1 已吸到(保持在取料位Z={unlz})");
                     break;
                 }
@@ -2341,9 +2583,15 @@ public sealed class Line1RearFlowEngine : IDisposable
 
             Console.WriteLine($"│ [下料] ③ Y回数据库坐标({by + _oy}) → Z升到安全高度{sz}");
             //y回数据库坐标   z升安全高度
+            action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(bx + _ox, by + _oy, unlz), "斜床取料后Y回数据库安全位置");
+            action.MarkCommandSent();
             await cr.MoveAbsoluteAsync(-1, by + _oy, -1, ct: ct);
+            action.Confirm(new FlowActionPosition(bx + _ox, by + _oy, unlz), "斜床取料后Y安全位置到位");
             //z升安全高度
+            action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(bx + _ox, by + _oy, sz), "斜床取料后Z升安全高度");
+            action.MarkCommandSent();
             await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+            action.Confirm(new FlowActionPosition(bx + _ox, by + _oy, sz), "斜床取料后Z安全到位");
             physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "斜床取料后Z升安全命令成功返回");
             operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "斜床取料后Z升安全命令成功返回");
             zMayBeDown = false; // 正常下料已确认Z安全，保留原提前X退避流程
@@ -2355,7 +2603,13 @@ public sealed class Line1RearFlowEngine : IDisposable
                 //今洲斜床 不需要写10374=1了 没用 直接写10373=1 远程尾座张开
                 await bed.M!.OpenTailstockAsync(ct);
             }
-            else await bed.F!.SetCraneUnloadDoneAsync(ct);
+            else
+            {
+                action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(bx + _ox, by + _oy, sz), "写斜床天车下料完成通知");
+                action.MarkCommandSent();
+                await bed.F!.SetCraneUnloadDoneAsync(ct);
+                action.Confirm(new FlowActionPosition(bx + _ox, by + _oy, sz), "斜床天车下料完成通知成功返回");
+            }
 
             if (sharedLocked)
             {
@@ -2413,8 +2667,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                     Console.WriteLine("│ [分流] 目标: ST019(动平衡下料架1)  拿锁后二次确认M817...");
                     // 注意: 长板也拿M720路径锁。多把锁从获取前就进入finally保护,
                     // 第二把等待异常/取消时也会释放第一把, 避免锁泄漏。
-                    if (_lockM817 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M817)..."); await operation.AcquireAsync("M817", _lockM817, ct); gotM817 = true; }
-                    if (_lockM720 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M720路径保护)..."); await operation.AcquireAsync("M720", _lockM720, ct); gotM720 = true; }
+                    if (_lockM817 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M817)..."); await operation.AcquireAsync("M817", _lockM817, ct); action.RegisterLock("M817"); gotM817 = true; }
+                    if (_lockM720 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M720路径保护)..."); await operation.AcquireAsync("M720", _lockM720, ct); action.RegisterLock("M720"); gotM720 = true; }
                     //二次确认
                     await ConfirmM817EmptyBeforePlaceAsync(ct);
                 }
@@ -2425,8 +2679,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                     Console.WriteLine("│   M720可放料 ✓ (前置步骤④已确认)");
                     //加两把锁
                     // 注意: 多把锁从获取前就进入finally保护, 第二把等待异常/取消时也会释放第一把, 避免死锁。
-                    if (_lockM817 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M817)..."); await operation.AcquireAsync("M817", _lockM817, ct); gotM817 = true; }
-                    if (_lockM720 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M720)..."); await operation.AcquireAsync("M720", _lockM720, ct); gotM720 = true; }
+                    if (_lockM817 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M817)..."); await operation.AcquireAsync("M817", _lockM817, ct); action.RegisterLock("M817"); gotM817 = true; }
+                    if (_lockM720 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M720)..."); await operation.AcquireAsync("M720", _lockM720, ct); action.RegisterLock("M720"); gotM720 = true; }
                     await WaitForM720CanPlaceBeforePlaceAsync(wp, ct);
                 }
 
@@ -2441,7 +2695,13 @@ public sealed class Line1RearFlowEngine : IDisposable
 
                     if (!TryCoords("ST019", out int dx, out int dy, out int dz)) throw new Exception("缺少ST019坐标");
                     Console.WriteLine($"│   XY到ST019({dx + _ox},{dy + _oy})");
+                    action.SetTarget("ST019", "已选择M817/ST019作为实际分流目标");
+                    action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(dx + _ox, dy + _oy, sz), "持件XY到ST019/M817");
+                    action.MarkCommandSent();
                     await cr.MoveAbsoluteAsync(dx + _ox, dy + _oy, -1, ct: ct);
+                    action.Confirm(new FlowActionPosition(dx + _ox, dy + _oy, sz), "ST019目标XY到位");
+                    action.BeginStep(FlowActionStep.FineTuneTarget, new FlowActionPosition(dx + _ox, dy + _oy, sz), "ST019放料前XY微调");
+                    action.MarkCommandSent();
                     await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
                         cr, _cfg, CraneRearNo, "ST019", "1号线后天车-ST019放料前",
                         reporter: _exceptionReporter,
@@ -2453,14 +2713,18 @@ public sealed class Line1RearFlowEngine : IDisposable
                             owner: "1号线后天车", targetZ: EvidenceValue<int>.Unavailable("业务在微调后计算ST019放料dz2"),
                             physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, physicalTracker, "斜床取料X11=1且分流已完成", "天车/ST019上方")),
                         actionId: actionId, physicalTracker: physicalTracker, ct: ct);
+                    action.Confirm(new FlowActionPosition(dx + _ox, dy + _oy, sz), "ST019放料前XY微调完成");
                     int dz2 = Pz(dz, wp.Diameter);
                     Console.WriteLine($"│   Z下降到{dz2 + _oz}");
                     operationalTracker.BeginZDown(dz2 + _oz);
                     physicalTracker?.TryMarkZUnknown("ST019原始放料Z下降调用已开始，旧安全高度不能继承");
                     try
                     {
+                        action.BeginStep(FlowActionStep.MoveZDownToPlace, new FlowActionPosition(dx + _ox, dy + _oy, dz2 + _oz), "ST019下降放料");
+                        action.MarkCommandSent();
                         await cr.MoveAbsoluteAsync(-1, -1, dz2 + _oz, ct: ct);
                         operationalTracker.CompleteZDown();
+                        action.Confirm(new FlowActionPosition(dx + _ox, dy + _oy, dz2 + _oz), "ST019放料Z到位");
                     }
                     catch (PressureStopException)
                     {
@@ -2478,8 +2742,11 @@ public sealed class Line1RearFlowEngine : IDisposable
                     operationalTracker.BeginPlacementMagnetOff("ST019");
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(dx + _ox, dy + _oy, dz2 + _oz), "ST019/M817退磁放料");
+                        action.MarkCommandSent();
                         await cr.MagnetOffAsync(ct);
                         operationalTracker.CompletePlacementMagnetOff("ST019");
+                        action.Confirm(new FlowActionPosition(dx + _ox, dy + _oy, dz2 + _oz), "ST019退磁调用成功返回");
                     }
                     catch (Exception ex)
                     {
@@ -2492,6 +2759,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                     }
                     magnetOn = false;
                     operationalPlaced = true;
+                    action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff, "ST019退磁放料成功返回，等待缓存和Z安全回升");
                     operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST019/M817完整交接",
                         "ST019目标位退磁成功返回，放料推定成立；等待缓存回调和Z安全回升");
                     Console.WriteLine($"│   ✓ ST019放料完成,退磁 {wp.IdentityText}");
@@ -2511,7 +2779,10 @@ public sealed class Line1RearFlowEngine : IDisposable
                     operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.CacheNotification, "M817动平衡缓存回调", "动平衡缓存回调成功返回");
                     wp.ReportStage("1号线 动平衡下料架 M817");
                     //移动z
+                    action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(dx + _ox, dy + _oy, sz), "ST019放料后Z升安全高度");
+                    action.MarkCommandSent();
                     await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+                    action.Confirm(new FlowActionPosition(dx + _ox, dy + _oy, sz), "ST019放料后Z安全到位");
                     physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST019放料后Z升安全命令成功返回");
                     operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST019放料后Z升安全命令成功返回");
                     operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST019/M817完整交接",
@@ -2527,7 +2798,13 @@ public sealed class Line1RearFlowEngine : IDisposable
 
                     if (!TryCoords("ST010", out int gx, out int gy, out int gz)) throw new Exception("缺少ST010坐标");
                     Console.WriteLine($"│   XY到ST010({gx + _ox},{gy + _oy})");
+                    action.SetTarget("ST010", "已选择M720/ST010作为实际分流目标");
+                    action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(gx + _ox, gy + _oy, sz), "持件XY到ST010/M720");
+                    action.MarkCommandSent();
                     await cr.MoveAbsoluteAsync(gx + _ox, gy + _oy, -1, ct: ct);
+                    action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "ST010目标XY到位");
+                    action.BeginStep(FlowActionStep.FineTuneTarget, new FlowActionPosition(gx + _ox, gy + _oy, sz), "ST010放料前XY微调");
+                    action.MarkCommandSent();
                     await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
                         cr, _cfg, CraneRearNo, "ST010", "1号线后天车-ST010放料前",
                         reporter: _exceptionReporter,
@@ -2539,14 +2816,18 @@ public sealed class Line1RearFlowEngine : IDisposable
                             owner: "1号线后天车", targetZ: EvidenceValue<int>.Unavailable("业务在微调后计算ST010放料gz2"),
                             physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, physicalTracker, "斜床取料X11=1且分流已完成", "天车/ST010上方")),
                         actionId: actionId, physicalTracker: physicalTracker, ct: ct);
+                    action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "ST010放料前XY微调完成");
                     int gz2 = Pz(gz, wp.Diameter);
                     Console.WriteLine($"│   Z下降到{gz2 + _oz}");
                     operationalTracker.BeginZDown(gz2 + _oz);
                     physicalTracker?.TryMarkZUnknown("ST010原始放料Z下降调用已开始，旧安全高度不能继承");
                     try
                     {
+                        action.BeginStep(FlowActionStep.MoveZDownToPlace, new FlowActionPosition(gx + _ox, gy + _oy, gz2 + _oz), "ST010下降放料");
+                        action.MarkCommandSent();
                         await cr.MoveAbsoluteAsync(-1, -1, gz2 + _oz, ct: ct);
                         operationalTracker.CompleteZDown();
+                        action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, gz2 + _oz), "ST010放料Z到位");
                     }
                     catch (PressureStopException)
                     {
@@ -2565,8 +2846,11 @@ public sealed class Line1RearFlowEngine : IDisposable
                     operationalTracker.BeginPlacementMagnetOff("ST010");
                     try
                     {
+                        action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(gx + _ox, gy + _oy, gz2 + _oz), "ST010/M720退磁放料");
+                        action.MarkCommandSent();
                         await cr.MagnetOffAsync(ct);
                         operationalTracker.CompletePlacementMagnetOff("ST010");
+                        action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, gz2 + _oz), "ST010退磁调用成功返回");
                     }
                     catch (Exception ex)
                     {
@@ -2580,11 +2864,15 @@ public sealed class Line1RearFlowEngine : IDisposable
                     }
                     magnetOn = false;
                     operationalPlaced = true;
+                    action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff, "ST010退磁放料成功返回，等待M721和研磨缓存通知");
                     operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST010/M720完整交接",
                         "ST010目标位退磁成功返回，放料推定成立；等待Z安全回升、M721和研磨缓存回调");
                     Console.WriteLine("│   ✓ ST010放料完成,退磁");
                     //退磁完成先回安全位置
+                    action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(gx + _ox, gy + _oy, sz), "ST010放料后Z升安全高度");
+                    action.MarkCommandSent();
                     await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+                    action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "ST010放料后Z安全到位");
                     physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
                     operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
                     // ── M721=1: 通知PLC放料到1号位完成 → PLC将启动传送带旋转 ──
@@ -2592,9 +2880,12 @@ public sealed class Line1RearFlowEngine : IDisposable
                     {
                         operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721(ST010放料完成)", "M721写入调用已开始，结果未知");
                         var mc65 = await EnsureMc65Async(ct);
+                        action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(gx + _ox, gy + _oy, sz), "写M721通知ST010放料完成");
+                        action.MarkCommandSent();
                         await mc65.WriteMBitInWordAsync(720, 1, true, ct);
                         operationalDownstreamNotified = true;
                         operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721(ST010放料完成)", "M721写入成功返回");
+                        action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "M721放料完成通知成功返回");
                         Console.WriteLine($"│   ✓ M721=1 通知PLC放料完成(传送带启动) {wp.IdentityText}");
                     }
                     catch (Exception ex)
@@ -2654,6 +2945,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             bed.St = SkewState.Idle;
             bed.Wp = null;
             ClearRearCraneTask();
+            action.Complete("斜床下料、目标位交接和后天车回位均已完成");
             Console.WriteLine($"│ [下料] ✓ 完成 {wp.IdentityText} {bed.Code}→Idle");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -2663,7 +2955,13 @@ public sealed class Line1RearFlowEngine : IDisposable
         catch (CraneMotionTimeoutException ex)
         {
             _paused = true;
+            action.MarkCommandResponseUnknown(ex.Message);
+            action.PauseForManualResolution(ex.Message);
             operation.HoldForManualSafetyRecovery(ex.Message);
+            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
+                operationalSite with { ActionStage = $"{action.Step}：天车运动超时" }, operationalTracker, ex,
+                "后天车下料运动超时；动作账本已暂停，等待人工确认。", true,
+                holdingWorkpiece: holdingWorkpiece, actionSnapshot: action.Snapshot());
             bed.St = SkewState.Unloading;
             if (bed.Wp is { } timeoutWp)
                 SetRearCraneTask(timeoutWp, "运动超时，位置未知", bed.Code, "分流目的地", true,
@@ -2677,7 +2975,13 @@ public sealed class Line1RearFlowEngine : IDisposable
         catch (PressureStopException ex)
         {
             _paused = true;
+            action.MarkCommandResponseUnknown(ex.Message);
+            action.PauseForManualResolution(ex.Message);
             requiresManualConfirmation = true;
+            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PRESSURE_STOP_DETECTED",
+                operationalSite with { ActionStage = $"{action.Step}：下压保护" }, operationalTracker, ex,
+                "后天车下料触发下压保护；动作账本已暂停，等待人工确认。", true,
+                holdingWorkpiece: holdingWorkpiece, actionSnapshot: action.Snapshot());
             bed.St = SkewState.Unloading;
             if (bed.Wp is { } pressureWp)
                 SetRearCraneTask(pressureWp, "下压保护触发，位置待确认", bed.Code, "分流目的地", true,
@@ -2699,6 +3003,13 @@ public sealed class Line1RearFlowEngine : IDisposable
                     cacheNotified: null,
                     downstreamNotified: null,
                     handoffClosed: false);
+            }
+            if (action.CommandState != FlowCommandState.NotSent && !placedToDestination && !_paused)
+            {
+                action.MarkCommandResponseUnknown(ex.Message);
+                action.PauseForManualResolution(ex.Message);
+                _paused = true;
+                requiresManualConfirmation = true;
             }
             // magnetOn 只表示发过充磁命令, 不等于工件已经吸住。
             // holdingWorkpiece 由X11=1确认, 这是判断异常后是否需要暂停人工处理的安全边界。

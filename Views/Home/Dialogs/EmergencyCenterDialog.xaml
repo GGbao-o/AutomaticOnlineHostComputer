@@ -87,6 +87,15 @@
                         <TextBlock Margin="18,0,8,0" VerticalAlignment="Center" Text="斜床" />
                         <ComboBox x:Name="SkewBedBox" Width="150" SelectionChanged="Skew_SelectionChanged" />
                         <Button Margin="18,0,0,0" Width="90" Content="刷新诊断" Click="RefreshSkew_Click" />
+                        <TextBlock Margin="18,0,8,0" VerticalAlignment="Center" Text="来源结案" />
+                        <ComboBox x:Name="SourceRackBox" Width="90" />
+                        <ComboBox x:Name="SourceResolutionBox" Width="170">
+                            <ComboBoxItem Content="仍在来源位" Tag="StillAtSource" IsSelected="True" />
+                            <ComboBoxItem Content="确认天车持件" Tag="OnCarrier" />
+                            <ComboBoxItem Content="已在目标待交接" Tag="AtTargetPendingHandoff" />
+                            <ComboBoxItem Content="已人工移走" Tag="RemovedManually" />
+                        </ComboBox>
+                        <Button Margin="8,0,0,0" Width="130" Content="提交来源结案" Click="ResolveSource_Click" />
                     </WrapPanel>
                     <TextBox
                         x:Name="SkewInfoBox"
@@ -176,6 +185,34 @@
                         Width="160"
                         Content="执行研磨应急"
                         Click="ClearGrinding_Click" />
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="动作账本待确认">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Margin="0,0,0,10">
+                        <TextBlock VerticalAlignment="Center" Foreground="#B91C1C"
+                                   Text="仅显示已暂停且必须人工确认的搬运动作；不会自动移动设备、释放锁或清理缓存。" />
+                        <Button DockPanel.Dock="Right" Width="110" Content="刷新账本" Click="RefreshActionLedger_Click" />
+                    </DockPanel>
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,10">
+                        <TextBlock VerticalAlignment="Center" Margin="0,0,8,0" Text="动作账本结案" />
+                        <ComboBox x:Name="GrindingActionOperationBox" Width="240" />
+                        <ComboBox x:Name="GrindingActionResolutionBox" Width="150" Margin="8,0,0,0">
+                            <ComboBoxItem Content="仍在来源位" Tag="StillAtSource" IsSelected="True" />
+                            <ComboBoxItem Content="确认天车持件" Tag="OnCarrier" />
+                            <ComboBoxItem Content="已在目标待交接" Tag="AtTargetPendingHandoff" />
+                            <ComboBoxItem Content="已人工移走" Tag="RemovedManually" />
+                        </ComboBox>
+                        <Button Width="130" Margin="8,0,0,0" Content="提交动作结案" Click="ResolveGrindingAction_Click" />
+                    </WrapPanel>
+                    <TextBox x:Name="ActionLedgerInfoBox" Grid.Row="2" FontFamily="Consolas" IsReadOnly="True"
+                             TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AcceptsReturn="True" />
                 </Grid>
             </TabItem>
         </TabControl>

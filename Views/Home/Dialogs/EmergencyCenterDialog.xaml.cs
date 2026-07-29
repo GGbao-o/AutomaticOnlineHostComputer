@@ -32,13 +32,23 @@ public partial class EmergencyCenterDialog : Window
     private int SelectedFrontLine => int.Parse(((ComboBoxItem)FrontLineBox.SelectedItem).Tag?.ToString() ?? "1");
     private int SelectedSkewLine => int.Parse(((ComboBoxItem)SkewLineBox.SelectedItem).Tag?.ToString() ?? "1");
     private string SelectedSkewBed => SkewBedBox.SelectedItem?.ToString() ?? "";
+    private string SelectedSourceRack => SourceRackBox.SelectedItem?.ToString() ?? "";
+    private FlowActionManualResolution SelectedSourceResolution => Enum.Parse<FlowActionManualResolution>(
+        ((ComboBoxItem)SourceResolutionBox.SelectedItem).Tag?.ToString() ?? nameof(FlowActionManualResolution.StillAtSource));
     private string SelectedBalancePosition => ((ComboBoxItem)BalancePositionBox.SelectedItem).Tag?.ToString() ?? "";
     private string SelectedGrindingTarget => ((ComboBoxItem)GrindingTargetBox.SelectedItem).Tag?.ToString() ?? "";
+    private string SelectedGrindingActionOperation => GrindingActionOperationBox.SelectedItem?.ToString() ?? string.Empty;
+    private FlowActionManualResolution SelectedGrindingActionResolution => Enum.Parse<FlowActionManualResolution>(
+        ((ComboBoxItem)GrindingActionResolutionBox.SelectedItem).Tag?.ToString() ?? nameof(FlowActionManualResolution.StillAtSource));
 
     private void ResetSkewBeds()
     {
         SkewBedBox.ItemsSource = SelectedSkewLine == 1 ? Line1Beds : Line2Beds;
         SkewBedBox.SelectedIndex = 0;
+        SourceRackBox.ItemsSource = SelectedSkewLine == 1
+            ? new[] { "ST105", "ST101", "ST106" }
+            : new[] { "ST016", "ST017", "ST018" };
+        SourceRackBox.SelectedIndex = 0;
     }
 
     private void RefreshAll()
@@ -46,6 +56,7 @@ public partial class EmergencyCenterDialog : Window
         RefreshSkewInfo();
         RefreshBalanceInfo();
         RefreshGrindingInfo();
+        RefreshActionLedgerInfo();
     }
 
     private void RefreshSkewInfo()
@@ -64,6 +75,23 @@ public partial class EmergencyCenterDialog : Window
     {
         if (!string.IsNullOrWhiteSpace(SelectedGrindingTarget))
             GrindingInfoBox.Text = _viewModel.GetGrindingEmergencyInfo(SelectedGrindingTarget);
+    }
+
+    private void RefreshActionLedgerInfo()
+    {
+        string? selected = GrindingActionOperationBox.SelectedItem?.ToString();
+        string[] grindingOperations = FlowActionManualRegistry.Snapshot()
+            // 账本是统一的最终异常事实来源。即使某类动作尚无“自动恢复”按钮，也必须
+            // 可见，现场不能因为筛选而误以为没有在途工件/待确认动作。
+            .Where(x => x.ManualConfirmationRequired)
+            .Select(x => x.OperationId)
+            .ToArray();
+        GrindingActionOperationBox.ItemsSource = grindingOperations;
+        if (selected != null && grindingOperations.Contains(selected, StringComparer.Ordinal))
+            GrindingActionOperationBox.SelectedItem = selected;
+        else if (grindingOperations.Length > 0)
+            GrindingActionOperationBox.SelectedIndex = 0;
+        ActionLedgerInfoBox.Text = _viewModel.GetPendingManualFlowActions();
     }
 
     private async Task RefreshFrontInfoAsync()
@@ -116,6 +144,92 @@ public partial class EmergencyCenterDialog : Window
     private void RefreshSkew_Click(object sender, RoutedEventArgs e) => RefreshSkewInfo();
     private void RefreshBalance_Click(object sender, RoutedEventArgs e) => RefreshBalanceInfo();
     private void RefreshGrinding_Click(object sender, RoutedEventArgs e) => RefreshGrindingInfo();
+    private void RefreshActionLedger_Click(object sender, RoutedEventArgs e) => RefreshActionLedgerInfo();
+    private async void ResolveGrindingAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(SelectedGrindingActionOperation)) return;
+        bool isRearTargetSettlement =
+            SelectedGrindingActionResolution == FlowActionManualResolution.AtTargetPendingHandoff &&
+            FlowActionManualRegistry.TryGet(SelectedGrindingActionOperation, out FlowActionSnapshot promptSnapshot) &&
+            (promptSnapshot.FlowScope.Contains("后天车下料", StringComparison.Ordinal) ||
+             promptSnapshot.FlowScope.Contains("机械手1取料送叉", StringComparison.Ordinal));
+        string commandNotice = isRearTargetSettlement
+            ? "本操作会按实际目标补写必要的PLC/缓存交接；任一步失败都会保留账本和暂停状态，不会移动天车或磁铁。"
+            : "本操作不会发送天车、磁铁或PLC命令，也不会自动恢复所属引擎。";
+        if (MessageBox.Show(this,
+                $"现场确认后才可提交。\n\n动作: {SelectedGrindingActionOperation}\n结论: {SelectedGrindingActionResolution}\n\n{commandNotice}",
+                "确认动作账本结案", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        if (!TryBeginEmergencyAction()) return;
+        try
+        {
+            bool isBalancing = FlowActionManualRegistry.TryGet(SelectedGrindingActionOperation, out FlowActionSnapshot snapshot) &&
+                                snapshot.FlowScope.StartsWith("动平衡机械手", StringComparison.Ordinal);
+            bool isFrontCrane = snapshot != null && snapshot.FlowScope.Contains("前天车取料-打号-中转", StringComparison.Ordinal);
+            bool isGrinding = snapshot != null && snapshot.FlowScope.StartsWith("研磨天车", StringComparison.Ordinal);
+            bool isRearLoad = snapshot != null && snapshot.FlowScope.Contains("后天车上料", StringComparison.Ordinal);
+            bool isRearUnload = snapshot != null && snapshot.FlowScope.Contains("后天车下料", StringComparison.Ordinal);
+            bool isManipulator1 = snapshot != null && snapshot.FlowScope.Contains("机械手1取料送叉", StringComparison.Ordinal);
+            string result;
+            string scope;
+            if (isFrontCrane)
+            {
+                int line = snapshot!.FlowScope.StartsWith("1号线", StringComparison.Ordinal) ? 1 : 2;
+                result = SelectedGrindingActionResolution == FlowActionManualResolution.AtTargetPendingHandoff
+                    ? _viewModel.ResolveFrontCraneTargetPending(line, SelectedGrindingActionOperation)
+                    : _viewModel.ResolveFrontCraneManualAction(line, SelectedGrindingActionOperation, SelectedGrindingActionResolution);
+                scope = "前端";
+            }
+            else if (isBalancing || isGrinding)
+            {
+                result = isBalancing
+                    ? _viewModel.ResolveBalancingManualAction(SelectedGrindingActionOperation, SelectedGrindingActionResolution)
+                    : _viewModel.ResolveGrindingManualAction(SelectedGrindingActionOperation, SelectedGrindingActionResolution);
+                scope = isBalancing ? "动平衡" : "研磨";
+            }
+            else if (isRearUnload)
+            {
+                int line = snapshot!.FlowScope.StartsWith("1号线", StringComparison.Ordinal) ? 1 : 2;
+                result = SelectedGrindingActionResolution == FlowActionManualResolution.AtTargetPendingHandoff
+                    ? await _viewModel.ResolveRearUnloadTargetPendingAsync(line, SelectedGrindingActionOperation)
+                    : _viewModel.ResolveRearUnloadManualAction(line, SelectedGrindingActionOperation, SelectedGrindingActionResolution);
+                scope = $"{line}号线后端";
+            }
+            else if (isRearLoad)
+            {
+                int line = snapshot!.FlowScope.StartsWith("1号线", StringComparison.Ordinal) ? 1 : 2;
+                result = SelectedGrindingActionResolution == FlowActionManualResolution.AtTargetPendingHandoff
+                    ? _viewModel.ResolveRearLoadTargetPending(line, SelectedGrindingActionOperation)
+                    : _viewModel.ResolveRearSourceManualReservation(line, snapshot.Source, SelectedGrindingActionResolution);
+                scope = $"{line}号线后端";
+            }
+            else if (isManipulator1)
+            {
+                int line = snapshot!.FlowScope.StartsWith("1号线", StringComparison.Ordinal) ? 1 : 2;
+                result = SelectedGrindingActionResolution == FlowActionManualResolution.AtTargetPendingHandoff
+                    ? await _viewModel.ResolveManipulator1TargetPendingAsync(line, SelectedGrindingActionOperation)
+                    : _viewModel.ResolveManipulator1ManualAction(line, SelectedGrindingActionOperation, SelectedGrindingActionResolution);
+                scope = "前端机械手1";
+            }
+            else
+            {
+                // 先保持“全部异常动作可见”。未实现专用账本转换的设备绝不能落入
+                // 研磨结案器，否则会造成“按钮点了但错误流程试图清理”的假结案。
+                result = $"{snapshot?.FlowScope ?? "当前"}动作已展示，但尚未接入对应设备的人工账本转换；" +
+                         "本次没有修改缓存、任务牌或引擎暂停状态。请使用该设备专用应急入口。";
+                scope = snapshot?.FlowScope ?? "动作账本";
+            }
+            RecordEmergency(scope, $"{SelectedGrindingActionOperation}动作账本结案", result);
+            ActionLedgerInfoBox.Text = result + Environment.NewLine + Environment.NewLine + _viewModel.GetPendingManualFlowActions();
+            RefreshActionLedgerInfo();
+        }
+        catch (Exception ex)
+        {
+            RecordEmergencyException("研磨", "动作账本结案", ex);
+            ShowEmergencyException("研磨动作账本结案异常", ex, text => ActionLedgerInfoBox.Text = text);
+        }
+        finally { EndEmergencyAction(); }
+    }
     private async void RefreshFront_Click(object sender, RoutedEventArgs e) => await RefreshFrontInfoAsync();
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
@@ -245,6 +359,29 @@ public partial class EmergencyCenterDialog : Window
         {
             RecordEmergencyException($"{line}号线", $"{bed}斜床应急", ex);
             ShowEmergencyException("斜床应急异常", ex, text => SkewInfoBox.Text = text);
+        }
+        finally { EndEmergencyAction(); }
+    }
+
+    private void ResolveSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(SelectedSourceRack)) return;
+        if (MessageBox.Show(this,
+                $"现场确认后才可提交。\n\n线体: {SelectedSkewLine}号线\n来源: {SelectedSourceRack}\n结论: {SelectedSourceResolution}\n\n本操作不发送设备命令，也不会自动恢复引擎。",
+                "确认来源账本结案", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        if (!TryBeginEmergencyAction()) return;
+        try
+        {
+            string result = _viewModel.ResolveRearSourceManualReservation(SelectedSkewLine, SelectedSourceRack, SelectedSourceResolution);
+            RecordEmergency($"{SelectedSkewLine}号线", $"{SelectedSourceRack}来源账本结案", result);
+            SkewInfoBox.Text = result + Environment.NewLine + Environment.NewLine + _viewModel.GetSkewEmergencyInfo(SelectedSkewLine, SelectedSkewBed);
+            RefreshActionLedgerInfo();
+        }
+        catch (Exception ex)
+        {
+            RecordEmergencyException($"{SelectedSkewLine}号线", $"{SelectedSourceRack}来源账本结案", ex);
+            ShowEmergencyException("来源账本结案异常", ex, text => SkewInfoBox.Text = text);
         }
         finally { EndEmergencyAction(); }
     }
