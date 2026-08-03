@@ -27,8 +27,11 @@ public sealed class AttentionMonitorViewModel : ObservableObject, IDisposable
     private OperationalEventRowViewModel? _selectedRow;
     private long _appliedVersion;
     private long _cachedStoreVersion;
-    private bool _refreshQueued;
+    // Store.Changed may come from device/background threads, while DoRefresh runs on the UI thread.
+    // Use an interlocked 0/1 gate so a merge window can never be scheduled twice concurrently.
+    private int _refreshQueued;
     private bool _disposed;
+    private const int RefreshMergeWindowMs = 200;
     private string _operationStatusText = "";
     private bool _isExporting;
 
@@ -289,27 +292,43 @@ public sealed class AttentionMonitorViewModel : ObservableObject, IDisposable
     private void QueueRefresh()
     {
         if (_disposed) return;
-        _cachedStoreVersion = _store.CurrentVersion;
-        if (_refreshQueued) return;
-        _refreshQueued = true;
-        try { _dispatcher.BeginInvoke(() => DoRefresh()); }
-        catch { _refreshQueued = false; }
+        Interlocked.Exchange(ref _cachedStoreVersion, _store.CurrentVersion);
+        if (Interlocked.CompareExchange(ref _refreshQueued, 1, 0) != 0) return;
+        ScheduleRefresh();
     }
 
     public void RequestRefresh()
     {
         if (_disposed) return;
         long storeVer = _store.CurrentVersion;
-        if (storeVer == _appliedVersion) return;
-        _cachedStoreVersion = storeVer;
-        _refreshQueued = true;
-        try { _dispatcher.BeginInvoke(() => DoRefresh()); }
-        catch { _refreshQueued = false; }
+        if (storeVer == Interlocked.Read(ref _appliedVersion)) return;
+        Interlocked.Exchange(ref _cachedStoreVersion, storeVer);
+        if (Interlocked.CompareExchange(ref _refreshQueued, 1, 0) != 0) return;
+        ScheduleRefresh();
+    }
+
+    /// <summary>
+    /// 合并刷新：事件风暴时最多每200ms触发一次重建，减少UI线程全量刷新频率。
+    /// 所有集合操作仍留在 <see cref="DoRefresh"/> 的UI线程内执行。
+    /// </summary>
+    private void ScheduleRefresh()
+    {
+        try
+        {
+            _ = Task.Delay(RefreshMergeWindowMs).ContinueWith(_ =>
+            {
+                if (_disposed) return;
+                try { _dispatcher.BeginInvoke(() => DoRefresh()); }
+                catch { Interlocked.Exchange(ref _refreshQueued, 0); }
+            });
+        }
+        catch { Interlocked.Exchange(ref _refreshQueued, 0); }
     }
 
     private void DoRefresh()
     {
         if (_disposed) return;
+        bool scheduleFollowup = false;
         try
         {
             bool alreadySelected = _selectedRow != null;
@@ -347,27 +366,38 @@ public sealed class AttentionMonitorViewModel : ObservableObject, IDisposable
                 if (selIdx >= 0) SelectedRow = _rows[selIdx];
             }
 
-            _appliedVersion = snapshot.Version;
+            Interlocked.Exchange(ref _appliedVersion, snapshot.Version);
 
             // 版本追赶
             long latestStore = _store.CurrentVersion;
-            if (latestStore > _appliedVersion)
+            if (latestStore > Interlocked.Read(ref _appliedVersion))
             {
-                _cachedStoreVersion = latestStore;
-                _refreshQueued = false;
-                try { _dispatcher.BeginInvoke(() => DoRefresh()); }
-                catch { }
+                Interlocked.Exchange(ref _cachedStoreVersion, latestStore);
+                // 版本追赶也必须经过合并窗口，不能在事件风暴中连续重建UI集合。
+                scheduleFollowup = true;
                 return;
             }
         }
         catch { }
         finally
         {
-            _refreshQueued = false;
             UpdateKpis();
             OnPropertyChanged(nameof(CanCopy));
             OnPropertyChanged(nameof(CanExport));
             OnPropertyChanged(nameof(CurrentTotalEvents));
+            if (scheduleFollowup && !_disposed)
+            {
+                // 保持排队标志，避免事件处理器在等待窗口内重复投递。
+                ScheduleRefresh();
+            }
+            else
+            {
+                Interlocked.Exchange(ref _refreshQueued, 0);
+                // 清除标志与读取版本之间的竞态由再次检查覆盖：期间到达的事件要么已自行排队，
+                // 要么会在这里补排一次，不能永久遗漏刷新。
+                if (!_disposed && _store.CurrentVersion > Interlocked.Read(ref _appliedVersion))
+                    QueueRefresh();
+            }
         }
     }
 
@@ -460,7 +490,7 @@ public sealed class AttentionMonitorViewModel : ObservableObject, IDisposable
         _allRows.Clear();
         foreach (var evt in snapshot.Events)
             _allRows.Add(new OperationalEventRowViewModel(evt));
-        _appliedVersion = snapshot.Version;
+        Interlocked.Exchange(ref _appliedVersion, snapshot.Version);
         ApplyFilters();
         UpdateKpis();
     }

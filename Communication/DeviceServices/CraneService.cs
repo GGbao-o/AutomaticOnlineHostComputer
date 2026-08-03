@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.Clients;
@@ -82,6 +83,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         private string? _lastStatusLogKey;
         private DateTime _lastStatusLogAtUtc;
         private static readonly TimeSpan StatusLogHeartbeat = TimeSpan.FromSeconds(10);
+        private const int MaxWriteLogKeys = 256;
+        private readonly Dictionary<string, DateTime> _lastWriteLogAtUtcByKey = new(StringComparer.Ordinal);
 
         // ── 构造 ─────────────────────────────────────────────────────
         /// <param name="name">天车名称（如"1号线天车前"），仅用于日志输出</param>
@@ -1124,7 +1127,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         private async Task WriteDintAsync(int startAddr, int value, string label, CancellationToken ct)
         {
             await SafeIoAsync(token => _client.WriteInt32Async(startAddr, value, token), $"{label} D{startAddr}~D{startAddr + 1}", ct, MaxWriteIoAttempts);
-            Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{startAddr}~D{startAddr + 1}={value}");
+            if (ShouldLogWrite($"D{startAddr}~D{startAddr + 1}={value}"))
+                Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{startAddr}~D{startAddr + 1}={value}");
         }
 
         // ─── 辅助：统一写入并打印调试日志 ───────────────────────────
@@ -1136,12 +1140,43 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             {
                 // 使用公共 WriteAsync（FC06 单寄存器写入）
                 await SafeIoAsync(token => _client.WriteAsync(address, value, token), $"{label} D{address}", ct, MaxWriteIoAttempts);
-                Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{address}={value}");
+                if (ShouldLogWrite($"D{address}={value}"))
+                    Console.WriteLine($"[CraneService] [{_name}] ✔ {label} 写入成功 D{address}={value}");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[CraneService] [{_name}] ✘ {label} 写入失败 D{address}：{ex.Message}");
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// 写入成功日志节流：同一地址+值重复写入时每10秒心跳一次；不同键互不压制。
+        /// 失败日志不受节流，始终即时输出。
+        /// </summary>
+        private bool ShouldLogWrite(string key)
+        {
+            var now = DateTime.UtcNow;
+            lock (_statusLogLock)
+            {
+                if (_lastWriteLogAtUtcByKey.TryGetValue(key, out var lastAtUtc)
+                    && now - lastAtUtc < StatusLogHeartbeat)
+                    return false;
+
+                _lastWriteLogAtUtcByKey[key] = now;
+                if (_lastWriteLogAtUtcByKey.Count > MaxWriteLogKeys)
+                {
+                    string? oldestKey = null;
+                    DateTime oldestAtUtc = DateTime.MaxValue;
+                    foreach (var pair in _lastWriteLogAtUtcByKey)
+                    {
+                        if (pair.Value >= oldestAtUtc) continue;
+                        oldestKey = pair.Key;
+                        oldestAtUtc = pair.Value;
+                    }
+                    if (oldestKey != null) _lastWriteLogAtUtcByKey.Remove(oldestKey);
+                }
+                return true;
             }
         }
 

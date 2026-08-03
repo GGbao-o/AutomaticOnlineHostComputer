@@ -356,7 +356,7 @@
     "pollIntervalMs": 500,
     "handshakeTimeoutMs": 120000,
     "x11StableDelayMs": 3000,
-    "signalPollIntervalMs": 50,
+    "signalPollIntervalMs": 200,
     "grindingStuckTimeoutMs": 60000
   },
   "balancing": {

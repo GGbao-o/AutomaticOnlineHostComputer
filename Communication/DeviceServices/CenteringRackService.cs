@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.Clients;
@@ -26,6 +27,10 @@ public sealed class CenteringRackService : IDisposable
     private string? _lastStatusLogKey;
     private DateTime _lastStatusLogAtUtc;
     private static readonly TimeSpan StatusLogHeartbeat = TimeSpan.FromSeconds(10);
+    private bool _lastPickupLoggedValue;
+    private DateTime _lastPickupLogAtUtc;
+    private int _lastPlateLengthLoggedValue;
+    private DateTime _lastPlateLengthLogAtUtc;
     private bool _disposed;
 
     private MitsubishiMcClient Client => _client ?? throw new InvalidOperationException($"[CenteringRackSvc] [{_name}] 未连接MC客户端");
@@ -153,12 +158,28 @@ public sealed class CenteringRackService : IDisposable
     //  读取单信号
     // ═══════════════════════════════════════════════════════════════
 
+    /// <summary>单信号读取日志节流：值变化立即输出，否则每10秒心跳一次。</summary>
+    private bool ShouldLogSingleSignal<T>(T value, ref T lastLogged, ref DateTime lastAtUtc) where T : struct
+    {
+        var now = DateTime.UtcNow;
+        lock (_statusLogLock)
+        {
+            bool changed = !EqualityComparer<T>.Default.Equals(value, lastLogged);
+            bool heartbeat = now - lastAtUtc >= StatusLogHeartbeat;
+            if (!changed && !heartbeat) return false;
+            lastLogged = value;
+            lastAtUtc = now;
+            return true;
+        }
+    }
+
     /// <summary>上料架是否请求取料（M800）</summary>
     public async Task<bool> IsRequestPickupAsync(CancellationToken ct = default)
     {
         var result = await Client.ReadMAlignedWordAsync(Addr.M_ReadStartAddr, 1, ct);
         bool val = result.IntValues.Length > 0 && (result.IntValues[0] & (1 << 0)) != 0;
-        Console.WriteLine($"[CenteringRackSvc] [{_name}] M800 请求取料={(val ? 1 : 0)}");
+        if (ShouldLogSingleSignal(val, ref _lastPickupLoggedValue, ref _lastPickupLogAtUtc))
+            Console.WriteLine($"[CenteringRackSvc] [{_name}] M800 请求取料={(val ? 1 : 0)}");
         return val;
     }
 
@@ -184,7 +205,8 @@ public sealed class CenteringRackService : IDisposable
     {
         var result = await Client.ReadAsync(MitsubishiMcClient.DeviceD, Addr.D_PlateLength, 1, ct);
         int len = result.IntValues.Length > 0 ? result.IntValues[0] : 0;
-        Console.WriteLine($"[CenteringRackSvc] [{_name}] D100 板长={len}mm");
+        if (ShouldLogSingleSignal(len, ref _lastPlateLengthLoggedValue, ref _lastPlateLengthLogAtUtc))
+            Console.WriteLine($"[CenteringRackSvc] [{_name}] D100 板长={len}mm");
         return len;
     }
 

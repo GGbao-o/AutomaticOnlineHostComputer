@@ -21,6 +21,8 @@ public sealed class CraneConnectionCache
 
     private readonly Dictionary<int, (string Name, string Ip)> _ipMappings = new();
     private readonly Dictionary<int, CraneService> _services = new();
+    private readonly Dictionary<int, DateTime> _lastReuseLogAtUtcByCrane = new();
+    private static readonly TimeSpan ReuseLogHeartbeat = TimeSpan.FromSeconds(10);
 
     public CraneConnectionCache(MotionConfig motionConfig)
     {
@@ -88,7 +90,14 @@ public sealed class CraneConnectionCache
         {
             if (_services.TryGetValue(craneNo, out var existing))
             {
-                Console.WriteLine($"[CraneCache] 复用缓存服务：{craneNo}号");
+                // 复用成功是高频热路径日志（前后端引擎每500ms调用），每台天车独立按10秒心跳节流。
+                var now = DateTime.UtcNow;
+                if (!_lastReuseLogAtUtcByCrane.TryGetValue(craneNo, out var lastAtUtc)
+                    || now - lastAtUtc >= ReuseLogHeartbeat)
+                {
+                    _lastReuseLogAtUtcByCrane[craneNo] = now;
+                    Console.WriteLine($"[CraneCache] 复用缓存服务：{craneNo}号");
+                }
                 return existing;
             }
 
