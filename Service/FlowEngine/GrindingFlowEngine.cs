@@ -10,6 +10,7 @@ using AutomaticOnlineHostComputer.Communication.Clients;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Domain.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
@@ -329,6 +330,7 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine("[GrindingEngine] 引擎已在运行，跳过重复启动");
             return;
         }
+        using var logScope = EngineLogRouter.BeginScope(EngineLogRouter.Grinding);
         _paused = false;
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("  [GrindingEngine] 研磨自动流程引擎启动");

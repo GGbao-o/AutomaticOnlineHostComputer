@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.Clients;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
@@ -256,6 +257,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     public void Start()
     {
         if (IsRunning) return;
+        using var logScope = EngineLogRouter.BeginScope(EngineLogRouter.Line1);
         _paused = false;
         Console.WriteLine("[后引擎] ▶ 启动");
         _engineTask = Task.Run(() => Loop(_engineCts.Token));

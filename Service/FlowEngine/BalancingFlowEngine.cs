@@ -2,6 +2,7 @@ using AutomaticOnlineHostComputer.Communication.Clients;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Communication.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 using RackAddr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
@@ -725,6 +726,7 @@ public sealed class BalancingFlowEngine : IDisposable
             Console.WriteLine($"[平衡引擎#{EngineId}] 引擎已在运行, 跳过重复启动");
             return;
         }
+        using var logScope = EngineLogRouter.BeginScope(EngineLogRouter.Balance);
         _paused = false;
         _mc63SnapshotValid = false;
         _mc65SnapshotValid = false;

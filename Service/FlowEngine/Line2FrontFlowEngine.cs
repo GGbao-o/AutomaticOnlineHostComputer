@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Domain.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 using RackAddr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
@@ -149,7 +150,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
     private ForkService? _forkSvc;              // 货叉 (MC协议, UseBitReadForM=true)
     private CenteringRackService? _rackSvc; // 总上料架+中转架 (共享连接,可重连)
     private BoringModbusService? _boringSvc;    // 双头镗 (Modbus TCP, R区地址=R*2+1)
-    private readonly MarkerShareMonitor _markerMonitor = new("2号线打号机", MarkerSharePath, "ggbao", "123456");
+    private readonly MarkerShareMonitor _markerMonitor = new("2号线打号机", MarkerSharePath, "ggbao", "123456", EngineLogRouter.Line2);
     private int _forkReconnectInProgress;       // 货叉后台重连占坑, 防止断线时每轮重复创建连接任务
     private int _boringReconnectInProgress;     // 双头镗后台重连占坑, 防止断线时堆积SDK连接任务
 
@@ -535,6 +536,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         {
             Console.WriteLine("[Line2Front] 引擎已在运行"); return;
         }
+        using var logScope = EngineLogRouter.BeginScope(EngineLogRouter.Line2);
         _paused = false;
         DeviceStatus.DisplaySnapshotPaused = false;
         DeviceStatus.SnapshotAtUtc = default;

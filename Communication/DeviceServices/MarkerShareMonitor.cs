@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 
 namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
 
@@ -20,6 +21,7 @@ public sealed class MarkerShareMonitor : IDisposable
     private readonly string _sharePath;
     private readonly string? _username;
     private readonly string? _password;
+    private readonly string _logScope;
     private readonly object _sync = new();
     private CancellationTokenSource? _cts;
     private Thread? _worker;
@@ -30,12 +32,14 @@ public sealed class MarkerShareMonitor : IDisposable
     private bool _shareSessionEstablished;
     private bool _disposed;
 
-    public MarkerShareMonitor(string name, string sharePath, string? username = null, string? password = null)
+    public MarkerShareMonitor(string name, string sharePath, string? username = null, string? password = null,
+        string logScope = EngineLogRouter.Shared)
     {
         _name = name;
         _sharePath = sharePath;
         _username = username;
         _password = password;
+        _logScope = logScope;
     }
 
     /// <summary>最近一次探测成功且快照未过期时返回true。</summary>
@@ -74,6 +78,7 @@ public sealed class MarkerShareMonitor : IDisposable
 
     private void WorkerLoop(CancellationToken ct)
     {
+        using var logScope = EngineLogRouter.BeginScope(_logScope);
         while (!ct.IsCancellationRequested)
         {
             bool connected;

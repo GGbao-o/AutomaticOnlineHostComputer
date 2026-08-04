@@ -1,4 +1,5 @@
 using AutomaticOnlineHostComputer.Infrastructure.DependencyInjection;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.IO;
@@ -29,6 +30,8 @@ namespace AutomaticOnlineHostComputer;
 
 public partial class App : Application
 {
+    private TextWriter? _originalConsoleOut;
+    private EngineLogRouter? _logRouter;
     /// <summary>
     /// 全局 DI 容器，在 OnStartup 中初始化，程序生命周期内只读。
     /// 使用 GetRequiredService&lt;T&gt;() 解析服务；若服务未注册会抛出异常，
@@ -41,21 +44,21 @@ public partial class App : Application
     /// </summary>
     protected override void OnStartup(StartupEventArgs e)
     {
-        // ── 日志文件重定向：Console 输出同步写入 D:\BSH\1.txt ───────────
-        var logPath = @"D:\BSH\1.txt";
+        // ── 日志路由：Console 输出按日期、线体/引擎拆分到 D:\BSH\logs ───────────
+        var logRoot = @"D:\BSH\logs";
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-            var logWriter = new DualWriter(Console.Out, logPath);
-            Console.SetOut(logWriter);
+            _originalConsoleOut = Console.Out;
+            _logRouter = new EngineLogRouter(_originalConsoleOut, logRoot);
+            Console.SetOut(_logRouter);
             Console.WriteLine($"══════════════════════════════════════════");
             Console.WriteLine($"  启动时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
-            Console.WriteLine($"  日志文件：{logPath}");
+            Console.WriteLine($"  日志目录：{logRoot}");
             Console.WriteLine($"══════════════════════════════════════════");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[App] ⚠ 日志文件初始化失败：{ex.Message}");
+            try { (_originalConsoleOut ?? Console.Out).WriteLine($"[App] ⚠ 日志路由初始化失败：{ex.Message}"); } catch { }
         }
 
         Console.WriteLine("App.OnStartup: 构建 DI 容器...");
@@ -70,42 +73,15 @@ public partial class App : Application
         // BuildServiceProvider() 冻结注册表，返回可解析服务的容器
         Services = serviceCollection.BuildServiceProvider();
     }
-}
 
-/// <summary>
-/// 双路 TextWriter：同时写入控制台和日志文件。
-/// </summary>
-internal sealed class DualWriter : TextWriter
-{
-    private readonly TextWriter _console;
-    private readonly StreamWriter _file;
-
-    public DualWriter(TextWriter console, string logPath)
+    protected override void OnExit(ExitEventArgs e)
     {
-        _console = console;
-        _file = new StreamWriter(logPath, append: true) { AutoFlush = true };
-    }
-
-    public override System.Text.Encoding Encoding => _console.Encoding;
-
-    public override void Write(char value)
-    {
-        _console.Write(value);
-        _file.Write(value);
-    }
-
-    public override void WriteLine(string? value)
-    {
-        _console.WriteLine(value);
-        _file.WriteLine(value);
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
+        try
         {
-            _file.Dispose();
+            if (_originalConsoleOut != null) Console.SetOut(_originalConsoleOut);
+            _logRouter?.Dispose();
         }
-        base.Dispose(disposing);
+        catch { }
+        base.OnExit(e);
     }
 }

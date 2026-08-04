@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.Clients;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 using RackAddr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
@@ -254,6 +255,7 @@ public sealed class Line2RearFlowEngine : IDisposable
     public void Start()
     {
         if (IsRunning) return;
+        using var logScope = EngineLogRouter.BeginScope(EngineLogRouter.Line2);
         _paused = false;
         Console.WriteLine("[后引擎2] ▶ 启动");
         _engineTask = Task.Run(() => Loop(_engineCts.Token));
