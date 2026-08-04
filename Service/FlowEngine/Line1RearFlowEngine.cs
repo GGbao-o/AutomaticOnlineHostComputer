@@ -293,6 +293,8 @@ public sealed class Line1RearFlowEngine : IDisposable
     /// </summary>
     public string ResolveManualSourceReservation(string rackCode, FlowActionManualResolution resolution)
     {
+        if (resolution is not FlowActionManualResolution.StillAtSource and not FlowActionManualResolution.RemovedManually)
+            return "1号线来源账本结案只接受“仍在来源位”或“已人工移走”；已确认天车持件/目标待交接请使用斜床专用应急，未修改任何状态。";
         if (!_rackLedger.IsHeldForManualResolution(rackCode, out string operationId, out string reason))
             return $"1号线{rackCode}没有待人工结案的来源缓存";
         if (!_rackLedger.TryResolveManualReservation(rackCode, operationId, resolution, out WorkpieceCache wp, out _))
@@ -301,15 +303,10 @@ public sealed class Line1RearFlowEngine : IDisposable
         string result = resolution switch
         {
             FlowActionManualResolution.StillAtSource => "确认工件仍在来源位：保留缓存，解除冻结，允许后续重新派发",
-            FlowActionManualResolution.OnCarrier => "确认工件在后天车：已从来源账本移除，保留人工任务牌，禁止自动派发",
-            FlowActionManualResolution.AtTargetPendingHandoff => "确认工件已在目标待交接：已从来源账本移除，保留人工任务牌，禁止自动派发",
             FlowActionManualResolution.RemovedManually => "确认工件已人工移走：已从来源账本移除",
             _ => throw new ArgumentOutOfRangeException(nameof(resolution), resolution, null)
         };
-        if (resolution is FlowActionManualResolution.OnCarrier or FlowActionManualResolution.AtTargetPendingHandoff)
-            SetRearCraneTask(wp, resolution == FlowActionManualResolution.OnCarrier ? "人工确认天车持件" : "人工确认目标待交接",
-                rackCode, "人工确认目标", true, result);
-        else if (GetCraneTaskSnapshot().SourceStation == rackCode)
+        if (GetCraneTaskSnapshot().SourceStation == rackCode)
             ClearRearCraneTask();
 
         // 先完成来源缓存和任务牌的真实结案，再移除仅供诊断的暂停快照；
@@ -328,16 +325,16 @@ public sealed class Line1RearFlowEngine : IDisposable
             action.FlowScope != "1号线后天车上料" || action.Ownership != FlowWorkpieceOwnership.AtTargetPendingHandoff)
             return "1号线后天车上料目标结案拒绝：动作不是斜床目标待交接。";
         SkewCtx? bed = _beds.FirstOrDefault(x => x?.Code == action.Target);
-        if (bed == null || !_rackLedger.TryResolveManualReservation(action.Source, operationId,
-                FlowActionManualResolution.AtTargetPendingHandoff, out WorkpieceCache wp, out _))
-            return "1号线后天车上料目标结案失败：斜床或来源预约与动作账本不一致。";
-        bed.Wp = wp;
+        // X11=1 后来源预约已被 CommitPickup 消费；目标结案只能核对斜床已有的工件身份，
+        // 不能再把已经离开来源位的工件伪造回来源账本。
+        if (bed == null || bed.Wp is not { } wp || wp.IdentityText != action.WorkpieceIdentity)
+            return "1号线后天车上料目标结案失败：斜床当前工件与动作账本不一致。";
         bed.St = SkewState.Loading;
         bed.CompletionExported = false;
         _paused = true;
         SetRearCraneTask(wp, "人工确认斜床待交接", action.Source, bed.Code, true, "不自动补发CNC握手");
         FlowActionManualRegistry.Remove(operationId);
-        return $"1号线后天车已确认工件在{bed.Code}待交接：来源账本已消费，斜床置Loading并保留人工任务牌；后端保持暂停。";
+        return $"1号线后天车已确认工件在{bed.Code}待交接：斜床置Loading并保留人工任务牌；后端保持暂停。";
     }
 
     /// <summary>
@@ -763,6 +760,11 @@ public sealed class Line1RearFlowEngine : IDisposable
 
         foreach (var rackCode in racks)
         {
+            if (_rackLedger.IsHeldForManualResolution(rackCode, out _, out string manualReason))
+            {
+                if (logDetails) Console.WriteLine($"│   [上料候选] {rackCode}来源冻结,跳过该位，不影响其它中转架上料：{manualReason}");
+                continue;
+            }
             if (!TryGetRackWorkpieceCache(rackCode, out var wp))
             {
                 if (logDetails) Console.WriteLine($"│   [上料候选] {rackCode}有物理板但无工件缓存,等待缓存写入/人工确认");
@@ -1123,6 +1125,24 @@ public sealed class Line1RearFlowEngine : IDisposable
             $"信号新鲜: {(bed.SignalFresh ? "是" : "否")}");
     }
 
+    private static string SettleManualLoadOnCarrierForEmergency(SkewCtx bed)
+    {
+        // 斜床应急的前提是操作员已人工处理工件、磁铁和天车安全位置。
+        // 因此只结清“本线后天车上料 → 本斜床”的已确认持件快照；
+        // 来源冻结和目标待交接快照必须保留给各自的专用结案入口。
+        const string flowScope = "1号线后天车上料";
+        FlowActionSnapshot[] snapshots = FlowActionManualRegistry.Snapshot()
+            .Where(item => item.FlowScope == flowScope &&
+                           item.Target == bed.Code &&
+                           item.Disposition == FlowActionDisposition.PauseOnCarrier)
+            .ToArray();
+        foreach (FlowActionSnapshot snapshot in snapshots)
+            FlowActionManualRegistry.Remove(snapshot.OperationId);
+        return snapshots.Length == 0
+            ? "动作账本=无后天车持件快照"
+            : $"动作账本=已结清{snapshots.Length}条后天车持件快照(工件已人工移走/放弃)";
+    }
+
     /// <summary>
     /// 人工处理完成后的上位机应急清空。
     /// 只清本地斜床状态/缓存和释放软件锁, 不给天车或CNC写动作指令。
@@ -1210,6 +1230,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         // 仅应急软件状态已成功清空后才清展示任务；超时/失败路径会在此前return，保留旧身份供人工确认。
         ClearRearCraneTask();
         MarkSkewManualCleared(bed);
+        logs.Add(SettleManualLoadOnCarrierForEmergency(bed));
         logs.Add(deviceClearLog);
         if (resumeAfterClear && IsRunning) _paused = false;
         _fastNextCycle = true;
@@ -1758,7 +1779,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             _paused = true;
             requiresManualConfirmation = true;
             action.PauseForManualResolution(ex.Message);
-            _rackLedger.HoldForManualResolution(rs, actionId, ex.Message);
+            if (action.Ownership == FlowWorkpieceOwnership.ReservedAtSource)
+                _rackLedger.HoldForManualResolution(rs, actionId, ex.Message);
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
                 operationalSite with { ActionStage = $"{action.Step}：天车运动超时" }, operationalTracker, ex,
                 "后天车运动超时，动作账本已暂停并保留来源预约，等待人工确认。", true,
@@ -1784,7 +1806,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                 requiresManualConfirmation = true;
                 action.MarkCommandResponseUnknown(ex.Message);
                 action.PauseForManualResolution(ex.Message);
-                _rackLedger.HoldForManualResolution(rs, actionId, ex.Message);
+                if (action.Ownership == FlowWorkpieceOwnership.ReservedAtSource)
+                    _rackLedger.HoldForManualResolution(rs, actionId, ex.Message);
                 OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
                     operationalSite with { ActionStage = $"{action.Step}：命令响应未知" }, operationalTracker, ex,
                     "物理命令已开始且响应未知，动作账本已暂停并保留来源预约，等待人工确认。", true,

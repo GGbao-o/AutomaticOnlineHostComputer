@@ -1844,13 +1844,14 @@ public sealed class HomeViewModel : ObservableObject
 
     /// <summary>
     /// 安全告警的弹窗和引擎暂停可能发生在不同线程；恢复前以动作账本作最后一道门禁。
-    /// 不在此处猜测性清理快照，必须先走对应引擎的人工结案入口。
+    /// 来源位冻结只阻止该来源位重复派发，不阻止整线恢复；其余物理位置待确认动作仍必须先结案。
     /// </summary>
     private bool EnsureNoPendingManualActionsForLine(int line)
     {
         string linePrefix = $"{line}号线";
         FlowActionSnapshot[] pending = FlowActionManualRegistry.Snapshot()
             .Where(item => item.ManualConfirmationRequired &&
+                           item.Disposition != FlowActionDisposition.PauseSourceReserved &&
                            item.FlowScope.StartsWith(linePrefix, StringComparison.Ordinal))
             .ToArray();
         if (pending.Length == 0)

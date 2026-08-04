@@ -198,9 +198,18 @@ public partial class EmergencyCenterDialog : Window
             else if (isRearLoad)
             {
                 int line = snapshot!.FlowScope.StartsWith("1号线", StringComparison.Ordinal) ? 1 : 2;
-                result = SelectedGrindingActionResolution == FlowActionManualResolution.AtTargetPendingHandoff
-                    ? _viewModel.ResolveRearLoadTargetPending(line, SelectedGrindingActionOperation)
-                    : _viewModel.ResolveRearSourceManualReservation(line, snapshot.Source, SelectedGrindingActionResolution);
+                result = snapshot.Disposition switch
+                {
+                    FlowActionDisposition.PauseSourceReserved =>
+                        _viewModel.ResolveRearSourceManualReservation(line, snapshot.Source, SelectedGrindingActionResolution),
+                    FlowActionDisposition.PauseAtTargetPendingHandoff =>
+                        _viewModel.ResolveRearLoadTargetPending(line, SelectedGrindingActionOperation),
+                    FlowActionDisposition.PauseOnCarrier =>
+                        $"{line}号线后天车已确认持件/途中异常，不能使用来源账本结案。" +
+                        "请在“斜床应急作废”中确认工件已人工移走、天车已回安全位；" +
+                        "应急成功后会结清该斜床对应的持件动作快照。",
+                    _ => "后天车上料动作账本结论未知，未修改任何缓存、任务牌或暂停状态。"
+                };
                 scope = $"{line}号线后端";
             }
             else if (isManipulator1)
