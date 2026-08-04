@@ -106,7 +106,8 @@ public sealed class CraneConnectionCache
 
             var motion = _motionConfig.GetCraneSpeed(craneNo);
             var service = new CraneService(info.Name, info.Ip,
-                xyTimeoutMs: motion.XyTimeoutMs, zTimeoutMs: motion.ZTimeoutMs);
+                xyTimeoutMs: motion.XyTimeoutMs, zTimeoutMs: motion.ZTimeoutMs,
+                pressureStopNormalPositionToleranceProvider: () => _motionConfig.Safety.PressureStopNormalPositionToleranceMm);
             _services[craneNo] = service;
             Console.WriteLine($"[CraneCache] 新建服务：{craneNo}号 {info.Name} {info.Ip}");
             return service;

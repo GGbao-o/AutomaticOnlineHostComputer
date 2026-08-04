@@ -92,6 +92,11 @@ public sealed class MotionConfig
         public int MaxRetries { get; set; } = 3;
         public int MagnetOffMaxRetries { get; set; } = 50;
         public int MagnetOffRetryIntervalMs { get; set; } = 500;
+        /// <summary>
+        /// Z 下降时 X2 下压触发后，停止位置与目标 Z 的最大允许差值。
+        /// 在此范围内视为正常接触到位，恢复伺服后继续充/退磁等后续步骤；超出范围才暂停人工确认。
+        /// </summary>
+        public int PressureStopNormalPositionToleranceMm { get; set; } = 15;
     }
 
     public sealed class ShakeSection

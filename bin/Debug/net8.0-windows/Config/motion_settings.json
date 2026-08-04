@@ -201,7 +201,8 @@
   "safety": {
     "maxRetries": 3,
     "magnetOffMaxRetries": 50,
-    "magnetOffRetryIntervalMs": 500
+    "magnetOffRetryIntervalMs": 500,
+    "pressureStopNormalPositionToleranceMm": 15
   },
   "shake": {
     "defaultCount": 5,

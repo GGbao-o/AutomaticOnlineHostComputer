@@ -115,6 +115,11 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     public int XAbsMaxAdjustMm { get => _cfg.XAbsFineTune.MaxAdjustMm; set { _cfg.XAbsFineTune.MaxAdjustMm = value; OnPropertyChanged(); } }
     public int YAbsToleranceMm { get => _cfg.YAbsFineTune.ToleranceMm; set { _cfg.YAbsFineTune.ToleranceMm = value; OnPropertyChanged(); } }
     public int YAbsMaxAdjustMm { get => _cfg.YAbsFineTune.MaxAdjustMm; set { _cfg.YAbsFineTune.MaxAdjustMm = value; OnPropertyChanged(); } }
+    public int PressureStopNormalPositionToleranceMm
+    {
+        get => _cfg.Safety.PressureStopNormalPositionToleranceMm;
+        set { _cfg.Safety.PressureStopNormalPositionToleranceMm = value; OnPropertyChanged(); }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  初始化 — 每行持有对 _cfg 内对象的直接引用，修改即时生效

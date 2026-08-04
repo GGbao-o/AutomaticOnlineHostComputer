@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 
 namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
@@ -16,8 +17,14 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
 public sealed class ManipulatorConnectionCache
 {
     private readonly object _lock = new();
+    private readonly MotionConfig? _motionConfig;
     private readonly Dictionary<int, (string Name, string Ip)> _ipMappings = new();
     private readonly Dictionary<int, CraneService> _services = new();
+
+    public ManipulatorConnectionCache(MotionConfig? motionConfig = null)
+    {
+        _motionConfig = motionConfig;
+    }
 
     /// <summary>
     /// 从数据库 machine 表装载 3 台机械手的 IP（过滤 TypeName="机械手"）。
@@ -82,7 +89,10 @@ public sealed class ManipulatorConnectionCache
             }
 
             var info = GetManipulatorInfo(no);
-            var service = new CraneService(info.Name, info.Ip);
+            var service = new CraneService(info.Name, info.Ip,
+                pressureStopNormalPositionToleranceProvider: _motionConfig == null
+                    ? null
+                    : () => _motionConfig.Safety.PressureStopNormalPositionToleranceMm);
             _services[no] = service;
             Console.WriteLine($"[ManipulatorCache] 新建服务：{no}号 {info.Name} {info.Ip}");
             return service;

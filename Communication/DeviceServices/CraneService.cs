@@ -77,6 +77,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         private readonly string _name; // 天车名称，调试输出用
         private readonly int _xyTimeoutMs;
         private readonly int _zTimeoutMs;
+        private readonly Func<int> _pressureStopNormalPositionToleranceProvider;
         private readonly SemaphoreSlim _connectionLock = new(1, 1); // 连接/断开串行化，防止UI和引擎同时重连同一设备
         private readonly object _statusLogLock = new(); // UI与流程会共享服务，保护状态日志节流字段
         private bool _manualModeSet;   // 是否已确认 PLC 处于手动模式，避免重复写 D4500
@@ -91,12 +92,14 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <param name="ip">PLC IP 地址</param>
         /// <param name="port">Modbus TCP 端口，默认 502</param>
         public CraneService(string name, string ip, int port = 502,
-            int xyTimeoutMs = 240_000, int zTimeoutMs = 240_000)
+            int xyTimeoutMs = 240_000, int zTimeoutMs = 240_000,
+            Func<int>? pressureStopNormalPositionToleranceProvider = null)
         {
             _name   = name;
             _client = new ModbusTcpClient(ip, port, unitId: 1, timeoutMs: 3000);
             _xyTimeoutMs = ValidateTimeout(xyTimeoutMs, nameof(xyTimeoutMs));
             _zTimeoutMs = ValidateTimeout(zTimeoutMs, nameof(zTimeoutMs));
+            _pressureStopNormalPositionToleranceProvider = pressureStopNormalPositionToleranceProvider ?? (() => 15);
             Console.WriteLine($"[CraneService] [{_name}] 创建实例，IP={ip}:{port}");
         }
 
@@ -1005,17 +1008,6 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     bool x2Pressed = await ReadXBitAsync(Addr.D_X2_MagnetLimit, ct);
                     if (x2Pressed)
                     {
-                        // X2 可能恰好在目标高度接触工件才亮。先读实际位置：若 Z 已在
-                        // 目标±容差内，本次下降已经到位，不能把正常到位误判为异常停机。
-                        // 读取失败或 Z 仍未到位时才按位置未知执行急停并抛异常。
-                        CraneStatus? pressureStatus = await ReadStatusAsync(ct);
-                        if (pressureStatus != null && zTarget != -1 &&
-                            Math.Abs(pressureStatus.ZPos - zTarget) <= tolerance)
-                        {
-                            Console.WriteLine($"[CraneService] [{_name}] ✔ X2下压触发但Z已到位 " +
-                                $"Z={pressureStatus.ZPos}(目标{zTarget}, 容差±{tolerance})，按正常到位返回");
-                            return;
-                        }
                         Console.WriteLine($"══════════════════════════════════════");
                         Console.WriteLine($"  [CraneService] [{_name}] ⚠⚠⚠ 磁铁下压限位 X2=1 ⚠⚠⚠");
                         Console.WriteLine($"  磁铁已接触工件/障碍物！");
@@ -1041,6 +1033,24 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                         if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X下压停止复位 D4522", emergencyCt);
                         if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y下压停止复位 D4521", emergencyCt);
                         if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z下压停止复位 D4520", emergencyCt);
+
+                        // 必须等下降实际停止后再读 Z：X2 亮时仍可能处在运动中，不能仅因
+                        // “已接近目标”而提前充磁。正常接触到位才恢复伺服并把本次下降视为成功。
+                        await Task.Delay(200, emergencyCt);
+                        CraneStatus? stoppedStatus = await ReadStatusAsync(emergencyCt);
+                        int normalToleranceMm = GetPressureStopNormalPositionToleranceMm();
+                        if (stoppedStatus != null && zTarget != -1 &&
+                            PressureStopRecoveryPolicy.IsNormalArrival(stoppedStatus.ZPos, zTarget, normalToleranceMm))
+                        {
+                            Console.WriteLine($"[CraneService] [{_name}] ✔ X2下压停止后Z正常到位 " +
+                                $"Z={stoppedStatus.ZPos}(目标{zTarget}, 下压正常阈值±{normalToleranceMm}mm)，恢复后继续流程");
+                            await RecoverFromPressureStopAsync(emergencyCt);
+                            return;
+                        }
+
+                        string actualZ = stoppedStatus == null ? "读取失败" : stoppedStatus.ZPos.ToString();
+                        Console.WriteLine($"[CraneService] [{_name}] ⚠ X2下压停止后Z未通过正常到位判定：" +
+                            $"实际Z={actualZ}，目标Z={zTarget}，阈值±{normalToleranceMm}mm；按位置未知抛异常");
 
                         throw new PressureStopException(_name);
                     }
@@ -1076,6 +1086,26 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             if (zTarget != -1 && (finalStatus == null || Math.Abs(finalStatus.ZPos - zTarget) > tolerance)) unreachedAxes.Add("Z");
             return new CraneMotionTimeoutException(_name, stage, xTarget, yTarget, zTarget, tolerance,
                 finalStatus, unreachedAxes, stopped);
+        }
+
+        /// <summary>
+        /// 配置页面修改后由提供器即时读取。非法值绝不能扩大正常接触范围；退化为 0mm，
+        /// 仅允许停止位置与目标完全一致时继续，其他情况仍走人工确认。
+        /// </summary>
+        private int GetPressureStopNormalPositionToleranceMm()
+        {
+            try
+            {
+                int configured = _pressureStopNormalPositionToleranceProvider();
+                if (configured >= 0) return configured;
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 下压正常到位阈值={configured}mm 非法，按最保守0mm处理");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 读取下压正常到位阈值失败，按最保守0mm处理：{ex.Message}");
+            }
+
+            return 0;
         }
 
         private async Task<bool> TryTriggerManualEmergencyStopAsync()

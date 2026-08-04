@@ -419,6 +419,21 @@
                             <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
                                 <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="X2下压正常到位" />
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
+                                               Text="Z下降时X2亮后，先急停并读取停止位置；与目标Z误差在此范围内则恢复伺服并继续流程，超出范围才暂停。" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="允许误差" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding PressureStopNormalPositionToleranceMm, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ParamTextBoxStyle}" Width="60" />
+                                        <TextBlock Text="mm" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                                <StackPanel>
                                     <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Y轴偏移 (mm)" />
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                         <TextBlock Text="大孔(100)" Style="{StaticResource ParamLabelStyle}" />
