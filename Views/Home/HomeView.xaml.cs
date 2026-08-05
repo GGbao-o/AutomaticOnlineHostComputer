@@ -72,6 +72,17 @@ public partial class HomeView : UserControl
     }
 
     /// <summary>
+    /// 仅恢复阻塞候选派发的上位机内存状态；不清设备寄存器、不写PLC，也不替代应急处理。
+    /// </summary>
+    private void ResetMemoryState_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new MemoryStateResetDialog(
+            _viewModel.ResetSkewMemoryState,
+            _viewModel.ResetGrindingMemoryState) { Owner = Window.GetWindow(this) };
+        dialog.ShowDialog();
+    }
+
+    /// <summary>
     /// 应急处理中心 — 斜床/动平衡/研磨特殊故障后的软件状态和锁清理。
     /// <para>⚠ 不控制天车动作, 不退磁; 执行前必须人工确认现场安全。</para>
     /// </summary>

@@ -2111,6 +2111,14 @@ public sealed class HomeViewModel : ObservableObject
         };
     }
 
+    /// <summary>只复位斜床上料候选的内存状态，不写PLC/CNC、不操作锁或动作账本。</summary>
+    public string ResetSkewMemoryState(int line, string bedCode) => line switch
+    {
+        1 => _line1RearEngine?.ResetSkewMemoryState(bedCode) ?? "1号线后端引擎未初始化",
+        2 => _line2RearEngine?.ResetSkewMemoryState(bedCode) ?? "2号线后端引擎未初始化",
+        _ => $"无效线体: {line}"
+    };
+
     /// <summary>人工确认来源位异常后的唯一账本结案入口；不会发送设备动作或自动恢复线路。</summary>
     public string ResolveRearSourceManualReservation(int line, string rackCode, FlowActionManualResolution resolution)
     {
@@ -2339,6 +2347,10 @@ public sealed class HomeViewModel : ObservableObject
 
     public string GetGrindingEmergencyInfo(string target)
         => _grindingEngine?.GetGrindingEmergencyInfo(target) ?? "研磨引擎未初始化";
+
+    /// <summary>只复位研磨机上料候选的内存状态，不写PLC、不操作锁或动作账本。</summary>
+    public string ResetGrindingMemoryState(string stationCode)
+        => _grindingEngine?.ResetGrindingMemoryState(stationCode) ?? "研磨引擎未初始化";
 
     public async Task<string> EmergencyClearGrindingAsync(string target, bool skipDeviceClear,
         bool resumeAfterClear, CancellationToken ct = default)

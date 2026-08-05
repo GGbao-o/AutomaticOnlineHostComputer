@@ -1,0 +1,107 @@
+<Window
+    x:Class="AutomaticOnlineHostComputer.Views.Home.Dialogs.MemoryStateResetDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="恢复设备内存状态"
+    Width="690"
+    Height="590"
+    Background="{StaticResource AppBackgroundBrush}"
+    ResizeMode="CanResize"
+    WindowStartupLocation="CenterOwner">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border
+            Grid.Row="0"
+            Margin="0,0,0,12"
+            Padding="12"
+            Background="#26323F"
+            CornerRadius="6">
+            <StackPanel>
+                <TextBlock
+                    FontSize="16"
+                    FontWeight="Bold"
+                    Foreground="White"
+                    Text="恢复设备内存状态" />
+                <TextBlock
+                    Margin="0,6,0,0"
+                    FontSize="12"
+                    Foreground="#FFFBBF24"
+                    Text="仅用于 PLC 已正常请求、天车尚未派发，但旧内存状态阻塞候选的情况。斜床仅清 St/Wp；研磨机仅清 State/PendingWorkpiece。不会写 PLC/CNC、移动设备、清信号、快照、账本或锁。"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <GroupBox
+                Grid.Row="0"
+                Margin="0,0,0,6"
+                Padding="8"
+                Header="1号线斜床：St → Idle，Wp → null">
+                <UniformGrid Columns="5">
+                    <Button Margin="2" Height="30" Tag="ST108" Click="Line1SkewButton_Click" Content="1号斜床 ST108" />
+                    <Button Margin="2" Height="30" Tag="ST109" Click="Line1SkewButton_Click" Content="2号斜床 ST109" />
+                    <Button Margin="2" Height="30" Tag="ST111" Click="Line1SkewButton_Click" Content="3号斜床 ST111" />
+                    <Button Margin="2" Height="30" Tag="ST110" Click="Line1SkewButton_Click" Content="4号斜床 ST110" />
+                    <Button Margin="2" Height="30" Tag="ST112" Click="Line1SkewButton_Click" Content="5号斜床 ST112" />
+                </UniformGrid>
+            </GroupBox>
+
+            <GroupBox
+                Grid.Row="1"
+                Margin="0,0,0,6"
+                Padding="8"
+                Header="2号线斜床：St → Idle，Wp → null">
+                <UniformGrid Columns="5">
+                    <Button Margin="2" Height="30" Tag="ST606" Click="Line2SkewButton_Click" Content="ST606" />
+                    <Button Margin="2" Height="30" Tag="ST607" Click="Line2SkewButton_Click" Content="ST607" />
+                    <Button Margin="2" Height="30" Tag="ST608" Click="Line2SkewButton_Click" Content="ST608" />
+                    <Button Margin="2" Height="30" Tag="ST609" Click="Line2SkewButton_Click" Content="ST609" />
+                    <Button Margin="2" Height="30" Tag="ST610" Click="Line2SkewButton_Click" Content="ST610" />
+                </UniformGrid>
+            </GroupBox>
+
+            <GroupBox
+                Grid.Row="2"
+                Margin="0,0,0,6"
+                Padding="8"
+                Header="研磨机：State → Idle，PendingWorkpiece → null">
+                <UniformGrid Columns="4">
+                    <Button Margin="2" Height="30" Tag="ST701" Click="GrinderButton_Click" Content="ST701（新代）" />
+                    <Button Margin="2" Height="30" Tag="ST702" Click="GrinderButton_Click" Content="ST702（新代）" />
+                    <Button Margin="2" Height="30" Tag="ST703" Click="GrinderButton_Click" Content="ST703（西门子）" />
+                    <Button Margin="2" Height="30" Tag="ST704" Click="GrinderButton_Click" Content="ST704（西门子）" />
+                </UniformGrid>
+            </GroupBox>
+
+            <GroupBox Grid.Row="3" Margin="0,8,0,0" Padding="5" Header="操作日志">
+                <RichTextBox
+                    x:Name="TxtLog"
+                    Background="White"
+                    FontFamily="Consolas"
+                    FontSize="11"
+                    IsReadOnly="True"
+                    VerticalScrollBarVisibility="Auto" />
+            </GroupBox>
+        </Grid>
+
+        <StackPanel
+            Grid.Row="2"
+            Margin="0,12,0,0"
+            HorizontalAlignment="Right"
+            Orientation="Horizontal">
+            <Button Width="80" Height="28" Click="BtnClose_Click" Content="关闭" />
+        </StackPanel>
+    </Grid>
+</Window>

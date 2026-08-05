@@ -465,6 +465,26 @@ public sealed class GrindingFlowEngine : IDisposable
     }
 
     /// <summary>
+    /// 仅复位目标研磨机阻塞新上料候选的内存字段。不会写PLC，也不会清信号、恢复标记、动作账本或锁。
+    /// 仅适用于PLC已正常请求数据且研磨天车尚未派发的人工恢复场景。
+    /// </summary>
+    public string ResetGrindingMemoryState(string stationCode)
+    {
+        var grinder = _grinders.FirstOrDefault(g =>
+            string.Equals(g.StationCode, stationCode, StringComparison.OrdinalIgnoreCase));
+        if (grinder == null) return $"未找到研磨机 {stationCode}";
+
+        string oldState = GrinderStateText(grinder.State);
+        string oldWorkpiece = grinder.PendingWorkpiece?.IdentityText ?? "无";
+        grinder.State = GrinderState.Idle;
+        grinder.PendingWorkpiece = null;
+
+        string result = $"{grinder.StationCode} 内存状态已复位：状态 {oldState}→空闲，Pending工件 {oldWorkpiece}→无。未写PLC，未清信号、恢复标记、快照、账本或锁。";
+        Console.WriteLine($"[GrindingEngine] {result}");
+        return result;
+    }
+
+    /// <summary>
     /// 已暂停研磨天车动作的人工账本结案。只在现场已确认工件真实位置后调用；
     /// 不发送天车、磁铁、PLC/CNC命令，也不自动恢复研磨引擎。四种结论只改变能够
     /// 被现场事实证明的软件账本，避免把“已在目标”错误清成Idle或把“仍在来源”丢失。

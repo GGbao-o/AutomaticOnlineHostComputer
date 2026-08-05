@@ -1087,6 +1087,25 @@ public sealed class Line2RearFlowEngine : IDisposable
             $"信号新鲜: {(bed.SignalFresh ? "是" : "否")}");
     }
 
+    /// <summary>
+    /// 仅复位目标斜床阻塞新上料候选的内存字段。不会写PLC/CNC，也不会清信号、恢复标记、动作账本或锁。
+    /// 仅适用于PLC已正常请求数据且后天车尚未派发的人工恢复场景。
+    /// </summary>
+    public string ResetSkewMemoryState(string bedCode)
+    {
+        var bed = FindBed(bedCode);
+        if (bed == null) return $"2号线未找到斜床 {bedCode}";
+
+        string oldState = StateText(bed.St);
+        string oldWorkpiece = bed.Wp?.IdentityText ?? "无";
+        bed.St = SkewState.Idle;
+        bed.Wp = null;
+
+        string result = $"{bed.Code} 内存状态已复位：状态 {oldState}→空闲，工件 {oldWorkpiece}→无。未写PLC/CNC，未清信号、快照、账本或锁。";
+        Console.WriteLine($"[Line2Rear] {result}");
+        return result;
+    }
+
     private static string SettleManualRearLoadForEmergency(SkewCtx bed)
     {
         // 斜床应急的前提是操作员已人工处理工件、磁铁和天车安全位置。

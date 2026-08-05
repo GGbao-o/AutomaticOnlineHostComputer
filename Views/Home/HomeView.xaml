@@ -231,6 +231,12 @@
                         Content="应急处理"
                         Style="{StaticResource WarningButtonStyle}" />
                     <Button
+                        Width="104"
+                        Margin="0,0,8,0"
+                        Click="ResetMemoryState_Click"
+                        Content="恢复内存状态"
+                        Style="{StaticResource WarningButtonStyle}" />
+                    <Button
                         Width="84"
                         Click="ClearMachineStatus_Click"
                         Content="清空状态"
