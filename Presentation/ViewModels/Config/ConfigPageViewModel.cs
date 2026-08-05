@@ -107,6 +107,9 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
 
     public int GrindingSafeZ { get => _cfg.Grinding.SafeZHeight; set { _cfg.Grinding.SafeZHeight = value; OnPropertyChanged(); } }
     public int GrindingCraneNo { get => _cfg.Grinding.CraneNo; set { _cfg.Grinding.CraneNo = value; OnPropertyChanged(); } }
+    public int GrindingLoadingTimeoutMinutes { get => _cfg.Grinding.LoadingTimeoutMinutes; set { _cfg.Grinding.LoadingTimeoutMinutes = value; OnPropertyChanged(); } }
+    public int GrindingWaitingForUnloadTimeoutMinutes { get => _cfg.Grinding.WaitingForUnloadTimeoutMinutes; set { _cfg.Grinding.WaitingForUnloadTimeoutMinutes = value; OnPropertyChanged(); } }
+    public int GrindingUnloadingTimeoutMinutes { get => _cfg.Grinding.UnloadingTimeoutMinutes; set { _cfg.Grinding.UnloadingTimeoutMinutes = value; OnPropertyChanged(); } }
 
     public int LargeBoreOffset { get => _cfg.SkewBed.LargeBoreOffset; set { _cfg.SkewBed.LargeBoreOffset = value; OnPropertyChanged(); } }
     public int SmallBoreOffset { get => _cfg.SkewBed.SmallBoreOffset; set { _cfg.SkewBed.SmallBoreOffset = value; OnPropertyChanged(); } }

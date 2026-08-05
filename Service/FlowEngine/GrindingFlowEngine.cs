@@ -706,14 +706,14 @@ public sealed class GrindingFlowEngine : IDisposable
     /// <para>
     /// 调度策略（每 500ms 一轮）：
     ///   ① 扫描 4 台研磨机状态
-    ///   ② 卡死检测（Loading/Unloading/WaitingForUnload 超过安全观察时间 → 暂停并保留状态）
+    ///   ② 卡死检测（Loading/WaitingForUnload/Unloading 按各自观察时间超时 → 暂停并保留状态）
     ///   ③ 加工监视（Machining + 请求下料=1 → WaitingForUnload）
-    ///   ④ 【优先】下料（WaitingForUnload + 天车空闲 → 取料放到 ST710）
-    ///   ⑤ 【次之】上料（Idle+请求数据=1 + 天车空闲 → ST709 取料送研磨机）
+    ///   ④ 【优先】上料（Idle+请求数据=1 + 天车空闲 → ST709 取料送研磨机）
+    ///   ⑤ 【回退】下料（上料不可派发时，WaitingForUnload + 天车空闲 → 取料放到 ST710）
     /// </para>
     /// <para>
     /// 设计要点：
-    ///   - 下料优先于上料：研磨机被成品占着必须优先卸出，否则永远无法接新单
+    ///   - 上料优先于下料：上料不可派发时才尝试下料，保持研磨机的供料节拍
     ///   - 天车一次只做一件事（_craneLock SemaphoreSlim），但多台研磨机可同时加工
     ///   - 缓存为空或研磨机吞不下时，工件自动放回队列 FIFO 等待
     /// </para>
@@ -786,23 +786,21 @@ public sealed class GrindingFlowEngine : IDisposable
                 if (_cycleCount % 10 == 1) Console.WriteLine($"[GrindingEngine] 扫描 缓存={CachedCount} | {summary}");
 
                 // ═══════════════════════════════════════════════════════════
-                //  ② 卡死检测(专用配置GrindingStuckTimeoutMs)
+                //  ② 卡死检测(按上料中/等待下料/下料中的独立分钟配置)
                 //    安全第一: 现场运动可能很慢, 这里只做“暂停+保留状态”, 绝不强制Idle/清缓存。
                 //    研磨上下料存在工件在天车/机台/下料架三种物理位置, 超时不能推断工件已经安全。
                 // ═══════════════════════════════════════════════════════════
-                var stuckTimeoutMs = Math.Max(_cfg.Grinding.GrindingStuckTimeoutMs, 10 * 60 * 1000);
-                var stuckTimeout = TimeSpan.FromMilliseconds(stuckTimeoutMs);
                 bool pausedByTimeout = false;
                 foreach (var g in _grinders)
                 {
-                    if ((g.State == GrinderState.Loading || g.State == GrinderState.Unloading || g.State == GrinderState.WaitingForUnload)
-                        && DateTime.UtcNow - g.StateChangedAt > stuckTimeout)
+                    TimeSpan stateTimeout = GetStateTimeout(g.State);
+                    if (stateTimeout > TimeSpan.Zero && DateTime.UtcNow - g.StateChangedAt > stateTimeout)
                     {
-                        Console.WriteLine($"[GrindingEngine] ⚠ [{g.Name}] 状态={g.State} 超过安全观察时间 {stuckTimeout.TotalSeconds}s(配置{_cfg.Grinding.GrindingStuckTimeoutMs}ms, 实际按更长保护值)，暂停等待人工确认");
+                        Console.WriteLine($"[GrindingEngine] ⚠ [{g.Name}] 状态={g.State} 超过安全观察时间 {stateTimeout.TotalMinutes:F0}分钟，暂停等待人工确认");
                         Console.WriteLine($"[GrindingEngine] ⚠ [{g.Name}] 保留 PendingWorkpiece={g.PendingWorkpiece?.IdentityText ?? "null"}，不回Idle、不清缓存，避免慢动作时数据/现场断开");
                         g.StateChangedAt = DateTime.UtcNow;
                         _paused = true;
-                        OnSafetyAlarm?.Invoke($"{g.Name}状态={g.State}超过安全观察时间{stuckTimeout.TotalSeconds:F0}秒。研磨引擎已暂停，PendingWorkpiece={g.PendingWorkpiece?.IdentityText ?? "null"}，请人工确认现场。");
+                        OnSafetyAlarm?.Invoke($"{g.Name}状态={g.State}超过安全观察时间{stateTimeout.TotalMinutes:F0}分钟。研磨引擎已暂停，PendingWorkpiece={g.PendingWorkpiece?.IdentityText ?? "null"}，请人工确认现场。");
                         pausedByTimeout = true;
                     }
                 }
@@ -832,10 +830,16 @@ public sealed class GrindingFlowEngine : IDisposable
                 }
 
                 // ═══════════════════════════════════════════════════════════
-                //  ④ 优先：下料（WaitingForUnload + 天车空闲 → 取料放ST710研磨机下料架
-                //  下料架MC64: M720=1同时表示无板且允许天车放版
-                //  成品工件占着研磨机，必须优先卸出才能接下一单
+                //  ④ 优先：上料；只有未能启动上料时才进入下料回退。
                 // ═══════════════════════════════════════════════════════════
+                bool loadDispatched = await TryDispatchLoadAsync(ct);
+                if (!loadDispatched)
+                {
+                    // ═══════════════════════════════════════════════════════════
+                    //  ⑤ 回退：下料（WaitingForUnload + 天车空闲 → 取料放ST710研磨机下料架）
+                    //  下料架MC64: M720=1同时表示无板且允许天车放版
+                    //  没有上料可派发时，优先卸出成品以腾出下一轮产能。
+                    // ═══════════════════════════════════════════════════════════
                 foreach (var g in _grinders)
                 {
                     if (g.State == GrinderState.WaitingForUnload)
@@ -924,85 +928,6 @@ public sealed class GrindingFlowEngine : IDisposable
                         }
                     }
                 }
-
-                // ═══════════════════════════════════════════════════════════
-                //  ⑤ 上料: Idle+请求数据=1 + M730=1 + 缓存有数据 + 天车空闲 → 取料送研磨机
-                //    检查顺序: ①研磨机就绪→②M730有板→③缓存有数据→④抢天车锁(条件满足后再抢,减少无效竞争)
-                // ═══════════════════════════════════════════════════════════
-                // ── 先检查条件(锁外), 条件满足再抢锁 ──
-                //找到可用的研磨机 空闲 请求数据
-                var ready = FindReadyGrinder();
-                if (ready == null)
-                {
-                    if (_cycleCount % 10 == 1)
-                    {
-                        var idleNoReq = _grinders.Where(g => g.State == GrinderState.Idle && !g.LastRequestData).ToList();
-                        if (idleNoReq.Count > 0)
-                            Console.WriteLine($"[GrindingEngine] ⏳ 有空闲但无请求数据：{string.Join(", ", idleNoReq.Select(g => g.StationCode))}");
-                        else
-                            Console.WriteLine("[GrindingEngine] ⏳ 无就绪研磨机(全部忙或未联机)");
-                    }
-                    // 等待分支也必须节流。否则这里会跳过循环尾部延时，持续高速扫描4台PLC，
-                    // 反而挤占正常握手、页面状态读取和其它共享通信任务。
-                    await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
-                    continue;
-                }
-
-                // ── 检查研磨上料架3号位M730是否有板(MC65读, 传送带末端可取位) ──
-                // 主循环这里只做派发前预检; 真正去ST709取料前会再读一次M730,
-                // 防止预检后链条/现场信号变化导致天车空取。
-                bool m730HasPlate = await ConfirmGrindingFeedReadyAsync("主循环预检", ct);
-                if (!m730HasPlate)
-                {
-                    await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
-                    continue; // M730无板→等下轮
-                }
-
-                // ── 条件全部满足, 抢天车锁 ──
-                if (await _craneLock.WaitAsync(0, ct))
-                {
-                    bool dispatchGateHeld = false;
-                    try
-                    {
-                        await _grindingDispatchGate.WaitAsync(ct);
-                        dispatchGateHeld = true;
-                        // 应急可能在本轮顶部暂停检查之后发生，拿到天车锁后必须再次确认。
-                        if (_paused)
-                        {
-                            _craneLock.Release();
-                            Console.WriteLine($"[GrindingEngine] [{ready.Name}] 应急/暂停已生效, 放弃本次上料派发并释放天车锁");
-                        }
-                        else if (!await EnsureGrindingCranePositionReadyAsync("研磨上料任务出队前", ct))
-                        {
-                            // 必须在FIFO出队和研磨机状态变化前校验，报警时任务仍留在原缓存。
-                            _craneLock.Release();
-                        }
-                        // ── 缓存有数据 → 出队上料 ──
-                        else if (TryDequeueCache(out var wp))
-                        {
-                            var actionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                            int actionVersion = BeginGrindingAction(actionCts, completion, "上料", ready.StationCode);
-                            Console.WriteLine($"[GrindingEngine] 🚀 分配 {wp.IdentityText} d={wp.Diameter} → {ready.Name}({ready.StationCode}) 请求数据=1 缓存剩余={CachedCount}");
-                            ready.State = GrinderState.Loading;
-                            ready.StateChangedAt = DateTime.UtcNow;
-                            ready.PendingWorkpiece = wp;
-                            // 上料动作和完成信号必须在派发门闩内一起登记，避免应急漏等旧动作。
-                            _ = ProcessWorkpieceAsync(ready, wp, actionVersion, actionCts, completion);
-                        }
-                        else
-                        {
-                            // 缓存空→释放天车锁
-                            _craneLock.Release();
-                            if (_cycleCount % 10 == 1)
-                                Console.WriteLine($"[GrindingEngine] ⏳ 有研磨机{ready.Name}就绪但缓存空, 等待工件入队...");
-                        }
-                    }
-                    finally
-                    {
-                        if (dispatchGateHeld) _grindingDispatchGate.Release();
-                        else _craneLock.Release(); // 等待派发门闩时取消，不能遗留已取得的天车锁。
-                    }
                 }
 
                 // ── 下料刚完成→缩短延迟快速响应上料; 否则正常500ms ──
@@ -1018,6 +943,101 @@ public sealed class GrindingFlowEngine : IDisposable
             }
         }
         Console.WriteLine("[GrindingEngine] 引擎已停止");
+    }
+
+    /// <summary>按研磨机当前中间状态读取独立的观察时间；非中间状态不参与超时暂停。</summary>
+    private TimeSpan GetStateTimeout(GrinderState state) => state switch
+    {
+        GrinderState.Loading => ToSafeStateTimeout(_cfg.Grinding.LoadingTimeoutMinutes, 10),
+        GrinderState.WaitingForUnload => ToSafeStateTimeout(_cfg.Grinding.WaitingForUnloadTimeoutMinutes, 20),
+        GrinderState.Unloading => ToSafeStateTimeout(_cfg.Grinding.UnloadingTimeoutMinutes, 10),
+        _ => TimeSpan.Zero
+    };
+
+    /// <summary>配置页或手工 JSON 写入 0/负数时回退默认值，禁止立即触发安全暂停。</summary>
+    private static TimeSpan ToSafeStateTimeout(int configuredMinutes, int defaultMinutes) =>
+        TimeSpan.FromMinutes(configuredMinutes > 0 ? configuredMinutes : defaultMinutes);
+
+    /// <summary>
+    /// 尝试派发一笔研磨上料。只有任务已登记、天车锁已交给后台上料流程时才返回 true；
+    /// 任何上料前置条件不满足时返回 false，以便同一轮回退检查下料。
+    /// </summary>
+    private async Task<bool> TryDispatchLoadAsync(CancellationToken ct)
+    {
+        var ready = FindReadyGrinder();
+        if (ready == null)
+        {
+            if (_cycleCount % 10 == 1)
+            {
+                var idleNoReq = _grinders.Where(g => g.State == GrinderState.Idle && !g.LastRequestData).ToList();
+                if (idleNoReq.Count > 0)
+                    Console.WriteLine($"[GrindingEngine] ⏳ 有空闲但无请求数据：{string.Join(", ", idleNoReq.Select(g => g.StationCode))}");
+                else
+                    Console.WriteLine("[GrindingEngine] ⏳ 无就绪研磨机(全部忙或未联机)");
+            }
+            return false;
+        }
+
+        if (CachedCount == 0)
+        {
+            if (_cycleCount % 10 == 1)
+                Console.WriteLine($"[GrindingEngine] ⏳ 有研磨机{ready.Name}就绪但缓存空, 等待工件入队...");
+            return false;
+        }
+
+        // 主循环预检；真正去 ST709 取料前仍会再次读取 M730，防止现场信号变化导致空取。
+        if (!await ConfirmGrindingFeedReadyAsync("上料优先预检", ct))
+            return false;
+
+        if (!await _craneLock.WaitAsync(0, ct))
+        {
+            if (ShouldLogWaiting("crane-busy:grinding-load"))
+                Console.WriteLine($"[GrindingEngine] [{ready.Name}] ⏳ 上料条件满足但天车锁忙，等待下一轮...");
+            return false;
+        }
+
+        bool dispatchGateHeld = false;
+        bool craneLockTransferred = false;
+        try
+        {
+            await _grindingDispatchGate.WaitAsync(ct);
+            dispatchGateHeld = true;
+
+            // 应急可能在本轮顶部暂停检查之后发生，拿到天车锁后必须再次确认。
+            if (_paused)
+            {
+                Console.WriteLine($"[GrindingEngine] [{ready.Name}] 应急/暂停已生效, 放弃本次上料派发并释放天车锁");
+                return false;
+            }
+
+            // 必须在 FIFO 出队和研磨机状态变化前校验，报警时任务仍留在原缓存。
+            if (!await EnsureGrindingCranePositionReadyAsync("研磨上料任务出队前", ct))
+                return false;
+
+            if (!TryDequeueCache(out var wp))
+            {
+                if (_cycleCount % 10 == 1)
+                    Console.WriteLine($"[GrindingEngine] [{ready.Name}] 上料派发时缓存已空，改为检查下料");
+                return false;
+            }
+
+            var actionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            int actionVersion = BeginGrindingAction(actionCts, completion, "上料", ready.StationCode);
+            Console.WriteLine($"[GrindingEngine] 🚀 分配 {wp.IdentityText} d={wp.Diameter} → {ready.Name}({ready.StationCode}) 请求数据=1 缓存剩余={CachedCount}");
+            ready.State = GrinderState.Loading;
+            ready.StateChangedAt = DateTime.UtcNow;
+            ready.PendingWorkpiece = wp;
+            // 上料动作和完成信号必须在派发门闩内一起登记，避免应急漏等旧动作。
+            _ = ProcessWorkpieceAsync(ready, wp, actionVersion, actionCts, completion);
+            craneLockTransferred = true;
+            return true;
+        }
+        finally
+        {
+            if (dispatchGateHeld) _grindingDispatchGate.Release();
+            if (!craneLockTransferred) _craneLock.Release();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -2721,7 +2741,7 @@ public sealed class GrinderContext
     public DateTime LastGrindStoneAlarmHeartbeatAtUtc { get; set; } = DateTime.MinValue;
     /// <summary>状态扫描版本。超时/失败会递增版本, 防止旧扫描任务晚返回后覆盖已清空的信号。</summary>
     public long SignalScanVersion;
-    /// <summary>进入当前状态的时间戳(UTC), 用于卡死检测:超过HandshakeTimeoutMs强制回Idle</summary>
+    /// <summary>进入当前状态的时间戳(UTC)，用于按状态观察时间检测；超时后暂停并保留状态。</summary>
     public DateTime StateChangedAt { get; set; } = DateTime.UtcNow;
 
     public GrinderContext(string code, string name, PlcGrinderService.GrinderType type)

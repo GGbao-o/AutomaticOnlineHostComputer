@@ -419,6 +419,30 @@
                             <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
                                 <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="研磨状态超时（分钟）" />
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
+                                               Text="对应状态超过设定时间会暂停研磨引擎，并保留现场工件和状态等待人工确认。" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="上料中 Loading" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding GrindingLoadingTimeoutMinutes, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="55" />
+                                        <TextBlock Text="分钟" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="等待下料" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding GrindingWaitingForUnloadTimeoutMinutes, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="55" />
+                                        <TextBlock Text="分钟" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="下料中 Unloading" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding GrindingUnloadingTimeoutMinutes, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="55" />
+                                        <TextBlock Text="分钟" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                                <StackPanel>
                                     <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="X2下压正常到位" />
                                     <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
                                                Text="Z下降时X2亮后，先急停并读取停止位置；与目标Z误差在此范围内则恢复伺服并继续流程，超出范围才暂停。" />

@@ -224,8 +224,12 @@ public sealed class MotionConfig
         public int X11StableDelayMs { get; set; } = 3000;
         /// <summary>PLC/CNC信号等待轮询间隔(ms)。200ms对秒级信号变化足够，降低Modbus轮询压力</summary>
         public int SignalPollIntervalMs { get; set; } = 200;
-        /// <summary>研磨机状态卡死观察时间(ms)。超时后暂停引擎并保留状态/缓存，等待人工确认。</summary>
-        public int GrindingStuckTimeoutMs { get; set; } = 60_000;
+        /// <summary>研磨天车上料中观察时间(分钟)。超时后暂停引擎并保留状态/缓存，等待人工确认。</summary>
+        public int LoadingTimeoutMinutes { get; set; } = 10;
+        /// <summary>研磨机加工完成后等待天车下料的观察时间(分钟)。</summary>
+        public int WaitingForUnloadTimeoutMinutes { get; set; } = 20;
+        /// <summary>研磨天车下料中观察时间(分钟)。超时后暂停引擎并保留状态/缓存，等待人工确认。</summary>
+        public int UnloadingTimeoutMinutes { get; set; } = 10;
     }
 
     /// <summary>平衡引擎安全参数</summary>
