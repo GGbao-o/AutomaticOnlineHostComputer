@@ -1146,6 +1146,22 @@ public sealed class Line1RearFlowEngine : IDisposable
             : $"动作账本=已结清持件{onCarrierCount}条、目标待交接{targetPendingCount}条后天车上料快照(工件已人工移走/放弃)";
     }
 
+    private static string SettleManualRearUnloadOnCarrierForEmergency(SkewCtx bed)
+    {
+        // 下料目标待交接表示工件可能已在 M817/M720，必须走目标位专用结案器。
+        const string flowScope = "1号线后天车下料";
+        FlowActionSnapshot[] snapshots = FlowActionManualRegistry.Snapshot()
+            .Where(item => item.FlowScope == flowScope &&
+                           item.Source == bed.Code &&
+                           item.Disposition == FlowActionDisposition.PauseOnCarrier)
+            .ToArray();
+        foreach (FlowActionSnapshot snapshot in snapshots)
+            FlowActionManualRegistry.Remove(snapshot.OperationId);
+        return snapshots.Length == 0
+            ? "动作账本=无后天车下料持件快照"
+            : $"动作账本=已结清{snapshots.Length}条后天车下料持件快照(工件已人工移走/放弃)";
+    }
+
     /// <summary>
     /// 人工处理完成后的上位机应急清空。
     /// 只清本地斜床状态/缓存和释放软件锁, 不给天车或CNC写动作指令。
@@ -1234,6 +1250,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         ClearRearCraneTask();
         MarkSkewManualCleared(bed);
         logs.Add(SettleManualRearLoadForEmergency(bed));
+        logs.Add(SettleManualRearUnloadOnCarrierForEmergency(bed));
         logs.Add(deviceClearLog);
         if (resumeAfterClear && IsRunning) _paused = false;
         _fastNextCycle = true;
