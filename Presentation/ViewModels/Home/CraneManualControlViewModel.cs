@@ -74,6 +74,8 @@ public sealed class CraneManualControlViewModel : ObservableObject
                 OnPropertyChanged(nameof(IsCraneSelected));
                 IsMagnetizeFeedback = null;
                 IsDemagnetizeFeedback = null;
+                IsPlateFeedback = null;
+                IsMagnetPressureFeedback = null;
                 Console.WriteLine($"[CraneManualVM] 已切换设备 -> {SelectedDeviceDisplay}");
                 // 切换设备后自动读取当前位置填入目标输入框; 读状态请求合并, 不阻塞下拉框/UI。
                 RequestRefreshTargetsFromCurrent();
@@ -147,6 +149,44 @@ public sealed class CraneManualControlViewModel : ObservableObject
         true => "退磁到位（X7=1）",
         false => "退磁未到位（X7=0）",
         null => "退磁读取未知"
+    };
+
+    private bool? _isPlateFeedback;
+    /// <summary>X11有板实际反馈；null 表示本次未能读取，不能按无板解释。</summary>
+    public bool? IsPlateFeedback
+    {
+        get => _isPlateFeedback;
+        private set
+        {
+            if (SetField(ref _isPlateFeedback, value))
+                OnPropertyChanged(nameof(PlateFeedbackText));
+        }
+    }
+
+    private bool? _isMagnetPressureFeedback;
+    /// <summary>X2磁铁下压限位实际反馈；null 表示本次未能读取，不能按未触发解释。</summary>
+    public bool? IsMagnetPressureFeedback
+    {
+        get => _isMagnetPressureFeedback;
+        private set
+        {
+            if (SetField(ref _isMagnetPressureFeedback, value))
+                OnPropertyChanged(nameof(MagnetPressureFeedbackText));
+        }
+    }
+
+    public string PlateFeedbackText => IsPlateFeedback switch
+    {
+        true => "有板（X11=1）",
+        false => "无板（X11=0）",
+        null => "有板读取未知"
+    };
+
+    public string MagnetPressureFeedbackText => IsMagnetPressureFeedback switch
+    {
+        true => "下压触发（X2=1）",
+        false => "下压未触发（X2=0）",
+        null => "下压读取未知"
     };
 
     // ═══════════════════════════════════════════════════════════════
@@ -440,8 +480,8 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     /// <summary>手动按钮超时（秒）。后台轮询可能占着 Modbus 锁，手动命令设短超时避免 UI 卡死。</summary>
     private static readonly TimeSpan ManualCommandTimeout = TimeSpan.FromSeconds(5);
-    /// <summary>读取当前位置和X6/X7实际反馈；设备忙时快速放弃，防止页面像被按钮卡住。</summary>
-    private static readonly TimeSpan RefreshPositionTimeout = TimeSpan.FromSeconds(2);
+    /// <summary>读取当前位置及 X6/X7/X11/X2 实际反馈；设备忙时快速放弃，防止页面像被按钮卡住。</summary>
+    private static readonly TimeSpan RefreshPositionTimeout = TimeSpan.FromSeconds(3);
     private int _refreshPositionRequested;
     private int _refreshPositionRunning;
 
@@ -712,19 +752,25 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     private async Task RefreshTargetsFromCurrentAsync()
     {
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 读取当前位置填入目标框");
+        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 读取当前位置和设备实际反馈");
         IsMagnetizeFeedback = null;
         IsDemagnetizeFeedback = null;
+        IsPlateFeedback = null;
+        IsMagnetPressureFeedback = null;
         ManualDeviceItem? deviceAtRead = SelectedDevice;
         try
         {
             using var cts = new CancellationTokenSource(RefreshPositionTimeout);
             var service = await EnsureConnectedServiceAsync(cts.Token);
             var status = await service.ReadStatusAsync(cts.Token);
-            bool? magnetizeFeedback = await TryReadMagnetFeedbackAsync(
+            bool? magnetizeFeedback = await TryReadXFeedbackAsync(
                 service, CraneAddress.D_X6_MagnetizeOk, "X6充磁到位", cts.Token);
-            bool? demagnetizeFeedback = await TryReadMagnetFeedbackAsync(
+            bool? demagnetizeFeedback = await TryReadXFeedbackAsync(
                 service, CraneAddress.D_X7_DemagnetizeOk, "X7退磁到位", cts.Token);
+            bool? plateFeedback = await TryReadXFeedbackAsync(
+                service, CraneAddress.D_X11_HasPlate, "X11有板", cts.Token);
+            bool? magnetPressureFeedback = await TryReadXFeedbackAsync(
+                service, CraneAddress.D_X2_MagnetLimit, "X2磁铁下压限位", cts.Token);
 
             // 读途中切换设备时，旧设备状态不能覆盖新设备已清空/待刷新的状态。
             if (!ReferenceEquals(deviceAtRead, SelectedDevice)) return;
@@ -743,6 +789,8 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
             IsMagnetizeFeedback = magnetizeFeedback;
             IsDemagnetizeFeedback = demagnetizeFeedback;
+            IsPlateFeedback = plateFeedback;
+            IsMagnetPressureFeedback = magnetPressureFeedback;
         }
         catch (Exception ex)
         {
@@ -750,7 +798,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
         }
     }
 
-    private async Task<bool?> TryReadMagnetFeedbackAsync(
+    private async Task<bool?> TryReadXFeedbackAsync(
         CraneService service, int address, string label, CancellationToken ct)
     {
         try
