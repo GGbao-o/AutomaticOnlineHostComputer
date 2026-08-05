@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Media;
+using AutomaticOnlineHostComputer.Communication.DeviceAddresses;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
@@ -123,8 +124,11 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
             var s = await _service.ReadStatusAsync();
             if (s != null)
             {
+                bool x6MagnetOk = false, x7DemagnetOk = false;
+                try { x6MagnetOk = await _service.ReadXBitAsync(CraneAddress.D_X6_MagnetizeOk); } catch { }
+                try { x7DemagnetOk = await _service.ReadXBitAsync(CraneAddress.D_X7_DemagnetizeOk); } catch { }
                 Console.WriteLine($"[ManipulatorVM] [{Name}] 首次读取成功");
-                UpdateUi(s);
+                UpdateUi(s, x6MagnetOk, x7DemagnetOk);
             }
         }
         catch (Exception ex)
@@ -185,7 +189,17 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
                 var s = await _service.ReadStatusAsync(ct);
                 if (s != null)
                 {
-                    UpdateUi(s);
+                    bool x6MagnetOk = false, x7DemagnetOk = false;
+                    try
+                    {
+                        x6MagnetOk = await _service.ReadXBitAsync(CraneAddress.D_X6_MagnetizeOk, ct);
+                        x7DemagnetOk = await _service.ReadXBitAsync(CraneAddress.D_X7_DemagnetizeOk, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ManipulatorVM] [{Name}] ⚠ 读取X6/X7线圈异常：{ex.Message}");
+                    }
+                    UpdateUi(s, x6MagnetOk, x7DemagnetOk);
                 }
                 else
                 {
@@ -221,8 +235,8 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>将 <see cref="CraneStatus"/> 映射到卡片行（仅展示 Y/Z，无 X 轴）。</summary>
-    private void UpdateUi(CraneStatus s)
+    /// <summary>将状态与X6充磁、X7退磁反馈映射到卡片行（机械手仅展示 Y/Z）。</summary>
+    private void UpdateUi(CraneStatus s, bool x6MagnetOk, bool x7DemagnetOk)
     {
         var fault = s.Fault != 0 || s.ServoAlarm != 0 || s.PlcAlarm != 0;
         ConnectedBrush = fault ? Brushes.Red : Brushes.LimeGreen;
@@ -230,7 +244,7 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
         Line2 = s.Busy == 1 ? $"执行任务 #{s.CurrentTaskNo}" : "无任务";
         Line3 = s.Mode == 1 ? "自动模式" : (s.Mode == 2 ? "手动模式" : $"模式未知({s.Mode})");
         Line4 = s.RunConditionMissing != 0 ? $"条件缺失 0x{s.RunConditionMissing:X4}" : "运行条件满足";
-        Line5 = $"坐标 | Y={s.YPos}  Z={s.ZPos}";
+        Line5 = $"X6={(x6MagnetOk ? 1 : 0)} X7={(x7DemagnetOk ? 1 : 0)} D5029={s.HasRoller} | Y={s.YPos} Z={s.ZPos}";
 
         // 坐标只用于页面实时显示和流程安全判断，不再周期写入数据库。
     }

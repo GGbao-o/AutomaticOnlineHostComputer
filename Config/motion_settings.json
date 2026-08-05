@@ -24,6 +24,8 @@
   "craneSpeeds": {
     "1": {
       "tolerance": 5,
+      "xyTimeoutMs": 120000,
+      "zTimeoutMs": 120000,
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
@@ -44,6 +46,8 @@
     },
     "2": {
       "tolerance": 5,
+      "xyTimeoutMs": 120000,
+      "zTimeoutMs": 120000,
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
@@ -64,6 +68,8 @@
     },
     "3": {
       "tolerance": 5,
+      "xyTimeoutMs": 120000,
+      "zTimeoutMs": 120000,
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
@@ -84,6 +90,8 @@
     },
     "4": {
       "tolerance": 5,
+      "xyTimeoutMs": 120000,
+      "zTimeoutMs": 120000,
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
@@ -104,6 +112,8 @@
     },
     "5": {
       "tolerance": 5,
+      "xyTimeoutMs": 120000,
+      "zTimeoutMs": 120000,
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
@@ -126,6 +136,8 @@
   "manipulatorSpeeds": {
     "1": {
       "tolerance": 5,
+      "xyTimeoutMs": 120000,
+      "zTimeoutMs": 120000,
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
@@ -146,6 +158,8 @@
     },
     "2": {
       "tolerance": 5,
+      "xyTimeoutMs": 120000,
+      "zTimeoutMs": 120000,
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
@@ -166,6 +180,8 @@
     },
     "3": {
       "tolerance": 5,
+      "xyTimeoutMs": 120000,
+      "zTimeoutMs": 120000,
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
@@ -242,7 +258,7 @@
     "absolutePerDisplayDirections": {},
     "stationTargets": {
       "1": {
-        "ST713": -2764,
+        "ST713": -2770,
         "ST107": 419,
         "ST105": 1347,
         "ST101": 1919,
@@ -302,11 +318,11 @@
     },
     "stationTargets": {
       "1": {
-        "ST713": -1,
+        "ST713": 478,
         "ST107": -1,
-        "ST105": 611,
-        "ST101": 627,
-        "ST106": 626
+        "ST105": 596,
+        "ST101": 612,
+        "ST106": 611
       },
       "2": {
         "ST105": -751,

@@ -1087,22 +1087,25 @@ public sealed class Line2RearFlowEngine : IDisposable
             $"信号新鲜: {(bed.SignalFresh ? "是" : "否")}");
     }
 
-    private static string SettleManualLoadOnCarrierForEmergency(SkewCtx bed)
+    private static string SettleManualRearLoadForEmergency(SkewCtx bed)
     {
         // 斜床应急的前提是操作员已人工处理工件、磁铁和天车安全位置。
-        // 因此只结清“本线后天车上料 → 本斜床”的已确认持件快照；
-        // 来源冻结和目标待交接快照必须保留给各自的专用结案入口。
+        // 已人工放弃本斜床工件时，结清“本线后天车上料 → 本斜床”的持件和目标待交接快照。
+        // 来源冻结快照必须保留：X11未确认时工件仍可能在中转架。
         const string flowScope = "2号线后天车上料";
         FlowActionSnapshot[] snapshots = FlowActionManualRegistry.Snapshot()
             .Where(item => item.FlowScope == flowScope &&
                            item.Target == bed.Code &&
-                           item.Disposition == FlowActionDisposition.PauseOnCarrier)
+                           (item.Disposition == FlowActionDisposition.PauseOnCarrier ||
+                            item.Disposition == FlowActionDisposition.PauseAtTargetPendingHandoff))
             .ToArray();
+        int onCarrierCount = snapshots.Count(item => item.Disposition == FlowActionDisposition.PauseOnCarrier);
+        int targetPendingCount = snapshots.Count(item => item.Disposition == FlowActionDisposition.PauseAtTargetPendingHandoff);
         foreach (FlowActionSnapshot snapshot in snapshots)
             FlowActionManualRegistry.Remove(snapshot.OperationId);
         return snapshots.Length == 0
-            ? "动作账本=无后天车持件快照"
-            : $"动作账本=已结清{snapshots.Length}条后天车持件快照(工件已人工移走/放弃)";
+            ? "动作账本=无后天车持件或目标待交接快照"
+            : $"动作账本=已结清持件{onCarrierCount}条、目标待交接{targetPendingCount}条后天车上料快照(工件已人工移走/放弃)";
     }
 
     /// <summary>
@@ -1192,7 +1195,7 @@ public sealed class Line2RearFlowEngine : IDisposable
         // 仅应急软件状态已成功清空后才清展示任务；超时/失败路径会在此前return，保留旧身份供人工确认。
         ClearRearCraneTask();
         MarkSkewManualCleared(bed);
-        logs.Add(SettleManualLoadOnCarrierForEmergency(bed));
+        logs.Add(SettleManualRearLoadForEmergency(bed));
         logs.Add(deviceClearLog);
         if (resumeAfterClear && IsRunning) _paused = false;
         _fastNextCycle = true;
