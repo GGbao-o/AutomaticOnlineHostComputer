@@ -374,7 +374,9 @@
     "handshakeTimeoutMs": 120000,
     "x11StableDelayMs": 3000,
     "signalPollIntervalMs": 200,
-    "grindingStuckTimeoutMs": 60000
+    "loadingTimeoutMinutes": 10,
+    "waitingForUnloadTimeoutMinutes": 20,
+    "unloadingTimeoutMinutes": 10
   },
   "balancing": {
     "rearCraneSafeX": -3000,
