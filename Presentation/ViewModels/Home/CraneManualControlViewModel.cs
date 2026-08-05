@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using AutomaticOnlineHostComputer.Communication.DeviceAddresses;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
@@ -71,6 +72,8 @@ public sealed class CraneManualControlViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(SelectedDeviceDisplay));
                 OnPropertyChanged(nameof(IsCraneSelected));
+                IsMagnetizeFeedback = null;
+                IsDemagnetizeFeedback = null;
                 Console.WriteLine($"[CraneManualVM] 已切换设备 -> {SelectedDeviceDisplay}");
                 // 切换设备后自动读取当前位置填入目标输入框; 读状态请求合并, 不阻塞下拉框/UI。
                 RequestRefreshTargetsFromCurrent();
@@ -107,6 +110,44 @@ public sealed class CraneManualControlViewModel : ObservableObject
     public bool IsCraneSelected => _selectedDevice != null;
     /// <summary>当前选中设备是否是纯天车（有 X 轴/接液盘）。机械手为 false。</summary>
     private bool IsCraneOnly => _selectedDevice?.DeviceType == ManualDeviceType.Crane;
+
+    private bool? _isMagnetizeFeedback;
+    /// <summary>X6充磁到位实际反馈；null 表示本次未能读取，不能按未充磁解释。</summary>
+    public bool? IsMagnetizeFeedback
+    {
+        get => _isMagnetizeFeedback;
+        private set
+        {
+            if (SetField(ref _isMagnetizeFeedback, value))
+                OnPropertyChanged(nameof(MagnetizeFeedbackText));
+        }
+    }
+
+    private bool? _isDemagnetizeFeedback;
+    /// <summary>X7退磁到位实际反馈；null 表示本次未能读取，不能按已退磁解释。</summary>
+    public bool? IsDemagnetizeFeedback
+    {
+        get => _isDemagnetizeFeedback;
+        private set
+        {
+            if (SetField(ref _isDemagnetizeFeedback, value))
+                OnPropertyChanged(nameof(DemagnetizeFeedbackText));
+        }
+    }
+
+    public string MagnetizeFeedbackText => IsMagnetizeFeedback switch
+    {
+        true => "充磁到位（X6=1）",
+        false => "充磁未到位（X6=0）",
+        null => "充磁读取未知"
+    };
+
+    public string DemagnetizeFeedbackText => IsDemagnetizeFeedback switch
+    {
+        true => "退磁到位（X7=1）",
+        false => "退磁未到位（X7=0）",
+        null => "退磁读取未知"
+    };
 
     // ═══════════════════════════════════════════════════════════════
     //  点动距离 / 相对移动距离
@@ -399,8 +440,8 @@ public sealed class CraneManualControlViewModel : ObservableObject
 
     /// <summary>手动按钮超时（秒）。后台轮询可能占着 Modbus 锁，手动命令设短超时避免 UI 卡死。</summary>
     private static readonly TimeSpan ManualCommandTimeout = TimeSpan.FromSeconds(5);
-    /// <summary>读取当前位置只是读XYZ, 必须轻量; 设备忙时快速放弃, 防止页面像被按钮卡住。</summary>
-    private static readonly TimeSpan RefreshPositionTimeout = TimeSpan.FromMilliseconds(800);
+    /// <summary>读取当前位置和X6/X7实际反馈；设备忙时快速放弃，防止页面像被按钮卡住。</summary>
+    private static readonly TimeSpan RefreshPositionTimeout = TimeSpan.FromSeconds(2);
     private int _refreshPositionRequested;
     private int _refreshPositionRunning;
 
@@ -558,6 +599,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
         var service = await EnsureConnectedServiceAsync(cts.Token);
         await service.MagnetOnAsync(cts.Token);
         Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：充磁 D4510=2→0");
+        RequestRefreshTargetsFromCurrent();
     }
 
     private async Task MagnetOffAsync()
@@ -567,6 +609,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
         var service = await EnsureConnectedServiceAsync(cts.Token);
         await service.MagnetOffAsync(cts.Token);
         Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ✔ 写入寄存器成功：退磁 D4511=2→0");
+        RequestRefreshTargetsFromCurrent();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -670,26 +713,54 @@ public sealed class CraneManualControlViewModel : ObservableObject
     private async Task RefreshTargetsFromCurrentAsync()
     {
         Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 读取当前位置填入目标框");
+        IsMagnetizeFeedback = null;
+        IsDemagnetizeFeedback = null;
+        ManualDeviceItem? deviceAtRead = SelectedDevice;
         try
         {
             using var cts = new CancellationTokenSource(RefreshPositionTimeout);
             var service = await EnsureConnectedServiceAsync(cts.Token);
             var status = await service.ReadStatusAsync(cts.Token);
+            bool? magnetizeFeedback = await TryReadMagnetFeedbackAsync(
+                service, CraneAddress.D_X6_MagnetizeOk, "X6充磁到位", cts.Token);
+            bool? demagnetizeFeedback = await TryReadMagnetFeedbackAsync(
+                service, CraneAddress.D_X7_DemagnetizeOk, "X7退磁到位", cts.Token);
+
+            // 读途中切换设备时，旧设备状态不能覆盖新设备已清空/待刷新的状态。
+            if (!ReferenceEquals(deviceAtRead, SelectedDevice)) return;
+
             if (status == null)
             {
                 Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 读取当前位置失败(status=null)，目标框未更新");
-                return;
+            }
+            else
+            {
+                AbsXTarget = IsCraneOnly ? status.XPos : 0;
+                AbsYTarget = status.YPos;
+                AbsZTarget = status.ZPos;
+                Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 当前位置已填入目标框 X={AbsXTarget} Y={AbsYTarget} Z={AbsZTarget}");
             }
 
-            AbsXTarget = IsCraneOnly ? status.XPos : 0;
-            AbsYTarget = status.YPos;
-            AbsZTarget = status.ZPos;
-
-            Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 当前位置已填入目标框 X={AbsXTarget} Y={AbsYTarget} Z={AbsZTarget}");
+            IsMagnetizeFeedback = magnetizeFeedback;
+            IsDemagnetizeFeedback = demagnetizeFeedback;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] 读取当前位置异常：{ex.Message}");
+        }
+    }
+
+    private async Task<bool?> TryReadMagnetFeedbackAsync(
+        CraneService service, int address, string label, CancellationToken ct)
+    {
+        try
+        {
+            return await service.ReadXBitAsync(address, ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] {label}读取失败: {ex.Message}");
+            return null;
         }
     }
 
