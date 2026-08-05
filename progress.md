@@ -76,3 +76,19 @@
 - Phase 4（交叉验证与分级）：complete。
 - Phase 5（审查报告）：complete。
 - 已执行测试：217 passed，0 failed。业务代码未被本次审查修改。
+
+## Session: 2026-08-05
+
+### Phase 6: 取放料源码流程说明
+
+- **Status:** complete
+- 用户要求把斜床上下料、研磨机上下料和机械手取料的实际前置条件与方法内步骤，补充到 `Docs/全线业务逻辑详解.md`；新内容必须使用编号步骤，不使用表格。
+- 已依据 `Line1/2FrontFlowEngine`、`Line1/2RearFlowEngine` 与 `GrindingFlowEngine` 逐段核对，并将派发前条件、进入方法体后的动作步骤直接并入既有的机械手、后天车上/下料和研磨章节；未新增章节，也未使用表格。
+- 校验：`git diff --check` 未报告空白错误；只修改文档和本次工作记录，未修改运行代码。
+
+### Phase 7: 主页面内存状态复位
+
+- **Status:** complete
+- 新增主页面“恢复内存状态”按钮和单设备选择窗口。斜床仅复位 `St=Idle`、`Wp=null`；研磨机仅复位 `State=Idle`、`PendingWorkpiece=null`。
+- 复位入口不会写 PLC/CNC、不会移动设备，也不清请求信号、`CompletionExported`、`WpRecoveryNeeded`、异常快照、动作账本或锁。
+- 验证：聚焦契约测试 4/4 通过；构建成功（0 warning、0 error）；全量测试 228/228 通过。

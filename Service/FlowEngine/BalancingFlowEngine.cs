@@ -2254,21 +2254,34 @@ public sealed class BalancingFlowEngine : IDisposable
 
     /// <summary>
     /// M3放ST010/M720前二次确认M720允许放版。
-    /// 与下料预检一致直接读M720所在字; 读失败或未允许放版都按危险处理, 由外层暂停/人工确认。
+    /// M3已经持件、Z升至安全高度并持有M821/M720位置锁时，M720=0仅表示目标暂时不可放料：
+    /// 保持当前位置和锁，轮询等待M720恢复。通信读取失败或取消仍由外层按安全异常处理。
     /// </summary>
     private async Task ConfirmM720EmptyBeforePlaceAsync(CancellationToken ct)
     {
         if (_mc65?.IsConnected != true)
             throw new InvalidOperationException("M720二次确认失败: MC65未连接");
 
-        var r = await ReadMc65MAlignedWordAsync(720, "M720二次确认", ct);
-        if (r.IntValues.Length < 1)
-            throw new InvalidOperationException("M720二次确认失败: MC65返回字数不足");
+        int waitCount = 0;
+        while (true)
+        {
+            var r = await ReadMc65MAlignedWordAsync(720, "M720二次确认", ct);
+            if (r.IntValues.Length < 1)
+                throw new InvalidOperationException("M720二次确认失败: MC65返回字数不足");
 
-        bool canPlace = (r.IntValues[0] & 1) != 0; // M720 bit0, 1=允许放版
-        Console.WriteLine($"[平衡引擎] [M3] 二次确认M720={(canPlace ? "可放料" : "不可放料")} rawM720=0x{r.IntValues[0]:X4}");
-        if (!canPlace)
-            throw new InvalidOperationException("M720二次确认=不可放料, 禁止M3放料");
+            bool canPlace = (r.IntValues[0] & 1) != 0; // M720 bit0, 1=允许放版
+            if (canPlace)
+            {
+                if (waitCount > 0)
+                    Console.WriteLine($"[平衡引擎] [M3] ✓ M720恢复可放料，结束持板等待，继续放料");
+                return;
+            }
+
+            waitCount++;
+            if (waitCount == 1 || waitCount % 10 == 0)
+                Console.WriteLine($"[平衡引擎] [M3] ⚠ M720二次确认=不可放料，保持持板等待（{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1}秒） rawM720=0x{r.IntValues[0]:X4}");
+            await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
+        }
     }
 
     private async Task ConfirmMc63HandshakeBitAsync(int bitOffset, string signalName, CancellationToken ct)
