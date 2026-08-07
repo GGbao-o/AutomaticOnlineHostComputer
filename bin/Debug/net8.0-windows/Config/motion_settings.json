@@ -365,6 +365,13 @@
       }
     }
   },
+  "absFineTuneVerification": {
+    "beforeReadSettleDelayMs": 700,
+    "stableSampleCount": 3,
+    "stableSampleIntervalMs": 250,
+    "stableRangeMm": 1,
+    "afterMoveMinSettleDelayMs": 700
+  },
   "grinding": {
     "zFactor1": 0.9537,
     "zFactor2": 0.866,

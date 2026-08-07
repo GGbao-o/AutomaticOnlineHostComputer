@@ -132,7 +132,10 @@ public sealed class FineTuneInstrumentationContractTests
         Assert.Single(Regex.Matches(helper, @"\b_crane\.MoveAbsoluteAsync\(").Cast<Match>());
         Assert.Equal(3, Regex.Matches(helper, @"\bTask\.Delay\(").Count);
         Assert.Contains("private const int StableReadMaxAttempts = 20;", helper, StringComparison.Ordinal);
-        Assert.Contains("private const int StableReadRequiredCount = 5;", helper, StringComparison.Ordinal);
+        Assert.Contains("cfg.AbsFineTuneVerification.GetValidated()", helper, StringComparison.Ordinal);
+        Assert.Contains("verification.StableSampleCount", helper, StringComparison.Ordinal);
+        Assert.Contains("verification.StableSampleIntervalMs", helper, StringComparison.Ordinal);
+        Assert.Contains("verification.StableRangeMm", helper, StringComparison.Ordinal);
         Assert.Contains("private const int FineTuneMaxAttempts = 2;", helper, StringComparison.Ordinal);
         Assert.Contains("private const int AbsFeedbackRefreshMaxRetries = 3;", helper, StringComparison.Ordinal);
         Assert.Contains("for (int fineTuneAttempt = 1; fineTuneAttempt <= FineTuneMaxAttempts; fineTuneAttempt++)", helper, StringComparison.Ordinal);
@@ -234,7 +237,7 @@ public sealed class FineTuneInstrumentationContractTests
                 reporter, CreateFailureContext(), "ACT-CANCEL", null, cts.Token));
 
         Assert.Empty(reporter.Contexts);
-        Assert.Equal(new[] { "delay:Phase:500" }, execution.Calls);
+        Assert.Equal(new[] { "delay:Phase:1200" }, execution.Calls);
     }
 
     [Fact]
@@ -259,7 +262,33 @@ public sealed class FineTuneInstrumentationContractTests
         Assert.Equal(1, position.StageReadCount.Value);
         Assert.Equal(1, position.TotalReadCount.Value);
         Assert.Equal("微调前", position.FailureStage.Value);
-        Assert.Equal(new[] { "delay:Phase:500", "read" }, execution.Calls);
+        Assert.Equal(new[] { "delay:Phase:1200", "read" }, execution.Calls);
+    }
+
+    [Fact]
+    public async Task Fine_tune_uses_the_shared_configured_verification_timing_snapshot()
+    {
+        MotionConfig config = ActiveConfig();
+        config.AbsFineTuneVerification.BeforeReadSettleDelayMs = 1300;
+        config.AbsFineTuneVerification.StableSampleCount = 2;
+        config.AbsFineTuneVerification.StableSampleIntervalMs = 150;
+        config.AbsFineTuneVerification.StableRangeMm = 1;
+        config.AbsFineTuneVerification.AfterMoveMinSettleDelayMs = 1700;
+
+        CraneStatus before = Status(100, 990, z: 50);
+        CraneStatus after = Status(110, 1000, z: 50);
+        var execution = new FakeFineTuneExecution(Repeat(before, 2).Concat(Repeat(after, 2)));
+
+        await ExecuteAsync(execution, config, new CapturingReporter(), "ACT-CONFIGURED-TIMING");
+
+        Assert.Equal(new[]
+        {
+            "delay:Phase:1300",
+            "read", "delay:StableRead:150", "read",
+            "move:1:110:-1:-1:5:30000",
+            "delay:Phase:1700",
+            "read", "delay:StableRead:150", "read"
+        }, execution.Calls);
     }
 
     [Fact]
@@ -305,12 +334,12 @@ public sealed class FineTuneInstrumentationContractTests
         OperationalEventContext reported = Assert.Single(reporter.Contexts);
         Assert.Equal(20, reported.Evidence.Position.StageReadCount.Value);
         Assert.Equal(20, reported.Evidence.Position.TotalReadCount.Value);
-        Assert.Equal(5, reported.Evidence.Position.StableSampleCount.Value);
+        Assert.Equal(3, reported.Evidence.Position.StableSampleCount.Value);
         Assert.Equal("微调前", reported.Evidence.Position.FailureStage.Value);
         Assert.Empty(execution.Moves);
         Assert.Equal(20, execution.Calls.Count(call => call == "read"));
         Assert.Equal(21, execution.Calls.Count(call => call.StartsWith("delay:", StringComparison.Ordinal)));
-        var expected = new List<string> { "delay:Phase:500" };
+        var expected = new List<string> { "delay:Phase:1200" };
         for (int index = 0; index < 20; index++)
         {
             expected.Add("read");
@@ -322,7 +351,7 @@ public sealed class FineTuneInstrumentationContractTests
     [Fact]
     public async Task Excessive_correction_reports_without_sending_move()
     {
-        var execution = new FakeFineTuneExecution(Repeat(Status(100, 900, z: 23), 5));
+        var execution = new FakeFineTuneExecution(Repeat(Status(100, 900, z: 23), 3));
         var reporter = new CapturingReporter();
 
         InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => ExecuteAsync(
@@ -334,8 +363,8 @@ public sealed class FineTuneInstrumentationContractTests
         Assert.Equal(DeviceCommandState.NotSent, reported.Evidence.Position.XFineTuneCommand.State);
         Assert.Equal(PhysicalConclusionCode.CommandNotSent, reported.PhysicalConclusion.Code);
         Assert.Empty(execution.Moves);
-        Assert.Equal(5, execution.Calls.Count(call => call == "read"));
-        var expected = new List<string> { "delay:Phase:500" };
+        Assert.Equal(3, execution.Calls.Count(call => call == "read"));
+        var expected = new List<string> { "delay:Phase:1200" };
         AddStableReadCalls(expected);
         Assert.Equal(expected, execution.Calls);
     }
@@ -343,7 +372,7 @@ public sealed class FineTuneInstrumentationContractTests
     [Fact]
     public async Task Move_exception_keeps_original_error_marks_result_unknown_and_invalidates_only_xy()
     {
-        var execution = new FakeFineTuneExecution(Repeat(Status(100, 990, z: 321), 5));
+        var execution = new FakeFineTuneExecution(Repeat(Status(100, 990, z: 321), 3));
         var reporter = new CapturingReporter();
         var original = new InvalidOperationException("fake move failed");
         execution.MoveBehavior = _ => Task.FromException(original);
@@ -363,7 +392,7 @@ public sealed class FineTuneInstrumentationContractTests
         Assert.Equal(110, position.LastSentDisplayTargetX.Value);
         Assert.Single(execution.Moves);
         Assert.Equal(new MoveInvocation(1, 110, -1, -1, 5, 30_000), execution.Moves[0]);
-        var expected = new List<string> { "delay:Phase:500" };
+        var expected = new List<string> { "delay:Phase:1200" };
         AddStableReadCalls(expected);
         expected.Add("move:1:110:-1:-1:5:30000");
         Assert.Equal(expected, execution.Calls);
@@ -374,7 +403,7 @@ public sealed class FineTuneInstrumentationContractTests
     {
         CraneStatus initial = Status(100, 990, 200, 2000, 40);
         CraneStatus afterX = Status(110, 1000, 200, 1990, 40);
-        var execution = new FakeFineTuneExecution(Repeat(initial, 5).Concat(Repeat(afterX, 5)).ToArray());
+        var execution = new FakeFineTuneExecution(Repeat(initial, 3).Concat(Repeat(afterX, 3)).ToArray());
         var reporter = new CapturingReporter();
         var original = new InvalidOperationException("second Y move failed");
         execution.MoveBehavior = move => move.Index == 2 ? Task.FromException(original) : Task.CompletedTask;
@@ -392,10 +421,10 @@ public sealed class FineTuneInstrumentationContractTests
         Assert.Equal(PhysicalConclusionCode.CommandResultUnknown, reported.PhysicalConclusion.Code);
         Assert.Equal(new MoveInvocation(1, 110, -1, -1, 5, 30_000), execution.Moves[0]);
         Assert.Equal(new MoveInvocation(2, -1, 210, -1, 5, 30_000), execution.Moves[1]);
-        var expected = new List<string> { "delay:Phase:500" };
+        var expected = new List<string> { "delay:Phase:1200" };
         AddStableReadCalls(expected);
         expected.Add("move:1:110:-1:-1:5:30000");
-        expected.Add("delay:Phase:600");
+        expected.Add("delay:Phase:1200");
         AddStableReadCalls(expected);
         expected.Add("move:2:-1:210:-1:5:30000");
         Assert.Equal(expected, execution.Calls);
@@ -406,8 +435,8 @@ public sealed class FineTuneInstrumentationContractTests
     {
         CraneStatus before = Status(100, 990, z: 50);
         CraneStatus staleFeedback = Status(110, 990, z: 50);
-        CraneStatus?[] statuses = Repeat(before, 5)
-            .Concat(Repeat(staleFeedback, 20))
+        CraneStatus?[] statuses = Repeat(before, 3)
+            .Concat(Repeat(staleFeedback, 12))
             .Cast<CraneStatus?>()
             .ToArray();
         var execution = new FakeFineTuneExecution(statuses);
@@ -420,15 +449,15 @@ public sealed class FineTuneInstrumentationContractTests
         OperationalEventContext reported = Assert.Single(reporter.Contexts);
         Assert.Equal("第1次X绝对编码器反馈最终未跟随", reported.Evidence.Position.FailureStage.Value);
         Assert.Equal(3, reported.Evidence.Position.FeedbackRereadCount.Value);
-        Assert.Equal(25, reported.Evidence.Position.TotalReadCount.Value);
-        Assert.Equal(25, execution.Calls.Count(call => call == "read"));
+        Assert.Equal(15, reported.Evidence.Position.TotalReadCount.Value);
+        Assert.Equal(15, execution.Calls.Count(call => call == "read"));
         Assert.Single(execution.Moves);
-        Assert.Equal(25, execution.Calls.Count(call => call.StartsWith("delay:", StringComparison.Ordinal)));
+        Assert.Equal(15, execution.Calls.Count(call => call.StartsWith("delay:", StringComparison.Ordinal)));
 
-        var expected = new List<string> { "delay:Phase:500" };
+        var expected = new List<string> { "delay:Phase:1200" };
         AddStableReadCalls(expected);
         expected.Add("move:1:110:-1:-1:5:30000");
-        expected.Add("delay:Phase:600");
+        expected.Add("delay:Phase:1200");
         AddStableReadCalls(expected);
         for (int retry = 0; retry < 3; retry++)
         {
@@ -444,9 +473,9 @@ public sealed class FineTuneInstrumentationContractTests
         CraneStatus initial = Status(100, 990, 200, 2000, 60);
         CraneStatus afterXWithYDrift = Status(110, 1000, 200, 1990, 60);
         CraneStatus afterYWithXDrift = Status(110, 990, 210, 2000, 60);
-        CraneStatus?[] statuses = Repeat(initial, 5)
-            .Concat(Repeat(afterXWithYDrift, 5))
-            .Concat(Repeat(afterYWithXDrift, 5))
+        CraneStatus?[] statuses = Repeat(initial, 3)
+            .Concat(Repeat(afterXWithYDrift, 3))
+            .Concat(Repeat(afterYWithXDrift, 3))
             .Cast<CraneStatus?>()
             .ToArray();
         var execution = new FakeFineTuneExecution(statuses);
@@ -460,19 +489,19 @@ public sealed class FineTuneInstrumentationContractTests
         PositionEvidence position = reported.Evidence.Position;
         Assert.Equal("第二次微调后最终复核仍超差", position.FailureStage.Value);
         Assert.Equal(2, position.FineTuneAttemptCount.Value);
-        Assert.Equal(15, position.TotalReadCount.Value);
+        Assert.Equal(9, position.TotalReadCount.Value);
         Assert.Equal(DeviceCommandState.Acknowledged, position.XFineTuneCommand.State);
         Assert.Equal(DeviceCommandState.Acknowledged, position.YFineTuneCommand.State);
         Assert.Equal(PhysicalConclusionCode.ManualConfirmationRequired, reported.PhysicalConclusion.Code);
         Assert.Equal(2, execution.Moves.Count);
 
-        var expected = new List<string> { "delay:Phase:500" };
+        var expected = new List<string> { "delay:Phase:1200" };
         AddStableReadCalls(expected);
         expected.Add("move:1:110:-1:-1:5:30000");
-        expected.Add("delay:Phase:600");
+        expected.Add("delay:Phase:1200");
         AddStableReadCalls(expected);
         expected.Add("move:2:-1:210:-1:5:30000");
-        expected.Add("delay:Phase:600");
+        expected.Add("delay:Phase:1200");
         AddStableReadCalls(expected);
         Assert.Equal(expected, execution.Calls);
     }
@@ -589,13 +618,13 @@ public sealed class FineTuneInstrumentationContractTests
     private static IEnumerable<CraneStatus> Repeat(CraneStatus status, int count) =>
         Enumerable.Repeat(status, count);
 
-    private static void AddStableReadCalls(ICollection<string> calls)
+    private static void AddStableReadCalls(ICollection<string> calls, int sampleCount = 3, int intervalMs = 200)
     {
-        for (int index = 0; index < 5; index++)
+        for (int index = 0; index < sampleCount; index++)
         {
             calls.Add("read");
-            if (index < 4)
-                calls.Add("delay:StableRead:200");
+            if (index < sampleCount - 1)
+                calls.Add($"delay:StableRead:{intervalMs}");
         }
     }
 

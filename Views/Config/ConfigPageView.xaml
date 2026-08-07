@@ -266,6 +266,29 @@
                         <CheckBox IsChecked="{Binding YAbsFineTuneEnabled}" Margin="0,0,0,10"
                                   Content="启用 Y 绝对编码器微调 (需现场标定后开启)" FontSize="12" />
 
+                        <TextBlock Text="微调读取验证（所有天车共用）" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <TextBlock Text="XY到位后等待 (ms):" Style="{StaticResource ParamLabelStyle}" />
+                            <TextBox Text="{Binding AbsFineTuneBeforeReadSettleDelayMs, UpdateSourceTrigger=PropertyChanged}" Width="60" Height="26"
+                                     Style="{StaticResource ParamTextBoxStyle}" Margin="0,0,14,0" />
+                            <TextBlock Text="稳定采样次数:" Style="{StaticResource ParamLabelStyle}" />
+                            <TextBox Text="{Binding AbsFineTuneStableSampleCount, UpdateSourceTrigger=PropertyChanged}" Width="50" Height="26"
+                                     Style="{StaticResource ParamTextBoxStyle}" Margin="0,0,14,0" />
+                            <TextBlock Text="采样间隔 (ms):" Style="{StaticResource ParamLabelStyle}" />
+                            <TextBox Text="{Binding AbsFineTuneStableSampleIntervalMs, UpdateSourceTrigger=PropertyChanged}" Width="60" Height="26"
+                                     Style="{StaticResource ParamTextBoxStyle}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="稳定范围 (mm):" Style="{StaticResource ParamLabelStyle}" />
+                            <TextBox Text="{Binding AbsFineTuneStableRangeMm, UpdateSourceTrigger=PropertyChanged}" Width="50" Height="26"
+                                     Style="{StaticResource ParamTextBoxStyle}" Margin="0,0,14,0" />
+                            <TextBlock Text="微调后最短等待 (ms):" Style="{StaticResource ParamLabelStyle}" />
+                            <TextBox Text="{Binding AbsFineTuneAfterMoveMinSettleDelayMs, UpdateSourceTrigger=PropertyChanged}" Width="60" Height="26"
+                                     Style="{StaticResource ParamTextBoxStyle}" />
+                        </StackPanel>
+                        <TextBlock Margin="0,0,0,10" FontSize="11" Foreground="{StaticResource TextMutedBrush}"
+                                   Text="修改即时影响后续微调；点击保存后写入配置文件。稳定表示窗口内显示坐标和绝对编码器的最大值减最小值均不超过稳定范围。" />
+
                         <!-- 通用参数 -->
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                             <TextBlock Text="偏差允许 (mm):" Style="{StaticResource ParamLabelStyle}" />

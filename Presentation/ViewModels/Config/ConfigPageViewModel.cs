@@ -118,6 +118,31 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     public int XAbsMaxAdjustMm { get => _cfg.XAbsFineTune.MaxAdjustMm; set { _cfg.XAbsFineTune.MaxAdjustMm = value; OnPropertyChanged(); } }
     public int YAbsToleranceMm { get => _cfg.YAbsFineTune.ToleranceMm; set { _cfg.YAbsFineTune.ToleranceMm = value; OnPropertyChanged(); } }
     public int YAbsMaxAdjustMm { get => _cfg.YAbsFineTune.MaxAdjustMm; set { _cfg.YAbsFineTune.MaxAdjustMm = value; OnPropertyChanged(); } }
+    public int AbsFineTuneBeforeReadSettleDelayMs
+    {
+        get => _cfg.AbsFineTuneVerification.BeforeReadSettleDelayMs;
+        set { _cfg.AbsFineTuneVerification.BeforeReadSettleDelayMs = value; OnPropertyChanged(); }
+    }
+    public int AbsFineTuneStableSampleCount
+    {
+        get => _cfg.AbsFineTuneVerification.StableSampleCount;
+        set { _cfg.AbsFineTuneVerification.StableSampleCount = value; OnPropertyChanged(); }
+    }
+    public int AbsFineTuneStableSampleIntervalMs
+    {
+        get => _cfg.AbsFineTuneVerification.StableSampleIntervalMs;
+        set { _cfg.AbsFineTuneVerification.StableSampleIntervalMs = value; OnPropertyChanged(); }
+    }
+    public int AbsFineTuneStableRangeMm
+    {
+        get => _cfg.AbsFineTuneVerification.StableRangeMm;
+        set { _cfg.AbsFineTuneVerification.StableRangeMm = value; OnPropertyChanged(); }
+    }
+    public int AbsFineTuneAfterMoveMinSettleDelayMs
+    {
+        get => _cfg.AbsFineTuneVerification.AfterMoveMinSettleDelayMs;
+        set { _cfg.AbsFineTuneVerification.AfterMoveMinSettleDelayMs = value; OnPropertyChanged(); }
+    }
     public int PressureStopNormalPositionToleranceMm
     {
         get => _cfg.Safety.PressureStopNormalPositionToleranceMm;
@@ -183,6 +208,11 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
         // Tab6 — PropertyChanged 驱动 UI 刷新
         OnPropertyChanged(nameof(XAbsFineTuneEnabled));
         OnPropertyChanged(nameof(YAbsFineTuneEnabled));
+        OnPropertyChanged(nameof(AbsFineTuneBeforeReadSettleDelayMs));
+        OnPropertyChanged(nameof(AbsFineTuneStableSampleCount));
+        OnPropertyChanged(nameof(AbsFineTuneStableSampleIntervalMs));
+        OnPropertyChanged(nameof(AbsFineTuneStableRangeMm));
+        OnPropertyChanged(nameof(AbsFineTuneAfterMoveMinSettleDelayMs));
         OnPropertyChanged(nameof(Crane1HomeX)); OnPropertyChanged(nameof(Crane2HomeX));
         OnPropertyChanged(nameof(Crane3HomeX)); OnPropertyChanged(nameof(Crane4HomeX));
         OnPropertyChanged(nameof(Crane5HomeX));

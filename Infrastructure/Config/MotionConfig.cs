@@ -43,6 +43,8 @@ public sealed class MotionConfig
     public AxisAbsFineTuneSection XAbsFineTune { get; set; } = new();
     /// <summary>Y绝对编码器下降前微调参数。仅适用于1～5号天车，默认关闭，完成现场标定后才可启用。</summary>
     public AxisAbsFineTuneSection YAbsFineTune { get; set; } = new() { Enabled = false };
+    /// <summary>所有天车共用的绝对编码器微调验证节奏。</summary>
+    public AbsFineTuneVerificationSection AbsFineTuneVerification { get; set; } = new();
 
     /// <summary>单轴速度/加减速参数</summary>
     public sealed class AxisSpeed
@@ -202,6 +204,50 @@ public sealed class MotionConfig
             return direction;
         }
     }
+
+    /// <summary>
+    /// XY 绝对编码器微调前后，读取 PLC/编码器状态的共享验证节奏。
+    /// 配置页的修改会即时写入此对象；每次微调开始时会取一次经校验的快照。
+    /// </summary>
+    public sealed class AbsFineTuneVerificationSection
+    {
+        /// <summary>XY 到位后、首次读取稳定窗口前的等待时间。</summary>
+        public int BeforeReadSettleDelayMs { get; set; } = 1200;
+        /// <summary>稳定窗口内要求的连续采样次数。</summary>
+        public int StableSampleCount { get; set; } = 3;
+        /// <summary>稳定窗口的采样间隔。</summary>
+        public int StableSampleIntervalMs { get; set; } = 200;
+        /// <summary>稳定窗口中显示坐标与绝对编码器各自允许的最大范围。</summary>
+        public int StableRangeMm { get; set; } = 1;
+        /// <summary>微调动作完成后的最短等待时间。</summary>
+        public int AfterMoveMinSettleDelayMs { get; set; } = 1200;
+
+        /// <summary>将手工 JSON 中的非法值回退为现场确认的安全默认值。</summary>
+        public FineTuneVerificationValues GetValidated()
+        {
+            int beforeReadSettle = BeforeReadSettleDelayMs is >= 100 and <= 10_000
+                ? BeforeReadSettleDelayMs : 1200;
+            int stableSampleCount = StableSampleCount is >= 2 and <= 20
+                ? StableSampleCount : 3;
+            int stableSampleInterval = StableSampleIntervalMs is >= 50 and <= 2_000
+                ? StableSampleIntervalMs : 200;
+            int stableRange = StableRangeMm is >= 0 and <= 20
+                ? StableRangeMm : 1;
+            int afterMoveMinSettle = AfterMoveMinSettleDelayMs is >= 100 and <= 2_000
+                ? AfterMoveMinSettleDelayMs : 1200;
+
+            return new FineTuneVerificationValues(
+                beforeReadSettle, stableSampleCount, stableSampleInterval, stableRange, afterMoveMinSettle);
+        }
+    }
+
+    /// <summary>单次微调生命周期内固定使用的验证节奏快照。</summary>
+    public readonly record struct FineTuneVerificationValues(
+        int BeforeReadSettleDelayMs,
+        int StableSampleCount,
+        int StableSampleIntervalMs,
+        int StableRangeMm,
+        int AfterMoveMinSettleDelayMs);
 
     /// <summary>研磨自动流程参数</summary>
     public GrindingSection Grinding { get; set; } = new();
