@@ -1814,6 +1814,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         string operationalActionId = OperationalEventContextFactory.NewActionId("L2-MANIPULATOR-ST007");
         var action = new FlowActionContext(operationalActionId, "2号线机械手1取料送叉", "机械手1",
             wp.IdentityText, "ST007", "ST712", "总上料架当前工件");
+        using var logAction = OperationalLog.BeginAction("2号线前端", "机械手1", operationalActionId, wp.IdentityText, "ST007", "ST712");
         action.RegisterLock("Manipulator1");
         var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled($"{operationalActionId}:st007");
         var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
@@ -2305,6 +2306,10 @@ public sealed class Line2FrontFlowEngine : IDisposable
         // 任务一旦从前天车队列出队，就用动作账本记录真实工件归属；不能再凭磁铁调用推断持件。
         var action = new FlowActionContext(actionId, "2号线前天车取料-打号-中转", $"前天车{CraneFront2No}",
             wp.IdentityText, "ST714", "2号线中转架", "2号线前天车队列");
+        using var logAction = OperationalLog.BeginAction("2号线前天车", $"{CraneFront2No}号天车", actionId,
+            wp.IdentityText, "ST714", "2号线中转架");
+        OperationalLog.Info("搬运动作开始", "已创建前天车自动搬运任务",
+            ("板号与序号", wp.IdentityText), ("来源工位", "ST714"), ("目标工位", "2号线中转架"));
         action.RegisterLock("FrontCrane#3");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         var pos3OperationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled($"{actionId}:pos3");

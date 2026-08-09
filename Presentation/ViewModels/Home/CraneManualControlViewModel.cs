@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using System.Windows.Input;
 using AutomaticOnlineHostComputer.Communication.DeviceAddresses;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
@@ -244,6 +245,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// <summary>相对移动核心: 读当前坐标 → ±距离 → 调用绝对移动</summary>
     private async Task RelativeMoveAsync(char axis, bool positive)
     {
+        using var logAction = OperationalLog.BeginAction("人工运动控制", CurrentDeviceName, $"MAN-{Guid.NewGuid():N}");
         if (RelativeMoveDistance == 0)
         {
             Console.WriteLine("[CraneManualVM] 相对移动距离为0, 无需移动");
@@ -272,10 +274,12 @@ public sealed class CraneManualControlViewModel : ObservableObject
             z = s.ZPos + d;
         }
         var name = CurrentDeviceName;
-        Console.WriteLine($"[CraneManualVM] [{name}] 相对移动 {axis}{(positive?"+":"-")}{RelativeMoveDistance}mm → 目标({x},{y},{z})");
+        OperationalLog.Info("人工相对移动请求", "操作员请求天车相对移动",
+            ("轴", axis), ("方向", positive ? "正向" : "负向"), ("移动距离", $"{RelativeMoveDistance} mm"),
+            ("目标X", x == -1 ? "保持当前值" : $"{x} mm"), ("目标Y", y == -1 ? "保持当前值" : $"{y} mm"), ("目标Z", z == -1 ? "保持当前值" : $"{z} mm"));
         await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ, cts.Token);
         await service.MoveAbsoluteAsync(x, y, z, ct: cts.Token);
-        Console.WriteLine($"[CraneManualVM] [{name}] ✔ 相对移动完成 {axis}→{d}mm");
+        OperationalLog.Info("人工相对移动完成", "已确认相对移动调用完成", ("轴", axis), ("实际请求位移", $"{d} mm"));
         await LogCurrentPositionAsync(service, name, $"相对{axis}{(positive?"+":"-")}{RelativeMoveDistance}");
     }
 
@@ -835,10 +839,12 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     private async Task MoveAbsoluteAsync()
     {
+        using var logAction = OperationalLog.BeginAction("人工运动控制", CurrentDeviceName, $"MAN-{Guid.NewGuid():N}");
         int xTarget = IsCraneOnly ? AbsXTarget : -1;
         int yTarget = AbsYTarget;
         int zTarget = AbsZTarget;
-        Console.WriteLine($"[CraneManualVM] [{CurrentDeviceName}] ▶ 点击按钮【绝对移动】 目标 X={xTarget} Y={yTarget} Z={zTarget}");
+        OperationalLog.Info("人工绝对移动请求", "操作员请求天车绝对移动",
+            ("目标X", xTarget == -1 ? "保持当前值" : $"{xTarget} mm"), ("目标Y", $"{yTarget} mm"), ("目标Z", $"{zTarget} mm"));
 
         using var cts = new CancellationTokenSource(ManualCommandTimeout);
         var service = await EnsureConnectedServiceAsync(cts.Token);
@@ -849,15 +855,15 @@ public sealed class CraneManualControlViewModel : ObservableObject
             await service.SetAbsSpeedAsync(AbsSpeedX, AbsAccelX, AbsDecelX, AbsSpeedY, AbsAccelY, AbsDecelY, AbsSpeedZ, AbsAccelZ, AbsDecelZ, cts.Token);
             //绝对位移 service
             await service.MoveAbsoluteAsync(xTarget, yTarget, zTarget, ct: cts.Token);
-            Console.WriteLine($"[CraneManualVM] [{name}] ✔ 绝对移动完成");
+            OperationalLog.Info("人工绝对移动完成", "已确认绝对移动调用完成", ("设备名称", name));
         }
         catch (TimeoutException ex)
         {
-            Console.WriteLine($"[CraneManualVM] [{name}] ✘ 绝对移动超时：{ex.Message}");
+            OperationalLog.Error("人工绝对移动超时", "未在人工操作超时时间内完成移动", ("设备名称", name), ("原因", ex.Message));
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[CraneManualVM] [{name}] ✘ 绝对移动异常：{ex.Message}");
+            OperationalLog.Error("人工绝对移动异常", "人工移动执行发生异常", ("设备名称", name), ("原因", ex.Message));
         }
     }
 

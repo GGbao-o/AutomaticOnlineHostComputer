@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.Clients;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 using Addr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CraneAddress;
 
 namespace AutomaticOnlineHostComputer.Communication.DeviceServices
@@ -814,7 +815,12 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             if (xTarget != -1) activeAxes.Add("X");
             if (yTarget != -1) activeAxes.Add("Y");
             if (zTarget != -1) activeAxes.Add("Z");
-            Console.WriteLine($"[CraneService] [{_name}] ▶ 绝对移动 目标 X={xTarget} Y={yTarget} Z={zTarget} 轴={string.Join(",", activeAxes)}");
+            OperationalLog.Info("绝对移动命令已发送", "已向天车控制器发送绝对移动请求",
+                ("设备名称", _name),
+                ("目标X", xTarget == -1 ? "保持当前值" : $"{xTarget} mm"),
+                ("目标Y", yTarget == -1 ? "保持当前值" : $"{yTarget} mm"),
+                ("目标Z", zTarget == -1 ? "保持当前值" : $"{zTarget} mm"),
+                ("参与轴", activeAxes.Count == 0 ? "无" : string.Join("、", activeAxes)));
             
             //确保在手动模式
             await EnsureManualModeAsync(ct);
@@ -938,7 +944,10 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 }
             }
 
-            Console.WriteLine($"[CraneService] [{_name}] ✔ 绝对移动完成，触发已复位");
+            OperationalLog.Info("绝对移动到位确认", "天车已完成绝对移动，触发信号已复位",
+                ("设备名称", _name), ("目标X", xTarget == -1 ? "保持当前值" : $"{xTarget} mm"),
+                ("目标Y", yTarget == -1 ? "保持当前值" : $"{yTarget} mm"),
+                ("目标Z", zTarget == -1 ? "保持当前值" : $"{zTarget} mm"));
         }
 
         /// <summary>

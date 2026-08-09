@@ -1077,6 +1077,10 @@ public sealed class BalancingFlowEngine : IDisposable
         bool keepDisplayForManualConfirmation = false; // 只控制页面证据清理，不参与任何动作判断
         WorkpieceCache? displayWorkpiece = null;
         string operationalActionId = $"BAL-M2-{actionVersion}";
+        using var logAction = OperationalLog.BeginAction("动平衡", "机械手2", operationalActionId,
+            source: useM817 ? "M817/ST020" : "M818/ST020", target: "ST008/M710");
+        OperationalLog.Info("搬运动作开始", "机械手2已创建自动搬运任务",
+            ("来源", useM817 ? "M817/ST020" : "M818/ST020"), ("目标", "ST008/M710"));
         FlowActionContext? action = null;
         var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled(operationalActionId);
         var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
@@ -1619,6 +1623,10 @@ public sealed class BalancingFlowEngine : IDisposable
         bool keepDisplayForManualConfirmation = false; // 只控制页面证据清理，不参与任何动作判断
         WorkpieceCache? displayWorkpiece = null;
         string operationalActionId = $"BAL-M3-{actionVersion}";
+        using var logAction = OperationalLog.BeginAction("动平衡", "机械手3", operationalActionId,
+            source: useM700 ? "M700/ST021" : "M821/ST021", target: "ST010/M720");
+        OperationalLog.Info("搬运动作开始", "机械手3已创建自动搬运任务",
+            ("来源", useM700 ? "M700/ST021" : "M821/ST021"), ("目标", "ST010/M720"));
         FlowActionContext? action = null;
         var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled(operationalActionId);
         var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
@@ -2273,13 +2281,19 @@ public sealed class BalancingFlowEngine : IDisposable
             if (canPlace)
             {
                 if (waitCount > 0)
-                    Console.WriteLine($"[平衡引擎] [M3] ✓ M720恢复可放料，结束持板等待，继续放料");
+                    OperationalLog.Info("PLC放料许可恢复", "PLC已允许放料，继续原流程",
+                        ("信号名称", "M720放料允许"), ("当前值", "1（允许）"),
+                        ("累计等待", $"{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1} 秒"));
                 return;
             }
 
             waitCount++;
             if (waitCount == 1 || waitCount % 10 == 0)
-                Console.WriteLine($"[平衡引擎] [M3] ⚠ M720二次确认=不可放料，保持持板等待（{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1}秒） rawM720=0x{r.IntValues[0]:X4}");
+                OperationalLog.Warn("等待PLC放料许可", "PLC暂时不允许放料，机械手保持安全等待",
+                    ("信号名称", "M720放料允许"), ("当前值", "0（暂不允许）"),
+                    ("工件状态", "保持持件"), ("位置锁", "M821、M720保持"),
+                    ("累计等待", $"{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1} 秒"),
+                    ("PLC原始字", $"0x{r.IntValues[0]:X4}"));
             await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
         }
     }

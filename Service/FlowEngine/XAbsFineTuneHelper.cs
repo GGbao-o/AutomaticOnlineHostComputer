@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
+using AutomaticOnlineHostComputer.Infrastructure.Logging;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Service;
@@ -410,6 +411,10 @@ internal static class XAbsFineTuneHelper
                 return;
 
             MotionConfig.FineTuneVerificationValues verification = cfg.AbsFineTuneVerification.GetValidated();
+            OperationalLog.Info("绝对值微调开始", "XY到位后开始核对绝对编码器",
+                ("工位", stationCode), ("微调前等待", $"{verification.BeforeReadSettleDelayMs} ms"),
+                ("稳定采样次数", verification.StableSampleCount), ("采样间隔", $"{verification.StableSampleIntervalMs} ms"),
+                ("允许波动", $"{verification.StableRangeMm} mm"));
             evidence?.BeginStage("微调前沉降");
             await DelayWithLogAsync(execution, "[XYAbsFineTune]", stationCode, context, "微调前沉降", verification.BeforeReadSettleDelayMs, ct);
             evidence?.Checkpoint("微调前沉降完成");
@@ -460,7 +465,10 @@ internal static class XAbsFineTuneHelper
                 }
 
                 int moveTolerance = Math.Max(1, movingAxes.Max(correction => correction.Axis.Tolerance));
-                Console.WriteLine($"[XYAbsFineTune] [{context}] {stationCode} 发起一次XY微调: X={(targetX == -1 ? "保持" : targetX)}, Y={(targetY == -1 ? "保持" : targetY)}");
+                OperationalLog.Info("绝对值微调命令已发送", "已发送XY联合微调命令",
+                    ("工位", stationCode), ("目标显示X", targetX == -1 ? "保持当前值" : $"{targetX} mm"),
+                    ("目标显示Y", targetY == -1 ? "保持当前值" : $"{targetY} mm"),
+                    ("本次微调", $"{fineTuneAttempt}/{FineTuneMaxAttempts}"));
                 evidence?.CommandPrepared(targetX, targetY, movingAxes);
                 await execution.MoveAbsoluteAsync(targetX, targetY, -1, moveTolerance,
                     cfg.GetCraneSpeed(craneNo).XyTimeoutMs, ct);
@@ -641,7 +649,9 @@ internal static class XAbsFineTuneHelper
 
                 if (unstableRanges.Count == 0)
                 {
-                    Console.WriteLine($"[XYAbsFineTune] [{context}] {stationCode} {phase}状态稳定({verification.StableSampleCount}次窗口): {FormatAxisValues(latest, activeAxes)}");
+                    OperationalLog.Info("绝对值读数稳定", "连续采样已满足稳定条件，可继续后续安全校验",
+                        ("工位", stationCode), ("阶段", phase), ("稳定采样次数", verification.StableSampleCount),
+                        ("允许波动", $"{verification.StableRangeMm} mm"), ("当前读数", FormatAxisValues(latest, activeAxes)));
                     evidence?.Checkpoint($"{phase}状态稳定({verification.StableSampleCount}次窗口)");
                     return latest;
                 }
@@ -679,6 +689,8 @@ internal static class XAbsFineTuneHelper
             if (retry >= AbsFeedbackRefreshMaxRetries)
             {
                 evidence?.FailureStage($"第{fineTuneAttempt}次{axis.Name}绝对编码器反馈最终未跟随");
+                OperationalLog.Error("绝对值微调反馈未跟随", "微调后坐标未发生预期变化，已禁止继续微调和Z下降",
+                    ("工位", stationCode), ("轴", axis.Name), ("失败原因", reason), ("保护结果", "禁止继续微调/Z下降"));
                 throw new InvalidOperationException($"[{context}] {stationCode} {axis.Name}绝对编码器微调后反馈未跟随显示坐标: {reason}, 禁止继续微调/Z下降");
             }
 

@@ -1448,6 +1448,8 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         // 预约成功后才拥有真实工件身份；后续异常一律以这个动作账本的事实为准。
         var action = new FlowActionContext(actionId, "1号线后天车上料", "2号天车", wp.IdentityText, rs, bed.Code, rs);
+        using var logAction = OperationalLog.BeginAction("1号线后天车", "2号天车", actionId, wp.IdentityText, rs, bed.Code);
+        OperationalLog.Info("搬运动作开始", "已创建后天车上料任务", ("板号与序号", wp.IdentityText));
         action.BeginStep(FlowActionStep.SourceReserved);
         action.SetOwnership(FlowWorkpieceOwnership.ReservedAtSource);
         if (!_cfg.SkewBed.CanProcessLength(bed.Code, wp.Length))
@@ -2286,6 +2288,9 @@ public sealed class Line1RearFlowEngine : IDisposable
         WorkpieceCache initialWorkpiece = bed.Wp ?? throw new InvalidOperationException($"{bed.Code}下料缺少工件账本");
         var action = new FlowActionContext(actionId, "1号线后天车下料", "2号天车",
             initialWorkpiece.IdentityText, bed.Code, "ST019/ST010分流目标", bed.Code);
+        using var logAction = OperationalLog.BeginAction("1号线后天车", "2号天车", actionId,
+            initialWorkpiece.IdentityText, bed.Code, "ST019/ST010分流目标");
+        OperationalLog.Info("搬运动作开始", "已创建后天车下料任务", ("板号与序号", initialWorkpiece.IdentityText));
         action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "斜床下料前检查");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         bool magnetOn = false;

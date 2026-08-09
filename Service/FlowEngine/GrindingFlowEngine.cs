@@ -1417,6 +1417,9 @@ public sealed class GrindingFlowEngine : IDisposable
         string actionId = OperationalEventContextFactory.NewActionId("GRIND-LOAD");
         var action = new FlowActionContext(actionId, "研磨天车上料", $"研磨天车#{_cfg.Grinding.CraneNo}",
             wp.IdentityText, "ST709", grinder.StationCode, "研磨FIFO");
+        using var logAction = OperationalLog.BeginAction("研磨", $"{_cfg.Grinding.CraneNo}号天车", actionId,
+            wp.IdentityText, "ST709", grinder.StationCode);
+        OperationalLog.Info("搬运动作开始", "已创建研磨上料任务", ("板号与序号", wp.IdentityText));
         action.RegisterLock("GrindingCrane");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         using var _ = actionCts;
@@ -2057,6 +2060,9 @@ public sealed class GrindingFlowEngine : IDisposable
         var wp = grinder.PendingWorkpiece;
         var action = new FlowActionContext(actionId, "研磨天车下料", $"研磨天车#{_cfg.Grinding.CraneNo}",
             wp?.IdentityText ?? "待人工补录", grinder.StationCode, "ST710", "研磨机PendingWorkpiece");
+        using var logAction = OperationalLog.BeginAction("研磨", $"{_cfg.Grinding.CraneNo}号天车", actionId,
+            wp?.IdentityText ?? "待人工补录", grinder.StationCode, "ST710");
+        OperationalLog.Info("搬运动作开始", "已创建研磨下料任务", ("板号与序号", wp?.IdentityText ?? "待人工补录"));
         action.RegisterLock("GrindingCrane");
         var craneName = $"天车#{_cfg.Grinding.CraneNo}";
         bool magnetOn = false;  // 充磁标志: true=成品已吸在天车上, 异常时无法恢复

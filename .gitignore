@@ -1,5 +1,28 @@
-﻿bin/
-obj/
+﻿# Visual Studio 文件
 .vs/
+
+# 编译输出
+bin/
+obj/
+
+# 用户配置
 *.user
 *.suo
+
+# Rider
+.idea/
+
+# 日志
+*.log
+
+# 临时文件
+*.tmp
+
+# 测试结果
+TestResults/
+
+# 发布目录
+publish/
+
+# NuGet缓存
+packages/
