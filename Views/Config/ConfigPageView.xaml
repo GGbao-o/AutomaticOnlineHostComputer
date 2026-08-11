@@ -436,6 +436,13 @@
                                         <TextBlock Text="研磨天车编号" Style="{StaticResource ParamLabelStyle}" />
                                         <TextBox Text="{Binding GrindingCraneNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="50" />
                                     </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="充磁后X11稳定等待" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding X11StableDelayMs, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                        <TextBlock Text="ms" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
+                                               Text="全线共用：前/后天车、机械手、动平衡和研磨天车每次充磁后，等待该时长再读取X11有板信号。" />
                                 </StackPanel>
                             </Border>
 
