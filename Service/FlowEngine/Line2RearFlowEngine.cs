@@ -550,6 +550,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 }
 
                 if (decision.Action == RearSkewDispatchAction.Load)
+                    //派发上料  这里面有doload方法
                     await TryDispatchLoadAsync(ct);
                 else if (decision.Action == RearSkewDispatchAction.Unload)
                     await TryDispatchUnloadAsync(fds, ct);
@@ -884,6 +885,7 @@ public sealed class Line2RearFlowEngine : IDisposable
     private async Task TryDispatchLoadAsync(CancellationToken ct)
     {
         Console.WriteLine($"│ [后调度] 尝试派发上料, 抢后天车锁(当前={_craneRearLock.CurrentCount})...");
+        //抢锁
         if (!await _craneRearLock.WaitAsync(0, ct))
         {
             Console.WriteLine("│ [后调度] 后天车被占用, 本轮不改派下料");
@@ -902,12 +904,13 @@ public sealed class Line2RearFlowEngine : IDisposable
                 Console.WriteLine("│ [后调度] 上料复核无候选, 释放后天车锁");
                 return;
             }
-
+            
             var pair = scan.Candidates[0];
             Console.WriteLine($"│   ▶ 触发上料! 源={pair.RackCode} {pair.Wp.IdentityText} L={pair.Wp.Length} → 目标={pair.Bed.Code}(max={_cfg.SkewBed.GetMaxWorkpieceLengthMm(pair.Bed.Code)})");
             pair.Bed.St = SkewState.Loading;
             SetRearCraneTask(pair.Wp, "准备从中转架取料", pair.RackCode, pair.Bed.Code);
             triggered = true;
+            //上料方法
             _ = DoLoad(pair.Bed, pair.RackCode, ct);
         }
         catch (Exception ex)

@@ -51,9 +51,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 450,
-        "accel": 100,
-        "decel": 80
+        "speed": 500,
+        "accel": 200,
+        "decel": 120
       },
       "y": {
         "speed": 70,
@@ -95,9 +95,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 450,
-        "accel": 100,
-        "decel": 80
+        "speed": 500,
+        "accel": 200,
+        "decel": 120
       },
       "y": {
         "speed": 70,
@@ -117,9 +117,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 450,
-        "accel": 100,
-        "decel": 80
+        "speed": 500,
+        "accel": 200,
+        "decel": 120
       },
       "y": {
         "speed": 70,
@@ -379,7 +379,7 @@
     "craneNo": 5,
     "pollIntervalMs": 500,
     "handshakeTimeoutMs": 120000,
-    "x11StableDelayMs": 3000,
+    "x11StableDelayMs": 1500,
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,
     "waitingForUnloadTimeoutMinutes": 20,
