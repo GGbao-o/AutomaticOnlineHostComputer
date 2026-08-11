@@ -532,12 +532,29 @@ public sealed class Line2RearFlowEngine : IDisposable
                 if (logDetails) Console.WriteLine("│ [步骤4/5] 后天车动态调度候选扫描...");
                 var unloadScan = await BuildUnloadCandidateScanAsync(fds, logDetails, ct);
                 var loadScan = BuildLoadCandidateScan(logDetails);
-                var decision = RearSkewDispatchPlanner.Decide(
+                var baselineDecision = RearSkewDispatchPlanner.Decide(
                     loadScan.Candidates.Count,
                     unloadScan.Candidates.Count,
                     loadScan.PhysicalRackPlateCount,
                     loadScan.MatchableRackPlateCount,
                     unloadScan.UsableBedCount);
+                var immediatelyDispatchableUnloads = GetImmediatelyDispatchableUnloadCandidates(unloadScan);
+                bool loadPathImmediatelyAvailable = IsLoadTransferPathImmediatelyAvailable();
+                var decision = RearSkewDispatchPlanner.ApplyLoadPathAvailability(
+                    baselineDecision,
+                    loadPathImmediatelyAvailable,
+                    immediatelyDispatchableUnloads.Count,
+                    DescribeLoadPathAvailability());
+                string? preferredUnloadBedCode =
+                    baselineDecision.Action == RearSkewDispatchAction.Load &&
+                    decision.Action == RearSkewDispatchAction.Unload
+                        ? immediatelyDispatchableUnloads[0].Bed.Code
+                        : null;
+
+                if (preferredUnloadBedCode != null)
+                {
+                    Console.WriteLine($"│ [后调度] 上料通道暂不可进入，改派立即下料={preferredUnloadBedCode}；未创建上料任务、未抢后天车锁、未预约中转架来源");
+                }
 
                 if (_dispatchLogGate.ShouldLog(decision,
                     loadScan.Candidates.Count, unloadScan.Candidates.Count,
@@ -553,7 +570,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                     //派发上料  这里面有doload方法
                     await TryDispatchLoadAsync(ct);
                 else if (decision.Action == RearSkewDispatchAction.Unload)
-                    await TryDispatchUnloadAsync(fds, ct);
+                    await TryDispatchUnloadAsync(fds, ct, preferredUnloadBedCode);
 
                 // ── 刷新后天车连接状态到UI ──
                 try { ds.CraneRearConnected = _craneCache.GetOrCreateService(CraneRearNo).IsConnected; } catch { }
@@ -836,6 +853,34 @@ public sealed class Line2RearFlowEngine : IDisposable
         return scan;
     }
 
+    /// <summary>
+    /// 后天车上料必须先进入中转架，因此只有 ZoneMT、ZoneTS 同时空闲才视为可立即执行。
+    /// 此检查只决定本轮是否让位给下料，实际 DoLoad 仍会重新获取两把锁。
+    /// </summary>
+    private bool IsLoadTransferPathImmediatelyAvailable()
+        => _safety.MarkerTransferCollisionLock.CurrentCount > 0 &&
+           _safety.TransferSkew1CollisionLock.CurrentCount > 0;
+
+    private string DescribeLoadPathAvailability()
+        => $"ZoneMT={(_safety.MarkerTransferCollisionLock.CurrentCount > 0 ? "空闲" : "占用")}, " +
+           $"ZoneTS={(_safety.TransferSkew1CollisionLock.CurrentCount > 0 ? "空闲" : "占用")}";
+
+    /// <summary>
+    /// 普通斜床下料不进入共享中转架区；ST606 下料需要 ZoneTS，故 ZoneTS 被占时不算立即可执行。
+    /// </summary>
+    private List<UnloadCandidate> GetImmediatelyDispatchableUnloadCandidates(UnloadCandidateScan scan)
+    {
+        bool zoneTsAvailable = _safety.TransferSkew1CollisionLock.CurrentCount > 0;
+        var result = new List<UnloadCandidate>();
+        foreach (var candidate in scan.Candidates)
+        {
+            if (candidate.Bed.Code != "ST606" || zoneTsAvailable)
+                result.Add(candidate);
+        }
+
+        return result;
+    }
+
     private async Task<bool> CanUnloadDestinationAcceptAsync(Line2FrontFlowEngine.Line2DeviceStatus? fds, WorkpieceCache wp, CancellationToken ct)
     {
         bool needsBalancing = wp.Length >= 800 || wp.ForceBalancing;
@@ -927,7 +972,10 @@ public sealed class Line2RearFlowEngine : IDisposable
         }
     }
 
-    private async Task TryDispatchUnloadAsync(Line2FrontFlowEngine.Line2DeviceStatus? fds, CancellationToken ct)
+    private async Task TryDispatchUnloadAsync(
+        Line2FrontFlowEngine.Line2DeviceStatus? fds,
+        CancellationToken ct,
+        string? preferredBedCode = null)
     {
         Console.WriteLine($"│ [后调度] 尝试派发下料, 抢后天车锁(当前={_craneRearLock.CurrentCount})...");
         if (!await _craneRearLock.WaitAsync(0, ct))
@@ -949,7 +997,22 @@ public sealed class Line2RearFlowEngine : IDisposable
                 return;
             }
 
-            var candidate = scan.Candidates[0];
+            UnloadCandidate? candidate = null;
+            foreach (var item in scan.Candidates)
+            {
+                if (string.IsNullOrWhiteSpace(preferredBedCode) || item.Bed.Code == preferredBedCode)
+                {
+                    candidate = item;
+                    break;
+                }
+            }
+
+            if (candidate == null)
+            {
+                Console.WriteLine($"│ [后调度] 下料复核时立即下料候选{preferredBedCode}已失效，释放后天车锁等待下轮");
+                return;
+            }
+
             candidate.Bed.St = SkewState.Unloading;
             triggered = true;
             Console.WriteLine($"│   ▶ {candidate.Bed.Code} 开始下料! {candidate.Wp.IdentityText} 工件={candidate.Wp.Diameter}mm L={candidate.Wp.Length}mm");
