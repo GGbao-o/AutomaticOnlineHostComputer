@@ -31,6 +31,22 @@ public partial class MainWindow : Window
         ContentHost.Content = _navigationService.GetOrCreatePage(menuItem.Tag.ToString());
     }
 
+    /// <summary>
+    /// 所有常规窗口关闭入口（标题栏、Alt+F4、任务栏）均需人工确认，防止误触终止运行中的自动任务。
+    /// 选择“否”时取消关闭，选择“是”时继续 WPF 原有退出和资源释放流程。
+    /// </summary>
+    private void Window_Closing(object? sender, CancelEventArgs e)
+    {
+        MessageBoxResult result = MessageBox.Show(
+            "确定要关闭程序吗？\n正在运行的自动任务将停止。",
+            "确认关闭程序",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+
+        e.Cancel = result != MessageBoxResult.Yes;
+    }
+
     private void OnNavStateChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(OperationalEventNavigationState.UnseenDisplayText)) return;
