@@ -3068,6 +3068,7 @@ public sealed class HomeViewModel : ObservableObject
                     bool fault   = snapshot.Alarm;
                     bool stone1  = snapshot.GrindStone1Alarm;
                     bool stone2  = snapshot.GrindStone2Alarm;
+                    bool onlineMode = snapshot.OnlineMode;
                     bool reqData = snapshot.ReqData;
                     bool reqLoad = snapshot.ReqLoad;
                     bool clamped = snapshot.Clamped;
@@ -3079,10 +3080,14 @@ public sealed class HomeViewModel : ObservableObject
                     int stoneNo = stone1 ? 1 : 2;
                     string state = BuildGrinderOverviewState(fault, false, stone1 || stone2, stoneNo,
                         reqData, reqLoad, clamped, reqUnld, unclamp, busy);
-                    stationCard.ConnectedBrush = fault || stone1 || stone2 ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.LimeGreen;
+                    if (!fault && !stone1 && !stone2 && !onlineMode)
+                        state = "单机模式，停止自动分配";
+                    stationCard.ConnectedBrush = fault || stone1 || stone2 ? System.Windows.Media.Brushes.Red
+                        : !onlineMode ? System.Windows.Media.Brushes.Orange
+                        : System.Windows.Media.Brushes.LimeGreen;
                     stationCard.Status1 = state;
                     stationCard.Status1Brush = GetSignalStateBrush(state);
-                    stationCard.Status2 = $"DI=0x{snapshot.RawDI:X4} b12={To01(reqUnld)} 数据={To01(reqData)} 上料={To01(reqLoad)} 锁紧={To01(clamped)} 下料={To01(reqUnld)} 松开={To01(unclamp)} 加工={To01(busy)} 门={(door ? "开" : "关")} 磨石1={To01(stone1)} 磨石2={To01(stone2)}";
+                    stationCard.Status2 = $"DI=0x{snapshot.RawDI:X4} 联机={To01(onlineMode)} 数据={To01(reqData)} 上料={To01(reqLoad)} 锁紧={To01(clamped)} 下料={To01(reqUnld)} 松开={To01(unclamp)} 加工={To01(busy)} 门={(door ? "开" : "关")} 磨石1={To01(stone1)} 磨石2={To01(stone2)}";
 
                     // 同步更新研磨机卡片（共享同一快照）
                     grinderCard.UpdateTypeA(snapshot);
@@ -3091,7 +3096,7 @@ public sealed class HomeViewModel : ObservableObject
                     if (ShouldLogGrinderPoll(cycleCount, logEveryCycles, logKey, ref lastLogKey))
                     {
                         Console.WriteLine($"[GrinderPoll] [{name}] #{cycleCount} TypeA快照 {snapshot.ToSignalText()} " +
-                            $"报警={fault} 请求数据={reqData} 请求上料={reqLoad} 锁紧={clamped} 请求下料={reqUnld} 松开={unclamp} 加工={busy} 门开={door} 磨石1={stone1} 磨石2={stone2}");
+                            $"报警={fault} 联机={onlineMode} 请求数据={reqData} 请求上料={reqLoad} 锁紧={clamped} 请求下料={reqUnld} 松开={unclamp} 加工={busy} 门开={door} 磨石1={stone1} 磨石2={stone2}");
                     }
                 }
                 else

@@ -144,6 +144,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             public bool Alarm => Bit(Addr.Bit_Alarm);
             public bool GrindStone1Alarm => Bit(Addr.Bit_GrindStone1Alarm);
             public bool GrindStone2Alarm => Bit(Addr.Bit_GrindStone2Alarm);
+            public bool OnlineMode => Bit(Addr.Bit_OnlineMode);
             public bool Heartbeat => Bit(Addr.Bit_Heartbeat);
             public bool ReqData => Bit(Addr.Bit_RequestData);
             public bool ReqLoad => Bit(Addr.Bit_RequestLoad);
@@ -156,7 +157,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             private bool Bit(int bitIndex) => (RawDI & (1 << bitIndex)) != 0;
 
             public string ToSignalText()
-                => $"DI=0x{RawDI:X4} b8心跳={To01(Heartbeat)} b9数据={To01(ReqData)} b10上料={To01(ReqLoad)} b11锁紧={To01(Clamped)} b12下料={To01(ReqUnload)} b13松开={To01(Unclamp)} b14加工={To01(Busy)} b15门开={To01(Door)} b0报警={To01(Alarm)} b1磨石1={To01(GrindStone1Alarm)} b2磨石2={To01(GrindStone2Alarm)}";
+                => $"DI=0x{RawDI:X4} b3联机={To01(OnlineMode)} b8心跳={To01(Heartbeat)} b9数据={To01(ReqData)} b10上料={To01(ReqLoad)} b11锁紧={To01(Clamped)} b12下料={To01(ReqUnload)} b13松开={To01(Unclamp)} b14加工={To01(Busy)} b15门开={To01(Door)} b0报警={To01(Alarm)} b1磨石1={To01(GrindStone1Alarm)} b2磨石2={To01(GrindStone2Alarm)}";
 
             private static int To01(bool value) => value ? 1 : 0;
         }

@@ -61,6 +61,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         public const int Bit_GrindStone1Alarm   = 1;
         /// <summary>40001 bit2  磨石2厚度报警（读，1=磨石2厚度异常）</summary>
         public const int Bit_GrindStone2Alarm   = 2;
+        /// <summary>40001 bit3  机台联机状态（读，0=单机，1=联机；仅西门子自动上料准入）</summary>
+        public const int Bit_OnlineMode          = 3;
 
         // ─── DO 输出（上位机→机床写，FC06）────────────────────────────
 

@@ -116,6 +116,7 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
         bool stone2  = snapshot.GrindStone2Alarm;
         bool stoneAlarm = stone1 || stone2;
         int stoneNo = stone1 ? 1 : 2;
+        bool onlineMode = snapshot.OnlineMode;
         bool reqData = snapshot.ReqData;
         bool reqLoad = snapshot.ReqLoad;
         bool clamped = snapshot.Clamped;
@@ -124,11 +125,13 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
         bool busy    = snapshot.Busy;
         bool door    = snapshot.Door;
 
-        ConnectedBrush = fault || stoneAlarm ? Brushes.Red : Brushes.LimeGreen;
-        Line1Brush = fault || stoneAlarm ? Brushes.Red : Brushes.Green;
+        ConnectedBrush = fault || stoneAlarm ? Brushes.Red : !onlineMode ? Brushes.Orange : Brushes.LimeGreen;
+        Line1Brush = fault || stoneAlarm ? Brushes.Red : !onlineMode ? Brushes.DarkOrange : Brushes.Green;
         Line1 = stoneAlarm
             ? $"已连接 | ⚠ 磨石{stoneNo}厚度报警 · 已停止自动分配"
-            : fault ? "已连接 | ⚠ 故障" : "已连接，就绪";
+            : fault ? "已连接 | ⚠ 故障"
+            : !onlineMode ? "已连接 | 单机模式，停止自动分配"
+            : "已连接 | 联机，就绪";
 
         Line2 = reqUnld ? "请求下料 → 等待天车取料" :
                 reqLoad ? "请求上料 → 等待天车送料" :
@@ -138,14 +141,18 @@ public sealed class GrinderCardViewModel : ObservableObject, IDisposable
                 busy    ? "加工中" :
                 "空闲";
 
-        var flags = new System.Collections.Generic.List<string> { door ? "门开=1" : "门关=0" };
+        var flags = new System.Collections.Generic.List<string>
+        {
+            onlineMode ? "联机=1" : "单机=0",
+            door ? "门开=1" : "门关=0"
+        };
         if (stone1) flags.Add("磨石1报警✘");
         if (stone2) flags.Add("磨石2报警✘");
         Line3 = string.Join(" | ", flags);
 
         Line4 = "西门子PLC (TypeA)";
         Line4Brush = Brushes.DarkBlue;
-        Line5 = $"DI=0x{snapshot.RawDI:X4} 心跳={snapshot.Heartbeat}";
+        Line5 = $"DI=0x{snapshot.RawDI:X4} 联机={(onlineMode ? 1 : 0)} 心跳={snapshot.Heartbeat}";
     }
 
     public void UpdateTypeB(int machineStatus, bool reqData, bool reqLoad, bool clamped,

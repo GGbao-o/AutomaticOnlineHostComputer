@@ -459,7 +459,7 @@ public sealed class GrindingFlowEngine : IDisposable
         return
             $"[研磨应急诊断] 目标={g.StationCode} {g.Name}\n" +
             $"状态={g.State}; Pending={g.PendingWorkpiece?.IdentityText ?? "无"}; WpRecoveryNeeded={g.WpRecoveryNeeded}\n" +
-            $"信号: 请求数据={g.LastRequestData} 请求下料={(g.LastR7304 != 0 || ((g.LastDi >> 12) & 1) == 1)} 加工中={g.LastMachining} 门开={g.LastDoorOpen} DI=0x{g.LastDi:X4} R7304={g.LastR7304}\n" +
+            $"信号: 请求数据={g.LastRequestData} 联机={(g.GrinderType == PlcGrinderService.GrinderType.TypeA ? g.LastOnlineMode.ToString() : "不适用")} 请求下料={(g.LastR7304 != 0 || ((g.LastDi >> 12) & 1) == 1)} 加工中={g.LastMachining} 门开={g.LastDoorOpen} DI=0x{g.LastDi:X4} R7304={g.LastR7304}\n" +
             $"研磨天车锁={CraneLockText()}\n" +
             "提示: 应急处理会先清研磨机PLC输出/参数, 成功后清Pending和状态; 失败时需要二次确认是否仅清软件。";
     }
@@ -669,6 +669,7 @@ public sealed class GrindingFlowEngine : IDisposable
         g.LastRequestData = false;
         g.LastMachining = false;
         g.LastDoorOpen = false;
+        g.LastOnlineMode = false;
         g.LastDi = 0;
         g.LastR7304 = 0;
         g.StateChangedAt = DateTime.UtcNow;
@@ -1076,6 +1077,7 @@ public sealed class GrindingFlowEngine : IDisposable
         g.LastR7304 = 0;
         g.LastMachining = false;
         g.LastDoorOpen = false;
+        g.LastOnlineMode = false;
 
         if (_cycleCount % 10 == 0)
             Console.WriteLine($"[GrindingEngine] [{g.Name}] {reason}, 已清空旧触发信号, 等待读取恢复");
@@ -1252,7 +1254,7 @@ public sealed class GrindingFlowEngine : IDisposable
             bool wasAlarm = g.HasGrindStoneAlarm;
             if (!TryCommitGrinderSignals(g, scanVersion, snapshot.RawDI, snapshot.ReqData,
                     snapshot.ReqUnload ? 1 : 0, snapshot.Busy, snapshot.Door,
-                    snapshot.GrindStone1Alarm, snapshot.GrindStone2Alarm))
+                    snapshot.GrindStone1Alarm, snapshot.GrindStone2Alarm, snapshot.OnlineMode))
                 return;
 
             LogGrindStoneAlarmState(g, wasAlarm, source);
@@ -1292,7 +1294,7 @@ public sealed class GrindingFlowEngine : IDisposable
 
     private static bool TryCommitGrinderSignals(GrinderContext g, long scanVersion, int rawDi,
         bool requestData, int requestUnload, bool machining, bool doorOpen,
-        bool grindStone1Alarm = false, bool grindStone2Alarm = false)
+        bool grindStone1Alarm = false, bool grindStone2Alarm = false, bool onlineMode = false)
     {
         if (Interlocked.Read(ref g.SignalScanVersion) != scanVersion)
         {
@@ -1307,12 +1309,13 @@ public sealed class GrindingFlowEngine : IDisposable
         g.LastDoorOpen = doorOpen;
         g.LastGrindStone1Alarm = grindStone1Alarm;
         g.LastGrindStone2Alarm = grindStone2Alarm;
+        g.LastOnlineMode = onlineMode;
         return true;
     }
 
     /// <summary>
-    /// 按优先级找可用的研磨机(Idle+PLC联机就绪+无PendingWorkpiece+无磨石报警)。
-    /// 磨石报警是单机维护信号，只排除报警机的新上料，不影响其他机台和已完成工件下料。
+    /// 按优先级找可用的研磨机(Idle+PLC请求数据+无PendingWorkpiece+无磨石报警)。
+    /// 西门子 TypeA 还必须为40001-3联机模式；单机和磨石报警都只排除本机新上料。
     /// </summary>
     private bool ShouldLogWaiting(string key)
     {
@@ -1331,7 +1334,8 @@ public sealed class GrindingFlowEngine : IDisposable
             && g.Svc != null                      // 共享服务已注入(GrinderPoll)
             && g.Svc.IsConnected                  // Modbus已连接
             && g.PendingWorkpiece == null          // 无在途工件(后台流程跑完会清)
-            && !g.HasGrindStoneAlarm);             // 磨石厚度报警：仅本机停止自动分配
+            && !g.HasGrindStoneAlarm               // 磨石厚度报警：仅本机停止自动分配
+            && (g.GrinderType != PlcGrinderService.GrinderType.TypeA || g.LastOnlineMode)); // TypeA单机时禁止新上料
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1458,25 +1462,28 @@ public sealed class GrindingFlowEngine : IDisposable
                 "请求数据", _cfg.Grinding.HandshakeTimeoutMs, ct);
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}]   ① 请求数据=1 ✓ PLC已就绪");
 
-            // ── ② 检查磨石厚度报警(仅西门子TypeA) ──
-            //    正式取料前重新读完整快照，覆盖扫描与动作之间才出现的报警。
-            //    报警只是本机维护信号：工件仍在ST709，退回缓存并停止本机自动分配；不暂停研磨引擎。
+            // ── ② 检查磨石厚度报警及联机状态(仅西门子TypeA) ──
+            //    正式取料前重新读完整快照，覆盖扫描与动作之间才出现的报警或切单机。
+            //    两者都只是本机新上料准入：工件仍在ST709，退回缓存；不暂停研磨引擎。
             if (grinder.GrinderType == PlcGrinderService.GrinderType.TypeA)
             {
                 var snapshot = await grinder.Svc!.ReadTypeAStatusSnapshotAsync(ct);
                 CommitTypeAGrinderSignals(grinder, Interlocked.Increment(ref grinder.SignalScanVersion), snapshot,
                     "取料前二次确认");
-                if (grinder.HasGrindStoneAlarm)
+                if (!snapshot.OnlineMode || grinder.HasGrindStoneAlarm)
                 {
                     Console.WriteLine($"══════════════════════════════════════════════");
-                    Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠⚠⚠ 磨石厚度报警！停止本机自动分配，请更换磨石 ⚠⚠⚠");
+                    string blockedReason = !snapshot.OnlineMode
+                        ? "单机模式(40001-3=0)，停止本机自动分配"
+                        : "磨石厚度报警，停止本机自动分配，请更换磨石";
+                    Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠⚠⚠ {blockedReason} ⚠⚠⚠");
                     Console.WriteLine($"══════════════════════════════════════════════");
                     grinder.State = GrinderState.Idle;
                     grinder.StateChangedAt = DateTime.UtcNow;
                     grinder.PendingWorkpiece = null; // 清PendingWorkpiece, 否则FindReadyGrinder永久排除此研磨机
                     // 工件还在 ST709 架上，放回缓存（finally 会释放锁）
                     RequeueWorkpiece(wp);
-                    Console.WriteLine($"[GrindingEngine] ↩ 工件 d={wp.Diameter} 放回缓存（磨石报警，未取料；其他研磨机继续分配）");
+                    Console.WriteLine($"[GrindingEngine] ↩ 工件 d={wp.Diameter} 放回缓存（{blockedReason}，未取料；其他研磨机继续分配）");
                     return;  // 中止上料流程
                 }
             }
@@ -2751,6 +2758,8 @@ public sealed class GrinderContext
     public int LastR7304 { get; set; }
     /// <summary>最近一次请求数据信号: TypeA=40001-9 / TypeB=R7301。PLC联机就绪=1</summary>
     public bool LastRequestData { get; set; }
+    /// <summary>TypeA西门子最近一次机台模式: 40001-3，0=单机、1=联机。TypeB不使用此条件。</summary>
+    public bool LastOnlineMode { get; set; }
     /// <summary>最近一次加工中信号: TypeA=40001-14 / TypeB=R7306。PLC正在执行加工程序=1</summary>
     public bool LastMachining { get; set; }
     /// <summary>最近一次门开信号: TypeA=40001-15 / TypeB=R7307。研磨机防护门已开=1</summary>
