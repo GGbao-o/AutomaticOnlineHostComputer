@@ -532,6 +532,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 if (logDetails) Console.WriteLine("│ [步骤4/5] 后天车动态调度候选扫描...");
                 var unloadScan = await BuildUnloadCandidateScanAsync(fds, logDetails, ct);
                 var loadScan = BuildLoadCandidateScan(logDetails);
+                //输入 上料候选数 / 下料候选数 / 中转架物理板数 / 可匹配板数 / 有效斜床数  按 6条规则得出 baselineDecision（Load/Unload/None）
                 var baselineDecision = RearSkewDispatchPlanner.Decide(
                     loadScan.Candidates.Count,
                     unloadScan.Candidates.Count,
@@ -540,11 +541,22 @@ public sealed class Line2RearFlowEngine : IDisposable
                     unloadScan.UsableBedCount);
                 var immediatelyDispatchableUnloads = GetImmediatelyDispatchableUnloadCandidates(unloadScan);
                 bool loadPathImmediatelyAvailable = IsLoadTransferPathImmediatelyAvailable();
+                //让位覆盖（ApplyLoadPathAvailability 
+                /*
+前提：baseline = Load（第一层说要上料）
+检查：上料通道（ZoneMT 和 ZoneTS）是否都空闲？
+  ├─ 都空闲 → 保持 Load（正常上料）
+  └─ 任一被占（比如前天车打号持 ZoneMT）
+      ├─ 有可立即下料候选（普通床，或 ST108/ST606 且 ZoneTS 空闲）
+      │    → 覆盖为 Unload（改派下料，不白占后天车锁）
+      └─ 没有可立即下料 → 保持 Load（去 DoLoad 等锁）
+      */
                 var decision = RearSkewDispatchPlanner.ApplyLoadPathAvailability(
                     baselineDecision,
                     loadPathImmediatelyAvailable,
                     immediatelyDispatchableUnloads.Count,
                     DescribeLoadPathAvailability());
+                
                 string? preferredUnloadBedCode =
                     baselineDecision.Action == RearSkewDispatchAction.Load &&
                     decision.Action == RearSkewDispatchAction.Unload
@@ -567,9 +579,10 @@ public sealed class Line2RearFlowEngine : IDisposable
                 }
 
                 if (decision.Action == RearSkewDispatchAction.Load)
-                    //派发上料  这里面有doload方法
+                    //派发上料  这里面有doload方法   决策层确实把"前天车占锁（通道被占）考虑进去了
                     await TryDispatchLoadAsync(ct);
                 else if (decision.Action == RearSkewDispatchAction.Unload)
+                    //下料
                     await TryDispatchUnloadAsync(fds, ct, preferredUnloadBedCode);
 
                 // ── 刷新后天车连接状态到UI ──
@@ -1452,12 +1465,13 @@ public sealed class Line2RearFlowEngine : IDisposable
     /// <summary>上料流程: 中转架取料→X11检测→送斜床→握手→标记加工中</summary>
     private async Task DoLoad(SkewCtx bed, string rs, CancellationToken ct)
     {
+        //生成动作id 其实是为了方便查看日志
         string actionId = OperationalEventContextFactory.NewActionId("L2-REAR-LOAD");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         bool transferLocked = false; // 新Zone模型下不再使用_transferRackLock作为中转架业务互斥
         WorkpieceCache wp;
         long rackArrivalSeq;
-        // 预约来源位不是取走：在X11确认前，缓存仍属于中转架，异常不会丢失工件身份。
+        // 预约来源位不是取走：在X11确认前，缓存仍属于中转架，异常不会丢失工件身份。预约设计
         if (!_rackLedger.TryReserve(rs, actionId, out wp, out rackArrivalSeq))
         {
             _craneRearLock.Release();
@@ -1467,6 +1481,7 @@ public sealed class Line2RearFlowEngine : IDisposable
         }
         // 预约成功后才拥有真实工件身份；后续异常一律以这个动作账本的事实为准。
         var action = new FlowActionContext(actionId, "2号线后天车上料", "4号天车", wp.IdentityText, rs, bed.Code, rs);
+        //using var 的意思是：当前作用域结束时自动调用对象的 Dispose() 适用于文件 数据库连接 锁 事务 设备操作上下文 日志 Scope
         using var logAction = OperationalLog.BeginAction("2号线后天车", "4号天车", actionId, wp.IdentityText, rs, bed.Code);
         OperationalLog.Info("搬运动作开始", "已创建后天车上料任务", ("板号与序号", wp.IdentityText));
         action.BeginStep(FlowActionStep.SourceReserved);
@@ -1521,10 +1536,12 @@ public sealed class Line2RearFlowEngine : IDisposable
             //   - 普通斜床：释放ZoneMT+ZoneTS；
             //   - ST606：释放ZoneMT，继续持有ZoneTS到斜床1交互和X+1000退避结束。
             Console.WriteLine("│ [上料] 获取ZoneMT(打号机↔中转架)...");
+            //获取锁
             await operation.AcquireAsync("ZoneMT", _safety.MarkerTransferCollisionLock, ct);
             action.RegisterLock("ZoneMT");
             Console.WriteLine("│ ZoneMT已获取 ✓");
             Console.WriteLine("│ [上料] 获取ZoneTS(中转架↔ST606)...");
+            //获取锁
             await operation.AcquireAsync("ZoneTS", _safety.TransferSkew1CollisionLock, ct);
             action.RegisterLock("ZoneTS");
             sharedLocked = bed.Code == "ST606";

@@ -1,4 +1,4 @@
-# 锦州斜床协议（迅捷 PLC，Modbus TCP）
+# 锦州斜床协议（信捷 PLC，Modbus TCP）
 
 > 依据 `ModbusSkewBedAddress.cs`、`ModbusSkewBedService.cs` 与1号线后端引擎整理。适用 ST108、ST109、ST111、ST110；端口502，单元ID=1。
 

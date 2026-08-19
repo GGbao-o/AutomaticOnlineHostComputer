@@ -69,6 +69,26 @@ internal sealed class RearSkewDispatchLogGate
 /// </summary>
 internal static class RearSkewDispatchPlanner
 {
+    /// <summary>
+    /// 输入 上料候选数 / 下料候选数 / 中转架物理板数 / 可匹配板数 / 有效斜床数   按 6 条规则得出 baselineDecision（Load/Unload/None）
+    /// </summary>
+    /// <param name="loadCandidateCount"></param>
+    /// <param name="unloadCandidateCount"></param>
+    /// <param name="physicalRackPlateCount"></param>
+    /// <param name="matchableRackPlateCount"></param>
+    /// <param name="usableBedCount"></param>
+    /// <returns></returns>
+    
+    /// 条件	结果
+    /*
+     上料候选=0 且 下料候选=0	None（没活干）
+    只有上料候选	Load
+    只有下料候选	Unload
+    中转架满 3 块 + 有上料候选	Load（强制腾位）
+    可匹配板 ≥2 且 下料候选 < 阈值	Load（供应足、成品少→先上料）
+    下料候选 ≥ 阈值 且 可匹配板 ≤1	Unload（成品堆积→先下料）
+    其他普通场景	Unload（默认下料优先）
+    */
     public static RearSkewDispatchDecision Decide(
         int loadCandidateCount,
         int unloadCandidateCount,
@@ -100,6 +120,11 @@ internal static class RearSkewDispatchPlanner
     }
 
     /// <summary>
+    ///
+    //  仅当：baseline=Load 且 上料通道被占（ZoneMT/ZoneTS │
+    // │        任一不空闲）且 有可立即下料候选                │
+    // │  → 覆盖为 Unload（改派下料）                        │
+    // │  否则：保持 baselineDecision  
     /// 在派发前根据中转架通道的即时可进入性，对原始压力决策作一次让位。
     /// 这是调度吞吐优化，不替代实际动作中的锁获取：DoLoad/DoUnload 仍按原有顺序获取锁。
     /// </summary>

@@ -105,9 +105,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 200,
-        "accel": 80,
-        "decel": 40
+        "speed": 250,
+        "accel": 120,
+        "decel": 70
       }
     },
     "5": {
@@ -254,7 +254,7 @@
   "xAbsFineTune": {
     "enabled": true,
     "toleranceMm": 5,
-    "maxAdjustMm": 1000,
+    "maxAdjustMm": 100,
     "absolutePerDisplayDirections": {},
     "stationTargets": {
       "1": {
@@ -368,7 +368,7 @@
   "absFineTuneVerification": {
     "beforeReadSettleDelayMs": 700,
     "stableSampleCount": 3,
-    "stableSampleIntervalMs": 250,
+    "stableSampleIntervalMs": 200,
     "stableRangeMm": 1,
     "afterMoveMinSettleDelayMs": 700
   },
@@ -379,14 +379,14 @@
     "craneNo": 5,
     "pollIntervalMs": 500,
     "handshakeTimeoutMs": 120000,
-    "x11StableDelayMs": 1500,
+    "x11StableDelayMs": 1000,
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,
     "waitingForUnloadTimeoutMinutes": 20,
     "unloadingTimeoutMinutes": 10
   },
   "balancing": {
-    "rearCraneSafeX": -3000,
+    "rearCraneSafeX": -2000,
     "armCoords": {
       "M817": {
         "y": 15701,
@@ -477,7 +477,7 @@
       "ST108": false,
       "ST109": false,
       "ST110": false,
-      "ST111": false,
+      "ST111": true,
       "ST112": false,
       "ST606": false,
       "ST607": false,
