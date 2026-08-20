@@ -107,6 +107,11 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
 
     public int GrindingSafeZ { get => _cfg.Grinding.SafeZHeight; set { _cfg.Grinding.SafeZHeight = value; OnPropertyChanged(); } }
     public int GrindingCraneNo { get => _cfg.Grinding.CraneNo; set { _cfg.Grinding.CraneNo = value; OnPropertyChanged(); } }
+    public string GrindingWorkpieceDisplayIp
+    {
+        get => _cfg.Grinding.WorkpieceDisplayIp;
+        set { _cfg.Grinding.WorkpieceDisplayIp = value; OnPropertyChanged(); }
+    }
     /// <summary>全线自动取料共用：充磁成功返回后，等待该时长再读取 X11 有板反馈（单位：ms）。</summary>
     public int X11StableDelayMs { get => _cfg.Grinding.X11StableDelayMs; set { _cfg.Grinding.X11StableDelayMs = value; OnPropertyChanged(); } }
     public int GrindingLoadingTimeoutMinutes { get => _cfg.Grinding.LoadingTimeoutMinutes; set { _cfg.Grinding.LoadingTimeoutMinutes = value; OnPropertyChanged(); } }

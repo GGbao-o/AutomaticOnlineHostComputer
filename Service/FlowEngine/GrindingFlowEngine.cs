@@ -34,6 +34,7 @@ public sealed class GrindingFlowEngine : IDisposable
     private readonly MotionConfig _cfg;                   // 运动参数配置(速度/Z公式系数/超时/轮询间隔/X11延时等)
     private readonly Dictionary<string, MachineManagementRowVm> _stationCoords; // 工位坐标(数据库machine表, 含XYZ+偏移量)
     private readonly IOperationalEventReporter _exceptionReporter;
+    private readonly GrindingWorkpieceDisplayService _workpieceDisplay = new(); // ST709取料参数旁路显示，不参与业务准入
     // ── MC连接(共享McConnectionCache, 与平衡/后端引擎共用, 防重复TCP) ──
     //   MC65=192.168.2.65: 上料架(研磨上料架) M730(末位有板/允许取板) M731(取板完成) D200(2号位测长,读)
     //   MC64=192.168.2.64: 下料架(研磨下料架) M720(无板且允许放版) M721(放版完成,写)
@@ -1372,6 +1373,24 @@ public sealed class GrindingFlowEngine : IDisposable
         return z;
     }
 
+    /// <summary>尽力写入研磨工件显示屏；失败只记日志，不改变研磨业务状态。</summary>
+    private async Task WriteWorkpieceDisplayBestEffortAsync(WorkpieceCache wp, CancellationToken ct)
+    {
+        var result = await _workpieceDisplay.TryWriteAsync(
+            _cfg.Grinding.WorkpieceDisplayIp, wp.Diameter, wp.Length, ct);
+        if (result.Success)
+        {
+            Console.WriteLine(
+                $"[GrindingEngine] [工件显示屏] 写入成功 IP={_cfg.Grinding.WorkpieceDisplayIp}:502 " +
+                $"d={(int)Math.Round(wp.Diameter)}→100 L={(int)Math.Round(wp.Length)}→101");
+            return;
+        }
+
+        Console.WriteLine(
+            $"[GrindingEngine] [工件显示屏] ⚠ 写入失败但继续取料 IP={_cfg.Grinding.WorkpieceDisplayIp}:502 " +
+            $"阶段={result.Stage} d={wp.Diameter} L={wp.Length}: {result.Error?.Message}");
+    }
+
     /// <summary>从 _stationCoords 读指定站号的 XYZ 坐标，未找到返回 false。</summary>
     private bool TryGetStationCoords(string stationCode, out int x, out int y, out int z)
     {
@@ -1493,6 +1512,7 @@ public sealed class GrindingFlowEngine : IDisposable
             //    再一次性写直径/版孔/长度到研磨机PLC(40012/R7316等)
             if (wp.Diameter <= 0)
                 throw new InvalidOperationException($"工件直径无效 d={wp.Diameter}, 不能计算取放料Z");
+            //工件长度=0时候 这个工件是从动平衡过来的
             if (wp.Length == 0)
             {
                 if (_mc65?.IsConnected != true)
@@ -1503,7 +1523,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 double len = d200.IntValues.Length > 0 ? d200.IntValues[0] : 0;
                 if (len <= 0)
                     throw new InvalidOperationException($"D200测长无效 len={len}, 暂停避免向研磨机发送长度0");
-
+                //重新赋值工件信息
                 wp = new WorkpieceCache
                 {
                     PlateNo = wp.PlateNo,
@@ -1531,7 +1551,6 @@ public sealed class GrindingFlowEngine : IDisposable
             if (!await ConfirmGrindingFeedReadyAsync("写研磨参数前", ct))
                 throw new InvalidOperationException("ST709/M730写参数前确认无版或读取失败, 工件未取走, 已回缓存等待下轮");
 
-           
 
             // ── ④ 天车去研磨上料架3号位ST709取料(传送带末端=可拾取位) ──
             //    安全: 先读X11确认磁铁无残留(断电重启保护)
@@ -1565,6 +1584,9 @@ public sealed class GrindingFlowEngine : IDisposable
             // 这段时间链条/现场信号可能变化, 所以天车动作前必须重新确认ST709/M730有版。
             if (!await ConfirmGrindingFeedReadyAsync("上料动作前", ct))
                 throw new InvalidOperationException("ST709/M730动作前确认无版或读取失败, 工件未取走, 已回缓存等待下轮");
+
+            // 显示屏只展示本次准备取走工件的最终直径/长度；通信失败只记日志，不阻断取料。
+            await WriteWorkpieceDisplayBestEffortAsync(wp, ct);
 
             if (!TryGetStationCoords("ST709", out int rackX, out int rackY, out int rackZ))
                 throw new InvalidOperationException("数据库未找到 ST709 上料架坐标");
@@ -1786,6 +1808,7 @@ public sealed class GrindingFlowEngine : IDisposable
             //方法体内会把doule类型转为int
             action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), $"{grinder.StationCode}研磨参数与数据完成通知");
             action.MarkCommandSent();
+            //下发研磨机参数
             await grinder.Svc!.SendRollerParamsAsync(wp.Diameter, wp.BoreType, wp.Length, ct);
             await grinder.Svc.SetDataSentDoneAsync(ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), "研磨参数与数据完成通知成功返回");
@@ -2726,6 +2749,7 @@ public sealed class GrindingFlowEngine : IDisposable
         if (_disposed) return;
         _disposed = true;
         _engineCts.Cancel();
+        _workpieceDisplay.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _engineCts.Dispose();
         _craneLock.Dispose();
         _grindingDispatchGate.Dispose();

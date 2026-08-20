@@ -437,6 +437,13 @@
                                         <TextBox Text="{Binding GrindingCraneNo, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="50" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="工件显示屏 IP" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding GrindingWorkpieceDisplayIp, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ParamTextBoxStyle}" Width="130" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
+                                               Text="Modbus TCP：端口502、站号1；直径地址100，长度地址101。显示失败不影响研磨流程。" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                         <TextBlock Text="充磁后X11稳定等待" Style="{StaticResource ParamLabelStyle}" />
                                         <TextBox Text="{Binding X11StableDelayMs, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
                                         <TextBlock Text="ms" Style="{StaticResource ParamLabelStyle}" />

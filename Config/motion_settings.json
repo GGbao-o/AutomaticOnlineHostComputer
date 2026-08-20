@@ -377,6 +377,7 @@
     "zFactor2": 0.866,
     "safeZHeight": 0,
     "craneNo": 5,
+    "workpieceDisplayIp": "192.168.2.111",
     "pollIntervalMs": 500,
     "handshakeTimeoutMs": 120000,
     "x11StableDelayMs": 1000,

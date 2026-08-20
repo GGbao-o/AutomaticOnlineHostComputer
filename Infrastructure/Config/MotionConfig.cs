@@ -262,6 +262,8 @@ public sealed class MotionConfig
         public int SafeZHeight { get; set; } = 0;
         /// <summary>研磨机天车编号(默认5号)</summary>
         public int CraneNo { get; set; } = 5;
+        /// <summary>研磨取料工件参数显示屏 Modbus TCP IP。</summary>
+        public string WorkpieceDisplayIp { get; set; } = "192.168.2.111";
         /// <summary>研磨机状态轮询间隔(ms)</summary>
         public int PollIntervalMs { get; set; } = 500;
         /// <summary>研磨机握手超时(ms)，等待请求上料/锁紧/松开等信号</summary>
