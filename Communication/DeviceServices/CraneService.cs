@@ -853,15 +853,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     $"{(zGoingDown ? "↓下降" : zGoingUp ? "↑上升" : "→水平")}");
             }
 
-            // ── 3. 接液盘互锁：Z 下降前必须打开，Z 上升后必须关闭 ──────────
-            if (zGoingDown)
-            {
-                Console.WriteLine($"[CraneService] [{_name}] 接液盘互锁：Z下降前先打开接液盘");
-                await DrainOpenAsync(ct);
-                await Task.Delay(500, ct); // 等接液盘打开到位（无DI反馈用延时兜底）
-            }
-
-            // ── 4. 按 Z 方向决定触发顺序 ──────────────────────────────────
+            // ── 3. 按 Z 方向决定触发顺序 ──────────────────────────────────
             try
             {
                 // ── 绝对移动触发：2→500ms→0 脉冲模式 ──
@@ -936,12 +928,6 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", resetCt);
                 if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", resetCt);
 
-                // ── 接液盘互锁：Z 上升后关闭接液盘 ────────────────────
-                if (zGoingUp)
-                {
-                    Console.WriteLine($"[CraneService] [{_name}] 接液盘互锁：Z上升后关闭接液盘");
-                    await DrainCloseAsync(resetCt);
-                }
             }
 
             OperationalLog.Info("绝对移动到位确认", "天车已完成绝对移动，触发信号已复位",

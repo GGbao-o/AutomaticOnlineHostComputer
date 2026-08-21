@@ -7,6 +7,7 @@
         <SolidColorBrush x:Key="PanelHeaderBrush" Color="#F7FAFC" />
         <SolidColorBrush x:Key="TextMainBrush" Color="#1F2933" />
         <SolidColorBrush x:Key="TextMutedBrush" Color="#5C6675" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
         <Style TargetType="{x:Type GroupBox}">
             <Setter Property="Margin" Value="0,0,0,10" />
@@ -222,6 +223,44 @@
                                         </Style>
                                     </Border.Style>
                                     <TextBlock Text="{Binding ManualControl.MagnetPressureFeedbackText}" />
+                                </Border>
+                                <Border
+                                    Margin="0,0,6,0"
+                                    Padding="7,2"
+                                    BorderBrush="#C9D3DE"
+                                    BorderThickness="1"
+                                    CornerRadius="3"
+                                    Visibility="{Binding ManualControl.IsCraneOnly, Converter={StaticResource BoolToVis}}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="#F3F4F6" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ManualControl.IsDrainOpenFeedback}" Value="True">
+                                                    <Setter Property="Background" Value="#DCFCE7" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock Text="{Binding ManualControl.DrainOpenFeedbackText}" />
+                                </Border>
+                                <Border
+                                    Margin="0,0,8,0"
+                                    Padding="7,2"
+                                    BorderBrush="#C9D3DE"
+                                    BorderThickness="1"
+                                    CornerRadius="3"
+                                    Visibility="{Binding ManualControl.IsCraneOnly, Converter={StaticResource BoolToVis}}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="#F3F4F6" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ManualControl.IsDrainClosedFeedback}" Value="True">
+                                                    <Setter Property="Background" Value="#DCFCE7" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock Text="{Binding ManualControl.DrainClosedFeedbackText}" />
                                 </Border>
                                 <Button
                                     Height="24"
@@ -527,12 +566,14 @@
                             Height="32"
                             Margin="3"
                             Command="{Binding ManualControl.DrainOpenCommand}"
-                            Content="接液盘打开" />
+                            Content="接液盘打开"
+                            Visibility="{Binding ManualControl.IsCraneOnly, Converter={StaticResource BoolToVis}}" />
                         <Button
                             Height="32"
                             Margin="3"
                             Command="{Binding ManualControl.DrainCloseCommand}"
-                            Content="接液盘关闭" />
+                            Content="接液盘关闭"
+                            Visibility="{Binding ManualControl.IsCraneOnly, Converter={StaticResource BoolToVis}}" />
                     </UniformGrid>
                 </GroupBox>
             </Grid>

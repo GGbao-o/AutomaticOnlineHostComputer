@@ -45,6 +45,52 @@ public sealed class ManualMotionMagnetFeedbackContractTests
         Assert.Contains("ManualControl.RefreshTargetCommand", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Drain_tray_controls_and_door_feedbacks_are_crane_only()
+    {
+        string addresses = Read("Communication", "DeviceAddresses", "CraneAddress.cs");
+        string viewModel = Read("Presentation", "ViewModels", "Home", "CraneManualControlViewModel.cs");
+        string xaml = Read("Views", "Motion", "Controls", "ManualMotionControlPanel.xaml");
+
+        Assert.Contains("D_X0_DrainOpenOk    = 63488", addresses, StringComparison.Ordinal);
+        Assert.Contains("D_X1_DrainCloseOk   = 63489", addresses, StringComparison.Ordinal);
+
+        Assert.Contains("public bool IsCraneOnly", viewModel, StringComparison.Ordinal);
+        Assert.Contains("public bool? IsDrainOpenFeedback", viewModel, StringComparison.Ordinal);
+        Assert.Contains("public bool? IsDrainClosedFeedback", viewModel, StringComparison.Ordinal);
+        Assert.Contains("CraneAddress.D_X0_DrainOpenOk", viewModel, StringComparison.Ordinal);
+        Assert.Contains("CraneAddress.D_X1_DrainCloseOk", viewModel, StringComparison.Ordinal);
+        Assert.Contains("bool isCraneAtRead =", viewModel, StringComparison.Ordinal);
+        Assert.Contains("if (isCraneAtRead)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("true => \"门开到位（X0=1）\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("false => \"门开未到位（X0=0）\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("true => \"门关到位（X1=1）\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("false => \"门关未到位（X1=0）\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("IsDrainOpenFeedback = drainOpenFeedback;", viewModel, StringComparison.Ordinal);
+        Assert.Contains("IsDrainClosedFeedback = drainClosedFeedback;", viewModel, StringComparison.Ordinal);
+
+        Assert.Contains("ManualControl.DrainOpenFeedbackText", xaml, StringComparison.Ordinal);
+        Assert.Contains("ManualControl.DrainClosedFeedbackText", xaml, StringComparison.Ordinal);
+        Assert.Contains("ManualControl.DrainOpenCommand", xaml, StringComparison.Ordinal);
+        Assert.Contains("ManualControl.DrainCloseCommand", xaml, StringComparison.Ordinal);
+        Assert.True(
+            CountOccurrences(xaml, "ManualControl.IsCraneOnly") >= 4,
+            "两个接液盘按钮和两个门反馈标签都必须绑定天车专属可见性");
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        int count = 0;
+        int start = 0;
+        while ((start = source.IndexOf(value, start, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            start += value.Length;
+        }
+
+        return count;
+    }
+
     private static string Read(params string[] parts) =>
         File.ReadAllText(Path.Combine(RepositoryRoot.Find(), Path.Combine(parts)));
 }

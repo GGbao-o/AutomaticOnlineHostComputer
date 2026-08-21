@@ -95,9 +95,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 500,
-        "accel": 200,
-        "decel": 120
+        "speed": 600,
+        "accel": 250,
+        "decel": 200
       },
       "y": {
         "speed": 70,
@@ -468,7 +468,7 @@
     "manipulator1Line2SafeY": 3004,
     "manipulator1PickupStandbyY": 478,
     "manipulator2SafeY": 1000,
-    "manipulator3SafeY": 1500,
+    "manipulator3SafeY": 40,
     "largeDiameterLine1OnlyMm": 280,
     "sharedAreaRetreatX": {
       "ST108": 1000,
@@ -478,7 +478,7 @@
       "ST108": false,
       "ST109": false,
       "ST110": false,
-      "ST111": true,
+      "ST111": false,
       "ST112": false,
       "ST606": false,
       "ST607": false,

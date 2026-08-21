@@ -73,10 +73,13 @@ public sealed class CraneManualControlViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(SelectedDeviceDisplay));
                 OnPropertyChanged(nameof(IsCraneSelected));
+                OnPropertyChanged(nameof(IsCraneOnly));
                 IsMagnetizeFeedback = null;
                 IsDemagnetizeFeedback = null;
                 IsPlateFeedback = null;
                 IsMagnetPressureFeedback = null;
+                IsDrainOpenFeedback = null;
+                IsDrainClosedFeedback = null;
                 Console.WriteLine($"[CraneManualVM] 已切换设备 -> {SelectedDeviceDisplay}");
                 // 切换设备后自动读取当前位置填入目标输入框; 读状态请求合并, 不阻塞下拉框/UI。
                 RequestRefreshTargetsFromCurrent();
@@ -112,7 +115,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// </summary>
     public bool IsCraneSelected => _selectedDevice != null;
     /// <summary>当前选中设备是否是纯天车（有 X 轴/接液盘）。机械手为 false。</summary>
-    private bool IsCraneOnly => _selectedDevice?.DeviceType == ManualDeviceType.Crane;
+    public bool IsCraneOnly => _selectedDevice?.DeviceType == ManualDeviceType.Crane;
 
     private bool? _isMagnetizeFeedback;
     /// <summary>X6充磁到位实际反馈；null 表示本次未能读取，不能按未充磁解释。</summary>
@@ -188,6 +191,44 @@ public sealed class CraneManualControlViewModel : ObservableObject
         true => "下压触发（X2=1）",
         false => "下压未触发（X2=0）",
         null => "下压读取未知"
+    };
+
+    private bool? _isDrainOpenFeedback;
+    /// <summary>X0接液盘门开到位实际反馈；null 表示未读取或读取失败。</summary>
+    public bool? IsDrainOpenFeedback
+    {
+        get => _isDrainOpenFeedback;
+        private set
+        {
+            if (SetField(ref _isDrainOpenFeedback, value))
+                OnPropertyChanged(nameof(DrainOpenFeedbackText));
+        }
+    }
+
+    private bool? _isDrainClosedFeedback;
+    /// <summary>X1接液盘门关到位实际反馈；null 表示未读取或读取失败。</summary>
+    public bool? IsDrainClosedFeedback
+    {
+        get => _isDrainClosedFeedback;
+        private set
+        {
+            if (SetField(ref _isDrainClosedFeedback, value))
+                OnPropertyChanged(nameof(DrainClosedFeedbackText));
+        }
+    }
+
+    public string DrainOpenFeedbackText => IsDrainOpenFeedback switch
+    {
+        true => "门开到位（X0=1）",
+        false => "门开未到位（X0=0）",
+        null => "门开读取未知"
+    };
+
+    public string DrainClosedFeedbackText => IsDrainClosedFeedback switch
+    {
+        true => "门关到位（X1=1）",
+        false => "门关未到位（X1=0）",
+        null => "门关读取未知"
     };
 
     // ═══════════════════════════════════════════════════════════════
@@ -761,7 +802,10 @@ public sealed class CraneManualControlViewModel : ObservableObject
         IsDemagnetizeFeedback = null;
         IsPlateFeedback = null;
         IsMagnetPressureFeedback = null;
+        IsDrainOpenFeedback = null;
+        IsDrainClosedFeedback = null;
         ManualDeviceItem? deviceAtRead = SelectedDevice;
+        bool isCraneAtRead = deviceAtRead?.DeviceType == ManualDeviceType.Crane;
         try
         {
             using var cts = new CancellationTokenSource(RefreshPositionTimeout);
@@ -775,6 +819,15 @@ public sealed class CraneManualControlViewModel : ObservableObject
                 service, CraneAddress.D_X11_HasPlate, "X11有板", cts.Token);
             bool? magnetPressureFeedback = await TryReadXFeedbackAsync(
                 service, CraneAddress.D_X2_MagnetLimit, "X2磁铁下压限位", cts.Token);
+            bool? drainOpenFeedback = null;
+            bool? drainClosedFeedback = null;
+            if (isCraneAtRead)
+            {
+                drainOpenFeedback = await TryReadXFeedbackAsync(
+                    service, CraneAddress.D_X0_DrainOpenOk, "X0接液盘门开到位", cts.Token);
+                drainClosedFeedback = await TryReadXFeedbackAsync(
+                    service, CraneAddress.D_X1_DrainCloseOk, "X1接液盘门关到位", cts.Token);
+            }
 
             // 读途中切换设备时，旧设备状态不能覆盖新设备已清空/待刷新的状态。
             if (!ReferenceEquals(deviceAtRead, SelectedDevice)) return;
@@ -795,6 +848,8 @@ public sealed class CraneManualControlViewModel : ObservableObject
             IsDemagnetizeFeedback = demagnetizeFeedback;
             IsPlateFeedback = plateFeedback;
             IsMagnetPressureFeedback = magnetPressureFeedback;
+            IsDrainOpenFeedback = drainOpenFeedback;
+            IsDrainClosedFeedback = drainClosedFeedback;
         }
         catch (Exception ex)
         {

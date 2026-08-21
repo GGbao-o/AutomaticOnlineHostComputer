@@ -198,6 +198,10 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         // ═══════════════════════════════════════════════════════════════
         /// <summary>D63488 — X输入基地址（X0=63488, X6=63494, X7=63495...）</summary>
         public const int D_XInput_Base       = 63488;
+        /// <summary>D63488 — X0 接液盘门开到位反馈（读，1=门开到位）</summary>
+        public const int D_X0_DrainOpenOk    = 63488;
+        /// <summary>D63489 — X1 接液盘门关到位反馈（读，1=门关到位）</summary>
+        public const int D_X1_DrainCloseOk   = 63489;
         /// <summary>D63494 — X6 充磁反馈（读，1=充磁到位）</summary>
         public const int D_X6_MagnetizeOk    = 63494;
         /// <summary>D63495 — X7 退磁反馈（读，1=退磁到位）</summary>
