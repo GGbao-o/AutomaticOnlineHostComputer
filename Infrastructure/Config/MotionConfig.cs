@@ -287,6 +287,10 @@ public sealed class MotionConfig
     {
         /// <summary>后天车X坐标小于等于此值=已离开动平衡/研磨上料架区域, 机械手可安全进入</summary>
         public int RearCraneSafeX { get; set; } = -4000;
+        /// <summary>机械手2持板去ST008途中，实际Y小于此值后释放本趟M817/M818位置锁。现场负责配置安全值，不做范围校验。</summary>
+        public int M2ReleaseLocksBelowY { get; set; }
+        /// <summary>机械手3从ST010回安全位途中，实际Y小于此值后释放本趟M720/M821位置锁。现场负责配置安全值，不做范围校验。</summary>
+        public int M3ReleaseLocksBelowY { get; set; }
         /// <summary>机械手自定义YZ坐标(Key=M817/M818/M710/M700/M821/M720, 非0时覆盖数据库坐标)</summary>
         public Dictionary<string, BalancingArmCoord> ArmCoords { get; set; } = new();
     }

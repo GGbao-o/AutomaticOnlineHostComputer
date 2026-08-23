@@ -113,6 +113,15 @@ public sealed class BalancingFlowEngine : IDisposable
     private TaskCompletionSource<bool>? _m2ActionCompletion, _m3ActionCompletion;
     private int _m2ActionVersion, _m3ActionVersion;
 
+    /// <summary>
+    /// 已从来源缓存确认转移到机械手的工件。它是业务状态，不是页面展示：
+    /// 提前释放来源位置锁后，后天车可写入同名新缓存，旧动作只能继续处理自己的在途记录。
+    /// </summary>
+    private sealed record ManipulatorInFlightWorkpiece(
+        WorkpieceCache Workpiece, string Source, string Target, int ActionVersion, string Ownership);
+
+    private ManipulatorInFlightWorkpiece? _m2InFlightWorkpiece, _m3InFlightWorkpiece;
+
     // ── 页面展示上下文（严格旁路）────────────────────────────────────────
     // 这些字段只补足M2/M3从_balWps移除后“动作局部变量外不可见”的身份缺口。
     // 禁止在派发、运动、握手、锁、暂停或应急判断中读取；只能由下方Set/Clear和只读快照访问。
@@ -166,6 +175,99 @@ public sealed class BalancingFlowEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// X11=1且Z安全到位后，将来源缓存原子转为本趟机械手在途工件。
+    /// 固定锁顺序为 emergency → balWps；中间禁止 await，避免旧动作提前放锁后误删新缓存。
+    /// </summary>
+    private void TransferBalancingCacheToInFlight(bool isM2, int actionVersion,
+        string source, string target, WorkpieceCache expected)
+    {
+        lock (_emergencyLock)
+        {
+            int currentVersion = isM2 ? _m2ActionVersion : _m3ActionVersion;
+            if (currentVersion != actionVersion)
+                throw new InvalidOperationException($"{(isM2 ? "M2" : "M3")}动作版本已变更，禁止转移{source}来源缓存");
+
+            lock (_balWpsLock)
+            {
+                if (!_balWps.TryGetValue(source, out WorkpieceCache cached))
+                    throw new InvalidOperationException($"{(isM2 ? "M2" : "M3")}确认持件后未找到{source}来源缓存，禁止提前释放位置锁");
+                if (!SameWorkpiece(cached, expected))
+                    throw new InvalidOperationException($"{(isM2 ? "M2" : "M3")}确认持件后{source}来源缓存身份已变化，禁止转移");
+                _balWps.Remove(source);
+            }
+
+            var inFlight = new ManipulatorInFlightWorkpiece(expected, source, target, actionVersion, "机械手持件");
+            if (isM2) _m2InFlightWorkpiece = inFlight;
+            else _m3InFlightWorkpiece = inFlight;
+        }
+
+        Console.WriteLine($"[平衡引擎#{EngineId}] [{(isM2 ? "M2" : "M3")}] 来源缓存已转在途: {source} → {target} {expected.IdentityText}");
+    }
+
+    private static bool SameWorkpiece(WorkpieceCache left, WorkpieceCache right) =>
+        string.Equals(left.PlateNo, right.PlateNo, StringComparison.Ordinal) &&
+        string.Equals(left.Sequence, right.Sequence, StringComparison.Ordinal) &&
+        left.Diameter.Equals(right.Diameter) && left.Length.Equals(right.Length) && left.BoreType == right.BoreType;
+
+    /// <summary>M700没有来源缓存；在同一取走确认点直接建立M3在途工件。</summary>
+    private void CreateInFlightWorkpiece(bool isM2, int actionVersion,
+        string source, string target, WorkpieceCache workpiece)
+    {
+        lock (_emergencyLock)
+        {
+            int currentVersion = isM2 ? _m2ActionVersion : _m3ActionVersion;
+            if (currentVersion != actionVersion)
+                throw new InvalidOperationException($"{(isM2 ? "M2" : "M3")}动作版本已变更，禁止建立在途工件");
+
+            var inFlight = new ManipulatorInFlightWorkpiece(workpiece, source, target, actionVersion, "机械手持件");
+            if (isM2) _m2InFlightWorkpiece = inFlight;
+            else _m3InFlightWorkpiece = inFlight;
+        }
+    }
+
+    private void SetInFlightOwnership(bool isM2, int actionVersion, string ownership)
+    {
+        lock (_emergencyLock)
+        {
+            var current = isM2 ? _m2InFlightWorkpiece : _m3InFlightWorkpiece;
+            if (current?.ActionVersion != actionVersion) return;
+            current = current with { Ownership = ownership };
+            if (isM2) _m2InFlightWorkpiece = current;
+            else _m3InFlightWorkpiece = current;
+        }
+    }
+
+    private WorkpieceCache? GetInFlightWorkpiece(bool isM2)
+    {
+        lock (_emergencyLock)
+            return (isM2 ? _m2InFlightWorkpiece : _m3InFlightWorkpiece)?.Workpiece;
+    }
+
+    private bool IsSourceCacheTransferredToInFlight(bool isM2, string source)
+    {
+        lock (_emergencyLock)
+        {
+            var current = isM2 ? _m2InFlightWorkpiece : _m3InFlightWorkpiece;
+            return current != null && string.Equals(current.Source, source, StringComparison.Ordinal);
+        }
+    }
+
+    private void ClearInFlightWorkpiece(bool isM2, int actionVersion)
+    {
+        lock (_emergencyLock)
+        {
+            if (isM2)
+            {
+                if (_m2InFlightWorkpiece?.ActionVersion == actionVersion) _m2InFlightWorkpiece = null;
+            }
+            else if (_m3InFlightWorkpiece?.ActionVersion == actionVersion)
+            {
+                _m3InFlightWorkpiece = null;
+            }
+        }
+    }
+
     public bool IsRunning => _engineTask != null && !_engineTask.IsCompleted;
     public bool IsPaused => _paused;
     /// <summary>动平衡流程进入人工确认暂停时通知主页面。</summary>
@@ -207,12 +309,16 @@ public sealed class BalancingFlowEngine : IDisposable
         WorkpieceCache? m3Workpiece;
         string m2Stage;
         string m3Stage;
+        bool m2IsInFlight;
+        bool m3IsInFlight;
         lock (_emergencyLock)
         {
-            m2Workpiece = _m2DisplayWorkpiece;
-            m3Workpiece = _m3DisplayWorkpiece;
-            m2Stage = _m2DisplayStage;
-            m3Stage = _m3DisplayStage;
+            m2Workpiece = _m2InFlightWorkpiece?.Workpiece ?? _m2DisplayWorkpiece;
+            m3Workpiece = _m3InFlightWorkpiece?.Workpiece ?? _m3DisplayWorkpiece;
+            m2Stage = _m2InFlightWorkpiece?.Ownership ?? _m2DisplayStage;
+            m3Stage = _m3InFlightWorkpiece?.Ownership ?? _m3DisplayStage;
+            m2IsInFlight = _m2InFlightWorkpiece != null;
+            m3IsInFlight = _m3InFlightWorkpiece != null;
         }
 
         var result = new List<InProcessWorkpieceSnapshot>(cached.Length + 2);
@@ -228,18 +334,18 @@ public sealed class BalancingFlowEngine : IDisposable
         {
             result.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.BalancingInTransit,
                 "动平衡", "动平衡", "机械手2", TextOrNone(m2Stage),
-                WorkpieceDisplaySnapshot.From(m2Workpiece.Value), "M2动作展示上下文",
+                WorkpieceDisplaySnapshot.From(m2Workpiece.Value), m2IsInFlight ? "M2在途业务记录" : "M2动作展示上下文",
                 _paused ? InProcessWorkpieceStatus.ManualConfirmation : InProcessWorkpieceStatus.Normal,
-                "只随当前动作记录身份；业务流程不会读取此展示字段", nowUtc));
+                m2IsInFlight ? "来源缓存已转为机械手2在途工件" : "只随当前动作记录身份", nowUtc));
         }
 
         if (m3Workpiece.HasValue)
         {
             result.Add(new InProcessWorkpieceSnapshot(InProcessWorkpieceKind.BalancingInTransit,
                 "动平衡", "动平衡", "机械手3", TextOrNone(m3Stage),
-                WorkpieceDisplaySnapshot.From(m3Workpiece.Value), "M3动作展示上下文",
+                WorkpieceDisplaySnapshot.From(m3Workpiece.Value), m3IsInFlight ? "M3在途业务记录" : "M3动作展示上下文",
                 _paused ? InProcessWorkpieceStatus.ManualConfirmation : InProcessWorkpieceStatus.Normal,
-                "M700来源可能只有直径、没有版号；业务流程不会读取此展示字段", nowUtc));
+                m3IsInFlight ? "来源缓存已转为机械手3在途工件；M700可能只有直径、没有版号" : "M700来源可能只有直径、没有版号", nowUtc));
         }
 
         return result.ToArray();
@@ -286,8 +392,15 @@ public sealed class BalancingFlowEngine : IDisposable
         bool isM2 = snapshot.FlowScope.StartsWith("动平衡机械手2", StringComparison.Ordinal);
         string source = snapshot.Source;
         WorkpieceCache? workpiece;
+        bool sourceCacheTransferred;
+        int inFlightActionVersion;
         lock (_emergencyLock)
-            workpiece = isM2 ? _m2DisplayWorkpiece : _m3DisplayWorkpiece;
+        {
+            var inFlight = isM2 ? _m2InFlightWorkpiece : _m3InFlightWorkpiece;
+            workpiece = inFlight?.Workpiece ?? (isM2 ? _m2DisplayWorkpiece : _m3DisplayWorkpiece);
+            sourceCacheTransferred = inFlight != null && string.Equals(inFlight.Source, source, StringComparison.Ordinal);
+            inFlightActionVersion = inFlight?.ActionVersion ?? 0;
+        }
         if (!workpiece.HasValue && source != "M700")
             return $"动作={operationId}缺少保留的工件身份，不能凭快照重建{source}缓存；请先人工补录后再结案。";
 
@@ -299,7 +412,14 @@ public sealed class BalancingFlowEngine : IDisposable
                 // M817/M818/M821都有完整软件缓存；M700是人工动平衡后的物理来源，
                 // 没有可靠版号时只保留占用/展示，绝不能伪造新的缓存身份。
                 if (source != "M700" && workpiece.HasValue)
-                    SetBalancingWp(source, workpiece.Value);
+                {
+                    lock (_balWpsLock)
+                    {
+                        if (sourceCacheTransferred && _balWps.ContainsKey(source))
+                            return $"动作={operationId}确认仍在{source}失败：该位置已存在后天车新写入的缓存，禁止用旧动作工件覆盖。";
+                        _balWps[source] = workpiece.Value;
+                    }
+                }
                 if (isM2) SetM2EmergencySource(source); else SetM3EmergencySource(source);
                 result = source == "M700"
                     ? "确认仍在M700：保留M3来源占用和展示身份；M700没有可靠版号缓存，未伪造缓存"
@@ -314,7 +434,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 result = $"确认工件已在目标{snapshot.Target}待交接：保留来源关联和展示任务牌，不伪造M711/M721或研磨缓存完成";
                 break;
             case FlowActionManualResolution.RemovedManually:
-                if (source != "M700")
+                if (source != "M700" && !sourceCacheTransferred)
                 {
                     lock (_balWpsLock) _balWps.Remove(source);
                 }
@@ -323,14 +443,18 @@ public sealed class BalancingFlowEngine : IDisposable
                     ClearM2Busy();
                     ClearM2EmergencyContext();
                     ClearM2Display(_m2DisplayVersion);
+                    if (inFlightActionVersion != 0) ClearInFlightWorkpiece(true, inFlightActionVersion);
                 }
                 else
                 {
                     ClearM3Busy();
                     ClearM3EmergencyContext();
                     ClearM3Display(_m3DisplayVersion);
+                    if (inFlightActionVersion != 0) ClearInFlightWorkpiece(false, inFlightActionVersion);
                 }
-                result = $"确认工件已人工移走：{source}来源缓存/忙标志/展示任务牌已清；未写PLC信号";
+                result = sourceCacheTransferred
+                    ? $"确认工件已人工移走：旧动作在途工件/忙标志/展示任务牌已清；保留{source}可能存在的新缓存，未写PLC信号"
+                    : $"确认工件已人工移走：{source}来源缓存/忙标志/展示任务牌已清；未写PLC信号";
                 break;
             default:
                 return $"不支持的人工结论: {resolution}";
@@ -353,12 +477,14 @@ public sealed class BalancingFlowEngine : IDisposable
                 ClearM2Busy();
                 ClearM2EmergencyContext();
                 ClearM2Display(_m2DisplayVersion);
+                if (inFlightActionVersion != 0) ClearInFlightWorkpiece(true, inFlightActionVersion);
             }
             else
             {
                 ClearM3Busy();
                 ClearM3EmergencyContext();
                 ClearM3Display(_m3DisplayVersion);
+                if (inFlightActionVersion != 0) ClearInFlightWorkpiece(false, inFlightActionVersion);
             }
         }
         FlowActionManualRegistry.Remove(operationId);
@@ -382,6 +508,10 @@ public sealed class BalancingFlowEngine : IDisposable
         bool releasedM3 = false;
         string m2Source = string.Empty;
         string m3Source = string.Empty;
+        bool m2SourceCacheTransferred = false;
+        bool m3SourceCacheTransferred = false;
+        int m2InFlightVersionToClear = 0;
+        int m3InFlightVersionToClear = 0;
         int m2DisplayVersionToClear = 0;
         int m3DisplayVersionToClear = 0;
 
@@ -401,6 +531,10 @@ public sealed class BalancingFlowEngine : IDisposable
             if (touchesM2)
             {
                 m2Source = _m2EmergencySource;
+                var inFlight = _m2InFlightWorkpiece;
+                m2SourceCacheTransferred = inFlight != null &&
+                    string.Equals(inFlight.Source, m2Source, StringComparison.Ordinal);
+                m2InFlightVersionToClear = inFlight?.ActionVersion ?? 0;
                 m2Completion = _m2ActionCompletion?.Task;
                 CancelM2ActionNoLock(logs);
             }
@@ -408,6 +542,10 @@ public sealed class BalancingFlowEngine : IDisposable
             if (touchesM3)
             {
                 m3Source = _m3EmergencySource;
+                var inFlight = _m3InFlightWorkpiece;
+                m3SourceCacheTransferred = inFlight != null &&
+                    string.Equals(inFlight.Source, m3Source, StringComparison.Ordinal);
+                m3InFlightVersionToClear = inFlight?.ActionVersion ?? 0;
                 m3Completion = _m3ActionCompletion?.Task;
                 CancelM3ActionNoLock(logs);
             }
@@ -445,11 +583,30 @@ public sealed class BalancingFlowEngine : IDisposable
             }
         }
 
-        // 选择目的位M710/M720时，真实工件身份仍存放在动作来源M817/M818/M821。
-        // 应急只清选中位置和被取消动作的实际来源，不碰其它正常位置缓存或研磨FIFO。
+        // 应急默认清选中位置；只有旧动作尚未转在途时，才同时清它的实际来源。
+        // 已转在途的来源键可能已由后天车写入下一块板，必须始终保留，不碰其它正常位置缓存或研磨FIFO。
         var cacheKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { position };
-        if (touchesM2 && !string.IsNullOrWhiteSpace(m2Source)) cacheKeys.Add(m2Source);
-        if (touchesM3 && string.Equals(m3Source, "M821", StringComparison.OrdinalIgnoreCase)) cacheKeys.Add(m3Source);
+        if (touchesM2 && m2SourceCacheTransferred)
+        {
+            if (string.Equals(position, m2Source, StringComparison.OrdinalIgnoreCase))
+                cacheKeys.Remove(position);
+            logs.Add($"{m2Source}缓存=保留（旧M2动作已转在途，可能是后天车新写入）");
+        }
+        else if (touchesM2 && !string.IsNullOrWhiteSpace(m2Source))
+        {
+            cacheKeys.Add(m2Source);
+        }
+
+        if (touchesM3 && m3SourceCacheTransferred)
+        {
+            if (string.Equals(position, m3Source, StringComparison.OrdinalIgnoreCase))
+                cacheKeys.Remove(position);
+            logs.Add($"{m3Source}缓存=保留（旧M3动作已转在途，可能是后天车新写入）");
+        }
+        else if (touchesM3 && string.Equals(m3Source, "M821", StringComparison.OrdinalIgnoreCase))
+        {
+            cacheKeys.Add(m3Source);
+        }
         lock (_balWpsLock)
         {
             foreach (var key in cacheKeys)
@@ -461,6 +618,8 @@ public sealed class BalancingFlowEngine : IDisposable
             if (touchesM2) { ClearM2Busy(); _m2EmergencySource = string.Empty; logs.Add("M2忙标志=已清"); }
             if (touchesM3) { ClearM3Busy(); _m3EmergencySource = string.Empty; logs.Add("M3忙标志=已清"); }
         }
+        if (m2InFlightVersionToClear != 0) { ClearInFlightWorkpiece(true, m2InFlightVersionToClear); logs.Add("M2在途工件=已清"); }
+        if (m3InFlightVersionToClear != 0) { ClearInFlightWorkpiece(false, m3InFlightVersionToClear); logs.Add("M3在途工件=已清"); }
 
         // 仅清展示字段，不改设备、缓存、锁或动作版本。版本校验防止旧应急清掉新任务。
         if (m2DisplayVersionToClear != 0) { ClearM2Display(m2DisplayVersionToClear); logs.Add("M2页面显示=已清"); }
@@ -1372,13 +1531,21 @@ public sealed class BalancingFlowEngine : IDisposable
                 Console.WriteLine($"[平衡引擎] [M2] ⚠ X11=0 未吸到, 准备下探5mm重试");
             }
 
-            // ── ② 放料: Z↑安全→XY→ST008→Z↓台面→退磁→Z↑安全 ──
-            // (缓存不移除: 放料失败时工件还在磁铁上, 缓存需保留供人工确认)
+            // ── ② 放料: Z↑安全→把来源缓存转为在途→XY→ST008→Z↓台面→退磁→Z↑安全 ──
+            // X11已确认且Z安全后，来源缓存必须转为本动作在途记录；此后放锁不会让旧动作删掉后天车的新缓存。
             action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, pickY, safeZ), "持件后Z上升安全高度");
             action.MarkCommandSent();
             await _m2.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
             action.Confirm(new FlowActionPosition(null, pickY, safeZ), "持件后Z安全到位");
             operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "M2取料后Z升安全命令成功返回");
+            operationalTracker.BeginCacheMutation(pickReg,
+                EvidenceValue<string>.Confirmed(trackedWorkpiece.IdentityText, "X11=1、Z安全且来源缓存已锁内确认"),
+                "将来源缓存转为M2在途工件");
+            TransferBalancingCacheToInFlight(true, actionVersion, pickReg, "ST008/M710", trackedWorkpiece);
+            operationalTracker.CompleteCacheMutation(pickReg,
+                EvidenceValue<string>.Confirmed(trackedWorkpiece.IdentityText, "缓存转移前的来源工件"),
+                EvidenceValue<string>.Confirmed("来源缓存已移除，工件已登记为M2在途", "转移成功返回"),
+                "M2来源缓存转在途成功返回");
             if (!useM817)
             {
                 action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(null, pickY, safeZ), "M824通知ST020已取料");
@@ -1393,9 +1560,17 @@ public sealed class BalancingFlowEngine : IDisposable
             //获得yz距离
             var (destY, destZ) = GetArmCoord("M710", "ST008", _m2OffsetY, _m2OffsetZ);
             Console.WriteLine($"[平衡引擎] [M2] ② 放料 M710(ST008) Y={destY}");
+            int m2ReleaseLocksBelowY = _cfg.Balancing.M2ReleaseLocksBelowY;
+            bool m2LocksReleasedDuringTransit = false;
+            void ObserveM2TransitY(CraneStatus status)
+            {
+                if (m2LocksReleasedDuringTransit || status.YPos >= m2ReleaseLocksBelowY) return;
+                m2LocksReleasedDuringTransit = true;
+                ReleaseM2RackLocks($"去ST008途中实际Y={status.YPos}小于提前释放阈值={m2ReleaseLocksBelowY}");
+            }
             action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(null, destY, safeZ), "持件Y到ST008/M710目标位");
             action.MarkCommandSent();
-            await _m2.MoveAbsoluteAsync(-1, destY, -1, ct: ct);
+            await _m2.MoveAbsoluteAsync(-1, destY, -1, ct: ct, yStatusObserver: ObserveM2TransitY);
             action.Confirm(new FlowActionPosition(null, destY, safeZ), "目标Y到位");
             int placeZ = Pz(destZ, d);
             Console.WriteLine($"[平衡引擎] [M2]   放料Z公式: {destZ} - Round(...) = {placeZ}");
@@ -1430,7 +1605,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 operationalTracker.CompletePlacementMagnetOff("ST008/M710");
                 operationalPlacementCommitted = true;
                 operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M2-ST008/M710完整交接",
-                    "目标位退磁成功返回，放料推定成立；等待Z安全回升、来源缓存移除和M711通知");
+                    "目标位退磁成功返回，放料推定成立；等待Z安全回升和M711通知；来源缓存已在持件安全Z阶段转在途");
             }
             catch (Exception ex)
             {
@@ -1446,10 +1621,8 @@ public sealed class BalancingFlowEngine : IDisposable
             action.Confirm(new FlowActionPosition(null, destY, placeZ), "目标退磁成功返回");
             action.RecordFeedback(FlowActionPosition.Unknown, null, false, "目标退磁成功返回");
             action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff, "退磁成功，工件已在ST008/M710等待M711闭环");
+            SetInFlightOwnership(true, actionVersion, "ST008/M710目标待交接");
             Console.WriteLine("[平衡引擎] [M2] 退磁 ✓");
-            // 工件已退磁放到M710/ST008, M2后续只需Z升安全和Y回配置安全位。
-            // 此时已不再占用M817/M818来源/路径区域, 可提前释放下料架位置锁, 让后天车/后续流程不被无谓阻塞。
-            ReleaseM2RackLocks("M710退磁完成");
             //退磁完成回安全位置
             action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, destY, safeZ), "ST008/M710放料后Z升安全高度");
             action.MarkCommandSent();
@@ -1459,19 +1632,6 @@ public sealed class BalancingFlowEngine : IDisposable
             placedOnM710 = true; // 工件已物理放到ST008, 后续M711失败必须暂停人工确认
             holdingWorkpiece = false;
             SetM2Display(actionVersion, trackedWorkpiece, "已放到ST008/M710，等待M711确认");
-            // ── 放料成功, 清理缓存 (工件已安全放到ST008, 不怕异常) ──
-            operationalTracker.BeginCacheMutation(pickReg,
-                EvidenceValue<string>.Confirmed($"{pickReg}=存在({trackedWorkpiece.IdentityText})", "锁内读取已确认来源缓存存在"),
-                $"开始移除来源缓存键{pickReg}");
-            lock (_balWpsLock)
-            {
-                _balWps.Remove(pickReg);
-            }
-            operationalTracker.CompleteCacheMutation(pickReg,
-                EvidenceValue<string>.Confirmed($"{pickReg}=存在({trackedWorkpiece.IdentityText})", "锁内读取已确认来源缓存存在"),
-                EvidenceValue<string>.Confirmed($"{pickReg}=已移除", "Remove成功完成后的缓存事实"),
-                $"来源缓存键{pickReg}移除完成");
-            Console.WriteLine($"[平衡引擎#{EngineId}] [M2] 缓存已清理 {pickReg} Keys=[{CacheKeysText}]");
 
             // ── 写M711=1: 通知PLC工件已送到ST008动平衡料架1(M300→M711) ──
             if (_mc65?.IsConnected == true)
@@ -1488,7 +1648,7 @@ public sealed class BalancingFlowEngine : IDisposable
                         "M711写入成功返回，PLC放料通知已确认");
                     m711Notified = true;
                     operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M2-ST008/M710完整交接",
-                        "退磁、Z安全回升、来源缓存移除及M711通知均成功返回");
+                        "退磁、Z安全回升及M711通知均成功返回；来源缓存已在持件安全Z阶段转在途");
                     trackedWorkpiece.ReportStage("动平衡加工中 ST008/M710");
                     SetM2Display(actionVersion, trackedWorkpiece, "M711已确认，机械手2返回安全位");
                     Console.WriteLine($"[平衡引擎] [M2] M711=1 送工件完成 ✓ {trackedWorkpiece.IdentityText}");
@@ -1572,8 +1732,8 @@ public sealed class BalancingFlowEngine : IDisposable
         }
         finally
         {
-            // 异常兜底: 如果流程没走到M710退磁完成, 这里释放仍持有的来源/路径锁。
-            // 正常路径已在退磁后清got标志, 这里不会重复Release。
+            // 异常兜底: 未在持件去ST008途中达到提前释放阈值时，释放仍持有的来源/路径锁。
+            // 已提前释放时got标志已清，这里不会重复Release。
             ReleaseM2RackLocks("finally兜底");
             if (IsM2ActionCurrent(actionVersion))
             {
@@ -1588,7 +1748,10 @@ public sealed class BalancingFlowEngine : IDisposable
             if (keepDisplayForManualConfirmation && IsM2ActionCurrent(actionVersion))
                 Console.WriteLine($"[平衡引擎] [M2] 保留页面工件身份: 动作版本={actionVersion}，等待人工确认/应急成功清理");
             else
+            {
                 ClearM2Display(actionVersion);
+                ClearInFlightWorkpiece(true, actionVersion);
+            }
             FinishM2Action(actionVersion, actionCompletion);
         }
     }
@@ -1598,7 +1761,7 @@ public sealed class BalancingFlowEngine : IDisposable
     //    触发: 主循环⑥ M700有版或ST021(M825允许取+M821缓存存在) + (M821需天车4号X≤safeX) + M720(ST010)允许放版
     //    直径: useM700=true → 读D100(MC65, 动平衡料架2直径); false → 读_balWps["M821"]缓存
     //    信号: M700来源取走后写M701=1; 放料后写M721=1(MC65)通知PLC放料完成; M720二次确认在取料前做
-    //    ⚠ M821缓存Remove移至放料成功后, 防止放料失败时缓存丢失
+    //    ⚠ M821缓存会在X11=1且Z安全后转为本动作在途记录，提前放锁后不允许旧动作删除新缓存
     // ═══════════════════════════════════════════════════════════════════
     /// <param name="useM700">主循环快照: true=M700(动平衡后读D100), false=M821(后天车送来读缓存)</param>
     private async Task M3Flow(CancellationToken ct, bool useM700)
@@ -1633,6 +1796,25 @@ public sealed class BalancingFlowEngine : IDisposable
             "动平衡", "动平衡引擎", "机械手", "M3", "来源未确定",
             "M3取料并放到ST010/M720", operationalActionId, $"{operationalActionId}:pending", null,
             "来源未确定", "ST010/M720", "机械手3", "来源未确定", "动作已创建", "M821/M720位置锁"));
+        void ReleaseM3RackLocks(string reason)
+        {
+            bool released = false;
+            if (gotM720)
+            {
+                if (ConsumeM3Lock("M720")) _lockM720?.Release();
+                action?.TryReleaseLock("M720");
+                gotM720 = false;
+                released = true;
+            }
+            if (gotM821)
+            {
+                if (ConsumeM3Lock("M821")) _lockM821?.Release();
+                action?.TryReleaseLock("M821");
+                gotM821 = false;
+                released = true;
+            }
+            if (released) Console.WriteLine($"[平衡引擎] [M3] {reason}: 已释放M821/M720位置锁");
+        }
         try
         {
             if (_lockM821 != null)
@@ -1941,6 +2123,20 @@ public sealed class BalancingFlowEngine : IDisposable
             await _m3.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
             action.Confirm(new FlowActionPosition(null, pickY, safeZ), "持件后Z安全到位");
             operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "M3取料后Z升安全命令成功返回");
+            if (useM700)
+                CreateInFlightWorkpiece(false, actionVersion, "M700", "ST010/M720", m3DisplayWorkpiece);
+            else
+            {
+                operationalTracker.BeginCacheMutation("M821",
+                    EvidenceValue<string>.Confirmed(m3DisplayWorkpiece.IdentityText, "X11=1、Z安全且M821来源缓存已锁内确认"),
+                    "将M821来源缓存转为M3在途工件");
+                TransferBalancingCacheToInFlight(false, actionVersion, "M821", "ST010/M720", m3DisplayWorkpiece);
+                operationalTracker.CompleteCacheMutation("M821",
+                    EvidenceValue<string>.Confirmed(m3DisplayWorkpiece.IdentityText, "缓存转移前的M821来源工件"),
+                    EvidenceValue<string>.Confirmed("M821来源缓存已移除，工件已登记为M3在途", "转移成功返回"),
+                    "M3来源缓存转在途成功返回");
+            }
+            operationalSourceCacheClosed = true;
             if (!useM700)
             {
                 action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(null, pickY, safeZ), "M826通知ST021已取料");
@@ -2020,7 +2216,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 operationalTracker.CompletePlacementMagnetOff("ST010/M720");
                 operationalPlacementCommitted = true;
                 operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M3-ST010/M720完整交接",
-                    "目标位退磁成功返回，放料推定成立；等待Z安全回升、M721、研磨缓存和来源缓存闭环");
+                    "目标位退磁成功返回，放料推定成立；等待Z安全回升、M721和研磨缓存闭环；M821来源缓存已在持件安全Z阶段转在途");
             }
             catch (Exception ex)
             {
@@ -2036,6 +2232,7 @@ public sealed class BalancingFlowEngine : IDisposable
             action.Confirm(new FlowActionPosition(null, destY, placeZ), "目标退磁成功返回");
             action.RecordFeedback(FlowActionPosition.Unknown, null, false, "目标退磁成功返回");
             action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff, "退磁成功，工件已在ST010/M720等待M721和研磨缓存闭环");
+            SetInFlightOwnership(false, actionVersion, "ST010/M720目标待交接");
             Console.WriteLine("[平衡引擎] [M3] 退磁 ✓");
             action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, destY, safeZ), "ST010/M720放料后Z升安全高度");
             action.MarkCommandSent();
@@ -2102,32 +2299,23 @@ public sealed class BalancingFlowEngine : IDisposable
             SetM3Display(actionVersion, grindingWp, "已写入研磨缓存，机械手3返回安全位");
             Console.WriteLine($"[平衡引擎] [M3] 通知研磨引擎入缓存 {grindingWp.IdentityText} d={grindingWp.Diameter} L={grindingWp.Length}");
 
-            // ── 放料成功, 清理M821来源的缓存 (工件已安全放到ST010) ──
-            if (!useM700) // M821来源走缓存, M820来源走D200无需清
-            {
-                operationalTracker.BeginCacheMutation("M821",
-                    EvidenceValue<string>.Confirmed($"M821=存在({m3DisplayWorkpiece.IdentityText})", "锁内读取已确认来源缓存存在"),
-                    "开始移除来源缓存键M821");
-                lock (_balWpsLock)
-                {
-                    _balWps.Remove("M821");
-                }
-                operationalTracker.CompleteCacheMutation("M821",
-                    EvidenceValue<string>.Confirmed($"M821=存在({m3DisplayWorkpiece.IdentityText})", "锁内读取已确认来源缓存存在"),
-                    EvidenceValue<string>.Confirmed("M821=已移除", "Remove成功完成后的缓存事实"),
-                    "来源缓存键M821移除完成");
-                Console.WriteLine($"[平衡引擎#{EngineId}] [M3] 缓存已清理 M821 Keys=[{CacheKeysText}]");
-            }
-            operationalSourceCacheClosed = true;
             operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "M3-ST010/M720完整交接",
-                "退磁、Z安全回升、M721、研磨缓存及适用的来源缓存移除均成功返回");
+                "退磁、Z安全回升、M721及研磨缓存均成功返回；适用的来源缓存已在持件安全Z阶段转在途");
 
             // ── ③ 回安全位: Y→配置文件manipulator3SafeY ──
             int safeY = _cfg.SkewBed.Manipulator3SafeY;
             Console.WriteLine($"[平衡引擎] [M3] Y→安全位{safeY}");
+            int m3ReleaseLocksBelowY = _cfg.Balancing.M3ReleaseLocksBelowY;
+            bool m3LocksReleasedDuringReturn = false;
+            void ObserveM3ReturnY(CraneStatus status)
+            {
+                if (m3LocksReleasedDuringReturn || status.YPos >= m3ReleaseLocksBelowY) return;
+                m3LocksReleasedDuringReturn = true;
+                ReleaseM3RackLocks($"从ST010回安全位途中实际Y={status.YPos}小于提前释放阈值={m3ReleaseLocksBelowY}");
+            }
             action.BeginStep(FlowActionStep.ReturnSafe, new FlowActionPosition(null, safeY, safeZ), "机械手3回配置安全Y");
             action.MarkCommandSent();
-            await _m3.MoveAbsoluteAsync(-1, safeY, -1, ct: ct);
+            await _m3.MoveAbsoluteAsync(-1, safeY, -1, ct: ct, yStatusObserver: ObserveM3ReturnY);
             action.Confirm(new FlowActionPosition(null, safeY, safeZ), "机械手3安全Y到位");
             action.Complete("机械手3已完成M721、研磨缓存和来源账本闭环并回到安全位");
             Console.WriteLine("[平衡引擎] [M3] ═══ 完成 ═══");
@@ -2198,12 +2386,7 @@ public sealed class BalancingFlowEngine : IDisposable
         }
         finally
         {
-            //释放两把锁
-            // 注意: 实际释放按后拿先放, 先释放M720/ST010锁, 再释放M821锁。
-            if (gotM720 && ConsumeM3Lock("M720")) _lockM720?.Release();  // 先释放M720/ST010锁(后拿的先放)
-            action?.TryReleaseLock("M720");
-            if (gotM821 && ConsumeM3Lock("M821")) _lockM821?.Release();  // 再释放M821锁(先拿的后放)
-            action?.TryReleaseLock("M821");
+            ReleaseM3RackLocks("finally兜底");
             if (IsM3ActionCurrent(actionVersion))
             {
                 ClearM3Busy();
@@ -2217,7 +2400,10 @@ public sealed class BalancingFlowEngine : IDisposable
             if (keepDisplayForManualConfirmation && IsM3ActionCurrent(actionVersion))
                 Console.WriteLine($"[平衡引擎] [M3] 保留页面工件身份: 动作版本={actionVersion}，等待人工确认/应急成功清理");
             else
+            {
                 ClearM3Display(actionVersion);
+                ClearInFlightWorkpiece(false, actionVersion);
+            }
             FinishM3Action(actionVersion, actionCompletion);
         }
     }

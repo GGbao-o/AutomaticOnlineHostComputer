@@ -29,9 +29,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 450,
-        "accel": 100,
-        "decel": 80
+        "speed": 800,
+        "accel": 200,
+        "decel": 200
       },
       "y": {
         "speed": 70,
@@ -51,9 +51,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 500,
+        "speed": 800,
         "accel": 200,
-        "decel": 120
+        "decel": 200
       },
       "y": {
         "speed": 70,
@@ -73,9 +73,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 450,
-        "accel": 100,
-        "decel": 80
+        "speed": 750,
+        "accel": 180,
+        "decel": 180
       },
       "y": {
         "speed": 70,
@@ -95,9 +95,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 600,
-        "accel": 250,
-        "decel": 200
+        "speed": 750,
+        "accel": 180,
+        "decel": 180
       },
       "y": {
         "speed": 70,
@@ -117,9 +117,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 500,
+        "speed": 600,
         "accel": 200,
-        "decel": 120
+        "decel": 160
       },
       "y": {
         "speed": 70,
@@ -380,7 +380,7 @@
     "workpieceDisplayIp": "192.168.2.111",
     "pollIntervalMs": 500,
     "handshakeTimeoutMs": 120000,
-    "x11StableDelayMs": 1000,
+    "x11StableDelayMs": 500,
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,
     "waitingForUnloadTimeoutMinutes": 20,
@@ -388,6 +388,8 @@
   },
   "balancing": {
     "rearCraneSafeX": -2000,
+    "m2ReleaseLocksBelowY": 5500,
+    "m3ReleaseLocksBelowY": 5500,
     "armCoords": {
       "M817": {
         "y": 15701,

@@ -804,10 +804,13 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// Y 目标：D3104~D3105（DINT）→ 触发 D4521=2 → 到位后 D4521=0
         /// Z 目标：D3106~D3107（DINT）→ 触发 D4520=2 → 到位后 D4520=0
         /// </para>
+        /// <para><paramref name="yStatusObserver"/> 仅观察本次参与Y轴运动的实际状态；它由既有到位轮询调用，
+        /// 不新增并发Modbus读取，也不改变运动命令、超时或触发位复位语义。</para>
         /// </summary>
         public async Task MoveAbsoluteAsync(
             int xTarget, int yTarget, int zTarget,
-            int tolerance = 5, int? timeoutMs = null, CancellationToken ct = default)
+            int tolerance = 5, int? timeoutMs = null, CancellationToken ct = default,
+            Action<CraneStatus>? yStatusObserver = null)
         {
             int xyTimeoutMs = timeoutMs ?? _xyTimeoutMs;
             int zTimeoutMs = timeoutMs ?? _zTimeoutMs;
@@ -868,7 +871,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     await Task.Delay(500, ct);
                     if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", ct);
                     if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", ct);
-                    await PollAxesAsync(xTarget, yTarget, -1, tolerance, xyTimeoutMs, "XY先行", ct);
+                    await PollAxesAsync(xTarget, yTarget, -1, tolerance, xyTimeoutMs, "XY先行", ct,
+                        statusObserver: yStatusObserver);
                     if (zTarget != -1)
                     {
                         await WriteRegAsync(Addr.D_ManualZAbsMove, 2, "Z绝对移动触发 D4520", ct);
@@ -885,7 +889,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                         await Task.Delay(500, ct);
                         await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", ct);
                     }
-                    await PollAxesAsync(-1, -1, zTarget, tolerance, zTimeoutMs, "Z先行", ct, monitorPressure: false);
+                    await PollAxesAsync(-1, -1, zTarget, tolerance, zTimeoutMs, "Z先行", ct,
+                        monitorPressure: false, statusObserver: yStatusObserver);
                     if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 2, "X绝对移动触发 D4522", ct);
                     if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 2, "Y绝对移动触发 D4521", ct);
                     await Task.Delay(500, ct);
@@ -909,12 +914,15 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 //  完成另一组轴，所以最终只等待尚未完成的安全阶段。
                 // ──────────────────────────────────
                 if (zGoingDown)
-                    await PollAxesAsync(-1, -1, zTarget, tolerance, zTimeoutMs, "Z下降", ct, monitorPressure: true);
+                    await PollAxesAsync(-1, -1, zTarget, tolerance, zTimeoutMs, "Z下降", ct,
+                        monitorPressure: true, statusObserver: yStatusObserver);
                 else if (zGoingUp)
-                    await PollAxesAsync(xTarget, yTarget, -1, tolerance, xyTimeoutMs, "XY后行", ct);
+                    await PollAxesAsync(xTarget, yTarget, -1, tolerance, xyTimeoutMs, "XY后行", ct,
+                        statusObserver: yStatusObserver);
                 else
                     await PollAxesAsync(xTarget, yTarget, zTarget, tolerance,
-                        zTarget == -1 ? xyTimeoutMs : Math.Max(xyTimeoutMs, zTimeoutMs), "并行动作", ct);
+                        zTarget == -1 ? xyTimeoutMs : Math.Max(xyTimeoutMs, zTimeoutMs), "并行动作", ct,
+                        statusObserver: yStatusObserver);
             }
             finally
             {
@@ -927,7 +935,6 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 if (xTarget != -1) await WriteRegAsync(Addr.D_ManualXAbsMove, 0, "X绝对移动复位 D4522", resetCt);
                 if (yTarget != -1) await WriteRegAsync(Addr.D_ManualYAbsMove, 0, "Y绝对移动复位 D4521", resetCt);
                 if (zTarget != -1) await WriteRegAsync(Addr.D_ManualZAbsMove, 0, "Z绝对移动复位 D4520", resetCt);
-
             }
 
             OperationalLog.Info("绝对移动到位确认", "天车已完成绝对移动，触发信号已复位",
@@ -980,9 +987,11 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// 轮询等待指定轴到位（-1 表示跳过该轴）。
         /// 超时后抛异常，由上层按工件物理状态决定暂停或人工处理。
         /// <param name="monitorPressure">仅 Z 下降时检测 X2 下压信号；Z 上升时不检测，防止回升途中 X2 延迟释放导致误急停。</param>
+        /// <param name="statusObserver">仅在本轮轮询参与Y轴时接收成功读取的实际状态。</param>
         /// </summary>
         private async Task PollAxesAsync(int xTarget, int yTarget, int zTarget,
-            int tolerance, int timeoutMs, string stage, CancellationToken ct, bool monitorPressure = false)
+            int tolerance, int timeoutMs, string stage, CancellationToken ct, bool monitorPressure = false,
+            Action<CraneStatus>? statusObserver = null)
         {
             var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
             CraneStatus? lastStatus = null;
@@ -1054,6 +1063,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 var status = await ReadStatusAsync(ct);
                 if (status == null) continue;
                 lastStatus = status;
+                if (yTarget != -1)
+                    statusObserver?.Invoke(status);
 
                 bool xOk = xTarget == -1 || Math.Abs(status.XPos - xTarget) <= tolerance;
                 bool yOk = yTarget == -1 || Math.Abs(status.YPos - yTarget) <= tolerance;

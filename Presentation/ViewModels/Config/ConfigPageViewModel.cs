@@ -104,6 +104,8 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     public int Manipulator3SafeY { get => _cfg.SkewBed.Manipulator3SafeY; set { _cfg.SkewBed.Manipulator3SafeY = value; OnPropertyChanged(); } }
 
     public int RearCraneSafeX { get => _cfg.Balancing.RearCraneSafeX; set { _cfg.Balancing.RearCraneSafeX = value; OnPropertyChanged(); } }
+    public int M2ReleaseLocksBelowY { get => _cfg.Balancing.M2ReleaseLocksBelowY; set { _cfg.Balancing.M2ReleaseLocksBelowY = value; OnPropertyChanged(); } }
+    public int M3ReleaseLocksBelowY { get => _cfg.Balancing.M3ReleaseLocksBelowY; set { _cfg.Balancing.M3ReleaseLocksBelowY = value; OnPropertyChanged(); } }
 
     public int GrindingSafeZ { get => _cfg.Grinding.SafeZHeight; set { _cfg.Grinding.SafeZHeight = value; OnPropertyChanged(); } }
     public int GrindingCraneNo { get => _cfg.Grinding.CraneNo; set { _cfg.Grinding.CraneNo = value; OnPropertyChanged(); } }

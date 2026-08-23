@@ -429,6 +429,16 @@
                                         <TextBox Text="{Binding RearCraneSafeX, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="M2提前放锁Y" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding M2ReleaseLocksBelowY, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="M3提前放锁Y" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding M3ReleaseLocksBelowY, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
+                                               Text="机械手实际Y小于配置值后提前释放位置锁；不做范围校验，请按现场安全位置设置。" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                         <TextBlock Text="研磨Z安全高度" Style="{StaticResource ParamLabelStyle}" />
                                         <TextBox Text="{Binding GrindingSafeZ, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
                                     </StackPanel>
