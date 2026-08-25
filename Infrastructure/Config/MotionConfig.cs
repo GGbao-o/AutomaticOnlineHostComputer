@@ -274,6 +274,8 @@ public sealed class MotionConfig
         public int M731NotifyDelayMs { get; set; } = 1000;
         /// <summary>ST010放料后：启动后天车Z回安全高度后，延时多久写M721通知传送带（ms）。</summary>
         public int M721NotifyDelayMs { get; set; } = 1000;
+        /// <summary>研磨上料FIFO最大缓存笔数。超过该值时，天车5在下一次上料派发前软暂停并等待人工确认。</summary>
+        public int MaxFifoCount { get; set; } = 2;
         /// <summary>PLC/CNC信号等待轮询间隔(ms)。200ms对秒级信号变化足够，降低Modbus轮询压力</summary>
         public int SignalPollIntervalMs { get; set; } = 200;
         /// <summary>研磨天车上料中观察时间(分钟)。超时后暂停引擎并保留状态/缓存，等待人工确认。</summary>

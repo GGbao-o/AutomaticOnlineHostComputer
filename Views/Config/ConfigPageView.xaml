@@ -473,7 +473,14 @@
                                         <TextBlock Text="ms" Style="{StaticResource ParamLabelStyle}" />
                                     </StackPanel>
                                     <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
-                                               Text="1号线后天车放入ST010后，先启动Z回安全高度；经过该延时写M721，随后等待Z与M721均成功才写入研磨FIFO。" />
+                                               Text="1号线后天车放入ST010后，先启动Z回安全高度；经过该延时写M721，M721成功即写入研磨FIFO，再等待Z安全到位收尾。" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="研磨上料FIFO最大缓存数" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding GrindingMaxFifoCount, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                        <TextBlock Text="笔" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
+                                               Text="FIFO数量超过该上限时，研磨天车5在下一次上料派发前暂停，不移动天车、不写PLC、不删除缓存；现场确认后用主页面ST709研磨应急逐笔清理队头。" />
                                 </StackPanel>
                             </Border>
 

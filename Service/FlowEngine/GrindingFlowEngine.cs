@@ -405,6 +405,7 @@ public sealed class GrindingFlowEngine : IDisposable
 
     /// <summary>
     /// 将完整工件信息写入FIFO缓存。保留版号/序号, 异常恢复时能和主页面任务对应。
+    /// 这个就是写入研磨上料架内存数据的
     /// </summary>
     public void EnqueueWorkpiece(WorkpieceCache wp)
     {
@@ -1010,7 +1011,8 @@ public sealed class GrindingFlowEngine : IDisposable
         // 主循环预检；真正去 ST709 取料前仍会再次读取 M730，防止现场信号变化导致空取。
         if (!await ConfirmGrindingFeedReadyAsync("上料优先预检", ct))
             return false;
-
+        
+        //非阻塞式拿锁 拿不到就return false
         if (!await _craneLock.WaitAsync(0, ct))
         {
             if (ShouldLogWaiting("crane-busy:grinding-load"))
@@ -1022,6 +1024,7 @@ public sealed class GrindingFlowEngine : IDisposable
         bool craneLockTransferred = false;
         try
         {
+            //拿锁   这个锁式防止主循环已经越过轮询顶部的暂停判断时，又恰好启动一个新动作。
             await _grindingDispatchGate.WaitAsync(ct);
             dispatchGateHeld = true;
 
@@ -1032,10 +1035,25 @@ public sealed class GrindingFlowEngine : IDisposable
                 return false;
             }
 
+            // 此时已取得天车锁和派发门闩，且尚未出队或启动天车动作；超限只做软暂停，保留所有FIFO身份。
+            int maxFifoCount = Math.Max(1, _cfg.Grinding.MaxFifoCount);
+            int cachedCount = CachedCount;
+            //判断缓存数量是否>配置文件设置的数量最大值 现在目前是2 如果大于2说明有问题
+            if (cachedCount > maxFifoCount)
+            {
+                _paused = true;
+                string overflowMessage = $"研磨上料FIFO数量={cachedCount}，超过配置上限{maxFifoCount}。研磨引擎已暂停；本轮尚未派发天车动作、未移动天车、未写PLC信号、未删除FIFO数据。" +
+                    "请先现场确认ST709及传送带工件状态；确认物理队头已处理后，请点击主页面应急按钮执行ST709研磨应急。每次只清除一个FIFO队头数据。";
+                Console.WriteLine($"[GrindingEngine] ⚠ {overflowMessage}");
+                OnSafetyAlarm?.Invoke(overflowMessage);
+                return false;
+            }
+
             // 必须在 FIFO 出队和研磨机状态变化前校验，报警时任务仍留在原缓存。
             if (!await EnsureGrindingCranePositionReadyAsync("研磨上料任务出队前", ct))
-                return false;
-
+                return false;   
+            
+            //拿缓存数据 
             if (!TryDequeueCache(out var wp))
             {
                 if (_cycleCount % 10 == 1)
@@ -1057,7 +1075,9 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         finally
         {
+            //这个锁：防止主循环已经越过轮询顶部的暂停判断时，又恰好启动一个新动作。
             if (dispatchGateHeld) _grindingDispatchGate.Release();
+            //天车锁
             if (!craneLockTransferred) _craneLock.Release();
         }
     }
