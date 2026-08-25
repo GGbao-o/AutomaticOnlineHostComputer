@@ -1436,6 +1436,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                                             double boringD = wp.Diameter + _cfg.GetDiameterOffset("boring2");
                                             Console.WriteLine(
                                                 $"[Line2Front] [货叉] ② R6101=1，写Modbus参数 R2041={wp.Length} R2043={boringD}*100 R2044={wp.LeftPlugThickness}*100 R2045={wp.RightPlugThickness}*100 R2046={wp.InnerTaper}*100 R2047={wp.BoreType}*100 R2048={wp.CornerSize}*100");
+                                            //下发双头镗参数
                                             await _boringSvc.SendMachiningParamsAsync(wp.Length, boringD,
                                                 wp.LeftPlugThickness, wp.RightPlugThickness, wp.InnerTaper,
                                                 wp.BoreType, wp.CornerSize, ct);

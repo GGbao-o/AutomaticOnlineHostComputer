@@ -116,6 +116,10 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     }
     /// <summary>全线自动取料共用：充磁成功返回后，等待该时长再读取 X11 有板反馈（单位：ms）。</summary>
     public int X11StableDelayMs { get => _cfg.Grinding.X11StableDelayMs; set { _cfg.Grinding.X11StableDelayMs = value; OnPropertyChanged(); } }
+    /// <summary>ST709取料后：先启动天车5 Z回安全高度，再等待该时长写M731释放传送带（单位：ms）。</summary>
+    public int M731NotifyDelayMs { get => _cfg.Grinding.M731NotifyDelayMs; set { _cfg.Grinding.M731NotifyDelayMs = value; OnPropertyChanged(); } }
+    /// <summary>ST010放料后：先启动1号线后天车Z回安全高度，再等待该时长写M721通知传送带（单位：ms）。</summary>
+    public int M721NotifyDelayMs { get => _cfg.Grinding.M721NotifyDelayMs; set { _cfg.Grinding.M721NotifyDelayMs = value; OnPropertyChanged(); } }
     public int GrindingLoadingTimeoutMinutes { get => _cfg.Grinding.LoadingTimeoutMinutes; set { _cfg.Grinding.LoadingTimeoutMinutes = value; OnPropertyChanged(); } }
     public int GrindingWaitingForUnloadTimeoutMinutes { get => _cfg.Grinding.WaitingForUnloadTimeoutMinutes; set { _cfg.Grinding.WaitingForUnloadTimeoutMinutes = value; OnPropertyChanged(); } }
     public int GrindingUnloadingTimeoutMinutes { get => _cfg.Grinding.UnloadingTimeoutMinutes; set { _cfg.Grinding.UnloadingTimeoutMinutes = value; OnPropertyChanged(); } }

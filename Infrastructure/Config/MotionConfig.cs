@@ -270,6 +270,10 @@ public sealed class MotionConfig
         public int HandshakeTimeoutMs { get; set; } = 300_000;
         /// <summary>X11有版检测稳定延时(ms)，充磁后等待磁铁吸稳再读取</summary>
         public int X11StableDelayMs { get; set; } = 3000;
+        /// <summary>ST709取料后：启动Z回安全高度后，延时多久写M731释放传送带（ms）。</summary>
+        public int M731NotifyDelayMs { get; set; } = 1000;
+        /// <summary>ST010放料后：启动后天车Z回安全高度后，延时多久写M721通知传送带（ms）。</summary>
+        public int M721NotifyDelayMs { get; set; } = 1000;
         /// <summary>PLC/CNC信号等待轮询间隔(ms)。200ms对秒级信号变化足够，降低Modbus轮询压力</summary>
         public int SignalPollIntervalMs { get; set; } = 200;
         /// <summary>研磨天车上料中观察时间(分钟)。超时后暂停引擎并保留状态/缓存，等待人工确认。</summary>

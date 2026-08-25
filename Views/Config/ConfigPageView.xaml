@@ -460,6 +460,20 @@
                                     </StackPanel>
                                     <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
                                                Text="全线共用：前/后天车、机械手、动平衡和研磨天车每次充磁后，等待该时长再读取X11有板信号。" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="ST709取料后M731延时" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding M731NotifyDelayMs, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                        <TextBlock Text="ms" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
+                                               Text="天车5从ST709持件回升时，先启动Z回安全高度；经过该延时写M731释放传送带，随后等待Z与M731均成功才继续。" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="ST010放料后M721延时" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding M721NotifyDelayMs, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                        <TextBlock Text="ms" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
+                                               Text="1号线后天车放入ST010后，先启动Z回安全高度；经过该延时写M721，随后等待Z与M721均成功才写入研磨FIFO。" />
                                 </StackPanel>
                             </Border>
 

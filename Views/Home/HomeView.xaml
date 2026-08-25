@@ -342,43 +342,43 @@
                         ItemsSource="{Binding TaskRows}">
                         <DataGrid.Columns>
                             <DataGridTextColumn
-                                Width="70"
+                                Width="100"
                                 Binding="{Binding PlateNo}"
                                 Header="版号" />
                             <DataGridTextColumn
-                                Width="70"
+                                Width="30"
                                 Binding="{Binding Sequence}"
                                 Header="序号" />
                             <DataGridTextColumn
-                                Width="90"
+                                Width="50"
                                 Binding="{Binding Length}"
                                 Header="版长" />
                             <DataGridTextColumn
-                                Width="90"
+                                Width="50"
                                 Binding="{Binding Diameter}"
                                 Header="直径" />
                             <DataGridTextColumn
-                                Width="70"
+                                Width="50"
                                 Binding="{Binding PlugHole}"
                                 Header="堵孔" />
                             <DataGridTextColumn
-                                Width="70"
+                                Width="50"
                                 Binding="{Binding LeftPlugThickness}"
                                 Header="左堵厚" />
                             <DataGridTextColumn
-                                Width="70"
+                                Width="50"
                                 Binding="{Binding RightPlugThickness}"
                                 Header="右堵厚" />
                             <DataGridTextColumn
-                                Width="80"
+                                Width="50"
                                 Binding="{Binding InnerTaper}"
                                 Header="内孔锥度" />
                             <DataGridTextColumn
-                                Width="80"
+                                Width="50"
                                 Binding="{Binding CornerSize}"
                                 Header="圆角大小" />
                             <DataGridTextColumn
-                                Width="140"
+                                Width="100"
                                 Binding="{Binding StartSourceText}"
                                 Header="任务起点" />
                             <DataGridTextColumn
@@ -386,27 +386,27 @@
                                 Binding="{Binding AssignedLineText}"
                                 Header="分配线路" />
                             <DataGridTextColumn
-                                Width="70"
+                                Width="50"
                                 Binding="{Binding BalancingText}"
                                 Header="动平衡" />
                             <DataGridTextColumn
-                                Width="130"
+                                Width="200"
                                 Binding="{Binding Step}"
                                 Header="当前工序" />
                             <DataGridTextColumn
-                                Width="130"
+                                Width="70"
                                 Binding="{Binding ProcessType}"
                                 Header="工序" />
                             <DataGridTextColumn
-                                Width="70"
+                                Width="50"
                                 Binding="{Binding SkipBoringText}"
                                 Header="跳过镗" />
-                            <DataGridTextColumn
-                                Width="120"
+                            <!--<DataGridTextColumn
+                                Width="50"
                                 Binding="{Binding BoringProcess}"
-                                Header="双头镗工艺" />
+                                Header="双头镗工艺" />-->
                             <DataGridTextColumn
-                                Width="70"
+                                Width="100"
                                 Binding="{Binding SkewBedProcess}"
                                 Header="斜床工艺" />
                             <DataGridTextColumn

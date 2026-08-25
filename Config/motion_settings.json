@@ -381,6 +381,8 @@
     "pollIntervalMs": 500,
     "handshakeTimeoutMs": 120000,
     "x11StableDelayMs": 500,
+    "m731NotifyDelayMs": 1000,
+    "m721NotifyDelayMs": 1000,
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,
     "waitingForUnloadTimeoutMinutes": 20,

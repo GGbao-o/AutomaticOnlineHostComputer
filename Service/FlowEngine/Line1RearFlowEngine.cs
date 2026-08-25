@@ -3000,47 +3000,100 @@ public sealed class Line1RearFlowEngine : IDisposable
                     operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST010/M720完整交接",
                         "ST010目标位退磁成功返回，放料推定成立；等待Z安全回升、M721和研磨缓存回调");
                     Console.WriteLine("│   ✓ ST010放料完成,退磁");
-                    //退磁完成先回安全位置
+                    // 退磁完成先启动Z回安全位置；现场确认经过配置延时即可并行写M721。
+                    // M721成功后立即写研磨FIFO；Z仍在回升。FIFO和Z都完成后才释放M817/M720位置锁。
                     action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(gx + _ox, gy + _oy, sz), "ST010放料后Z升安全高度");
                     action.MarkCommandSent();
-                    await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
-                    action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "ST010放料后Z安全到位");
-                    physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
-                    operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
+                    //回安全位置
+                    Task st010SafeZTask = cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+                    Console.WriteLine($"│   ST010放料后Z回升已启动，{_cfg.Grinding.M721NotifyDelayMs}ms后写M721并行通知PLC");
+                    //停顿1s 配置文件配置的
+                    await Task.Delay(_cfg.Grinding.M721NotifyDelayMs, ct);
                     // ── M721=1: 通知PLC放料到1号位完成 → PLC将启动传送带旋转 ──
+                    MitsubishiMcClient mc65;
                     try
                     {
                         operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721(ST010放料完成)", "M721写入调用已开始，结果未知");
-                        var mc65 = await EnsureMc65Async(ct);
-                        action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(gx + _ox, gy + _oy, sz), "写M721通知ST010放料完成");
-                        action.MarkCommandSent();
-                        await mc65.WriteMBitInWordAsync(720, 1, true, ct);
-                        operationalDownstreamNotified = true;
-                        operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721(ST010放料完成)", "M721写入成功返回");
-                        action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "M721放料完成通知成功返回");
-                        Console.WriteLine($"│   ✓ M721=1 通知PLC放料完成(传送带启动) {wp.IdentityText}");
+                        mc65 = await EnsureMc65Async(ct);
                     }
                     catch (Exception ex)
                     {
+                        await st010SafeZTask;
+                        action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "ST010放料后Z安全到位，MC65不可用无法写M721");
+                        physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
+                        operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
                         Console.WriteLine($"│   ⚠ M721写入失败: {ex.Message}");
                         throw new InvalidOperationException("ST010/M720已放料但M721写入失败, 需人工确认或补写M721", ex);
                     }
 
+                    action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(gx + _ox, gy + _oy, sz), "写M721通知ST010放料完成");
+                    action.MarkCommandSent();
+                    //写M721=1   研磨上料架1号位 上料完成信号
+                    Task m721Task = mc65.WriteMBitInWordAsync(720, 1, true, ct);
+                    try
+                    {
+                        await m721Task;
+                    }
+                    catch (Exception ex)
+                    {
+                        try
+                        {
+                            await st010SafeZTask;
+                            action.RecordFeedback(new FlowActionPosition(gx + _ox, gy + _oy, sz), null, false, "ST010放料后Z已安全到位，等待M721异常处理");
+                            physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
+                            operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
+                        }
+                        catch (Exception zEx)
+                        {
+                            Console.WriteLine($"│   ⚠ M721失败后的Z回安全高度也失败: {zEx.Message}");
+                        }
+                        Console.WriteLine($"│   ⚠ M721写入失败: {ex.Message}");
+                        throw new InvalidOperationException("ST010/M720已放料但M721写入失败, 需人工确认或补写M721", ex);
+                    }
+                    operationalDownstreamNotified = true;
+                    operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "M721(ST010放料完成)", "M721写入成功返回");
+                    action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "M721放料完成通知成功返回，Z继续回安全高度");
+                    Console.WriteLine($"│   ✓ M721=1 通知PLC放料完成(传送带启动)，立即写研磨缓存 {wp.IdentityText}");
+
                     // ── 通知研磨引擎: 工件已放到1号位, 入FIFO缓存 ──
-                    wp.BoreType = 1; // bore固定1(大孔), 研磨机不需要版孔区分
-                    if (OnGrindingRackPlaced == null)
-                        throw new InvalidOperationException("M720/ST010已放料但研磨缓存回调未绑定");
-                    operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.CacheNotification, "M720研磨缓存回调", "研磨缓存回调调用已开始，结果未知");
-                    operationalTracker.BeginCacheMutation("M720",
-                        EvidenceValue<string>.Unknown("回调前未确认M720缓存已写入本周期工件"),
-                        "M720缓存写入调用已开始，修改后事实未知");
-                    OnGrindingRackPlaced.Invoke(wp);
-                    operationalCacheNotified = true;
-                    operationalTracker.CompleteCacheMutation("M720",
-                        EvidenceValue<string>.Unknown("回调前未确认M720缓存已写入本周期工件"),
-                        EvidenceValue<string>.Confirmed("回调成功后M720缓存已写入本周期工件", "缓存回调成功返回"),
-                        "M720缓存写入成功返回");
-                    operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.CacheNotification, "M720研磨缓存回调", "研磨缓存回调成功返回");
+                    try
+                    {
+                        wp.BoreType = 1; // bore固定1(大孔), 研磨机不需要版孔区分
+                        if (OnGrindingRackPlaced == null)
+                            throw new InvalidOperationException("M720/ST010已放料但研磨缓存回调未绑定");
+                        operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.CacheNotification, "M720研磨缓存回调", "研磨缓存回调调用已开始，结果未知");
+                        operationalTracker.BeginCacheMutation("M720",
+                            EvidenceValue<string>.Unknown("回调前未确认M720缓存已写入本周期工件"),
+                            "M720缓存写入调用已开始，修改后事实未知");
+                        //写入研磨缓存
+                        OnGrindingRackPlaced.Invoke(wp);
+                        operationalCacheNotified = true;
+                        operationalTracker.CompleteCacheMutation("M720",
+                            EvidenceValue<string>.Unknown("回调前未确认M720缓存已写入本周期工件"),
+                            EvidenceValue<string>.Confirmed("回调成功后M720缓存已写入本周期工件", "缓存回调成功返回"),
+                            "M720缓存写入成功返回");
+                        operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.CacheNotification, "M720研磨缓存回调", "研磨缓存回调成功返回");
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            await st010SafeZTask;
+                            action.RecordFeedback(new FlowActionPosition(gx + _ox, gy + _oy, sz), null, false, "ST010放料后Z已安全到位，研磨缓存回调失败");
+                            physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
+                            operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
+                        }
+                        catch (Exception zEx)
+                        {
+                            Console.WriteLine($"│   ⚠ 研磨缓存回调失败后的Z回安全高度也失败: {zEx.Message}");
+                        }
+                        throw;
+                    }
+                    //等待2号天车z轴回升完成
+                    await st010SafeZTask;
+                    action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "M721、研磨缓存与ST010放料后Z安全到位均成功返回");
+                    physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
+                    operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
                     operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST010/M720完整交接",
                         "ST010退磁、Z安全回升、M721及M720研磨缓存回调均成功返回");
                     wp.ReportStage("1号线 研磨上料架 ST010/M720");
@@ -3053,7 +3106,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             }
             finally
             {
-                // 长短板都可能持有M720路径锁; 只释放真正拿到的锁。
+                // 长短板都可能持有M720路径锁; 只释放真正拿到的锁。  gotM720   gotM817 都是True  短板 长版都是拿的两把锁
                 if (gotM720)
                 {
                     if (operation.TryRelease("M720", _lockM720)) Console.WriteLine("│ [分流] 释放 M720锁");
