@@ -2811,8 +2811,18 @@ public sealed class Line1RearFlowEngine : IDisposable
                     Console.WriteLine("│   M720可放料 ✓ (前置步骤④已确认)");
                     //加两把锁
                     // 注意: 多把锁从获取前就进入finally保护, 第二把等待异常/取消时也会释放第一把, 避免死锁。
-                    if (_lockM817 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M817)..."); await operation.AcquireAsync("M817", _lockM817, ct); action.RegisterLock("M817"); gotM817 = true; }
-                    if (_lockM720 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M720)..."); await operation.AcquireAsync("M720", _lockM720, ct); action.RegisterLock("M720"); gotM720 = true; }
+                    if (_lockM817 != null)
+                    {
+                        Console.WriteLine("│ [分流] 等待平衡锁(M817)..."); 
+                        await operation.AcquireAsync("M817", _lockM817, ct); 
+                        action.RegisterLock("M817"); gotM817 = true;
+                    }
+                    if (_lockM720 != null)
+                    {
+                        Console.WriteLine("│ [分流] 等待平衡锁(M720)..."); 
+                        await operation.AcquireAsync("M720", _lockM720, ct); 
+                        action.RegisterLock("M720"); gotM720 = true;
+                    }
                     await WaitForM720CanPlaceBeforePlaceAsync(wp, ct);
                 }
 

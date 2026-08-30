@@ -1760,7 +1760,7 @@ public sealed class BalancingFlowEngine : IDisposable
     //  机械手3流程 (M3Flow): 动平衡料架2/不需动平衡位→取料→ST010研磨上料架放料→Y回安全位
     //    触发: 主循环⑥ M700有版或ST021(M825允许取+M821缓存存在) + (M821需天车4号X≤safeX) + M720(ST010)允许放版
     //    直径: useM700=true → 读D100(MC65, 动平衡料架2直径); false → 读_balWps["M821"]缓存
-    //    信号: M700来源取走后写M701=1; 放料后写M721=1(MC65)通知PLC放料完成; M720二次确认在取料前做
+    //    信号: M700来源取走后写M701=1; 放料后写M721=1(MC65)通知PLC放料完成; M720在锁后和持件去目标前分别确认
     //    ⚠ M821缓存会在X11=1且Z安全后转为本动作在途记录，提前放锁后不允许旧动作删除新缓存
     // ═══════════════════════════════════════════════════════════════════
     /// <param name="useM700">主循环快照: true=M700(动平衡后读D100), false=M821(后天车送来读缓存)</param>
@@ -1833,6 +1833,17 @@ public sealed class BalancingFlowEngine : IDisposable
                 MarkM3Lock("M720", true);
             }
             // 忙标志已由主循环原子占坑, 锁等待期间不会重复派发M3Flow。
+
+            // 主循环的M720只是锁外派发快照；等待两把位置锁可能持续数分钟。
+            // 此时尚未取料，可以在目标许可已经失效时正常放弃本趟，避免占着锁去做无效取料动作。
+            if (!await ConfirmM720AfterM3LocksAsync(ct))
+            {
+                Console.WriteLine("[平衡引擎] [M3] 锁后复查M720=0，本趟尚未取料，正常结束；finally将释放M720/M821锁、Busy和动作上下文");
+                OperationalLog.Info("锁后目标许可失效", "机械手3尚未取料，正常放弃本趟并释放资源",
+                    ("信号名称", "M720放料允许"), ("当前值", "0（暂不允许）"),
+                    ("工件状态", "尚未取料"), ("资源清理", "finally释放M720、M821、Busy和动作上下文"));
+                return;
+            }
 
             string pickReg = useM700 ? "M700" : "M821";
             string pickCode = useM700 ? "ST009" : "ST021";
@@ -2426,6 +2437,92 @@ public sealed class BalancingFlowEngine : IDisposable
     /// <summary>Z下降公式: 台面Z - Round[(d/2/zFactor1)+(d/2/zFactor2)] — 机械手取料/放料用</summary>
     private int Pz(int z, double d) =>
         z - (int)Math.Round((d / 2.0 / _cfg.Grinding.ZFactor1) + (d / 2.0 / _cfg.Grinding.ZFactor2));
+
+    /// <summary>
+    /// M3取得M821/M720两把位置锁后重新读取M720。
+    /// 此时尚未取料：M720=0可正常放弃本趟；通信状态未知则有限重试，最终失败暂停引擎。
+    /// 已经持件后的M720等待由ConfirmM720EmptyBeforePlaceAsync负责，两种语义不得合并。
+    /// </summary>
+    private async Task<bool> ConfirmM720AfterM3LocksAsync(CancellationToken ct)
+    {
+        const int maxAttempts = 3;
+        const int retryDelayMs = 500;
+        const string mc65Ip = "192.168.2.65";
+        const int mc65Port = 9000;
+        Exception? lastError = null;
+
+        Console.WriteLine($"[平衡引擎] [M3] 已取得M821/M720锁，开始锁后复查M720（最多{maxAttempts}次）");
+        OperationalLog.Info("锁后复查目标许可", "机械手3已取得两把位置锁，重新读取M720",
+            ("信号名称", "M720放料允许"), ("最大尝试次数", maxAttempts.ToString()),
+            ("重试间隔", $"{retryDelayMs}ms"), ("工件状态", "尚未取料"));
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                _mc65 = await _mcCache.GetOrCreateAsync(mc65Ip, mc65Port, ct);
+                var r = await ReadMc65MAlignedWordAsync(720, "M3锁后M720复查", ct);
+                if (r.IntValues.Length < 1)
+                    throw new InvalidOperationException("M3锁后M720复查失败: MC65返回字数不足");
+
+                bool canPlace = (r.IntValues[0] & 1) != 0; // M720 = M720字bit0，1=允许放料
+                if (canPlace)
+                {
+                    Console.WriteLine($"[平衡引擎] [M3] 锁后复查M720=1 ✓ 尝试={attempt}/{maxAttempts} rawM720=0x{r.IntValues[0]:X4}");
+                    OperationalLog.Info("锁后目标许可确认通过", "M720仍允许放料，机械手3继续取料流程",
+                        ("信号名称", "M720放料允许"), ("当前值", "1（允许）"),
+                        ("尝试次数", $"{attempt}/{maxAttempts}"), ("PLC原始字", $"0x{r.IntValues[0]:X4}"));
+                    return true;
+                }
+
+                Console.WriteLine($"[平衡引擎] [M3] 锁后复查M720=0，目标许可已失效，尚未取料，不重试信号值");
+                OperationalLog.Warn("锁后目标暂不可用", "M720已变为0，机械手3尚未取料，本趟正常放弃",
+                    ("信号名称", "M720放料允许"), ("当前值", "0（暂不允许）"),
+                    ("尝试次数", $"{attempt}/{maxAttempts}"), ("PLC原始字", $"0x{r.IntValues[0]:X4}"));
+                return false;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                lastError = ex;
+                _mc65SnapshotValid = false;
+                Console.WriteLine($"[平衡引擎] [M3] 锁后复查M720读取失败，第{attempt}/{maxAttempts}次：{ex.Message}");
+                OperationalLog.Warn("锁后目标许可读取失败", "M720状态未知，机械手3尚未取料",
+                    ("信号名称", "M720放料允许"), ("尝试次数", $"{attempt}/{maxAttempts}"),
+                    ("异常", ex.Message), ("后续处理", attempt < maxAttempts ? $"{retryDelayMs}ms后重连重试" : "达到上限后暂停"));
+
+                try
+                {
+                    await _mcCache.InvalidateAsync(mc65Ip, mc65Port);
+                }
+                catch (Exception invalidateEx)
+                {
+                    Console.WriteLine($"[平衡引擎] [M3] MC65失效清理异常，不中断锁后复查重试：{invalidateEx.Message}");
+                    OperationalLog.Warn("MC65失效清理异常", "连接清理失败，但机械手3仍按既定次数重试M720",
+                        ("尝试次数", $"{attempt}/{maxAttempts}"), ("异常", invalidateEx.Message));
+                }
+                finally
+                {
+                    _mc65 = null;
+                }
+
+                if (attempt < maxAttempts)
+                {
+                    Console.WriteLine($"[平衡引擎] [M3] MC65连接已失效，{retryDelayMs}ms后执行第{attempt + 1}/{maxAttempts}次锁后复查");
+                    await Task.Delay(retryDelayMs, ct);
+                }
+            }
+        }
+
+        _paused = true;
+        string message = $"机械手3取得M821/M720位置锁后连续{maxAttempts}次读取M720失败，目标状态未知，动平衡引擎已暂停。最后异常：{lastError?.Message}";
+        Console.WriteLine($"[平衡引擎] [M3] ⚠ {message}");
+        OperationalLog.Warn("锁后目标状态未知", "M720连续读取失败，动平衡引擎已暂停并等待人工检查通信",
+            ("信号名称", "M720放料允许"), ("尝试次数", maxAttempts.ToString()),
+            ("工件状态", "尚未取料"), ("位置锁", "finally释放M720、M821"),
+            ("最后异常", lastError?.Message ?? "未知"));
+        OnSafetyAlarm?.Invoke(message);
+        throw new InvalidOperationException(message, lastError);
+    }
 
     /// <summary>
     /// M2放ST008前二次确认M710允许放版。

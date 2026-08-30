@@ -1024,7 +1024,7 @@ public sealed class GrindingFlowEngine : IDisposable
         bool craneLockTransferred = false;
         try
         {
-            //拿锁   这个锁式防止主循环已经越过轮询顶部的暂停判断时，又恰好启动一个新动作。
+            //拿锁 阻塞式拿锁   这个锁式防止主循环已经越过轮询顶部的暂停判断时，又恰好启动一个新动作。
             await _grindingDispatchGate.WaitAsync(ct);
             dispatchGateHeld = true;
 
@@ -1614,6 +1614,7 @@ public sealed class GrindingFlowEngine : IDisposable
             var grSpd = _cfg.GetCraneSpeed(_cfg.Grinding.CraneNo);
             action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "设置研磨天车本任务绝对速度");
             action.MarkCommandSent();
+            //设置5号天车速度
             await crane.SetAbsSpeedAsync(
                 grSpd.X.Speed, grSpd.X.Accel, grSpd.X.Decel,
                 grSpd.Y.Speed, grSpd.Y.Accel, grSpd.Y.Decel,

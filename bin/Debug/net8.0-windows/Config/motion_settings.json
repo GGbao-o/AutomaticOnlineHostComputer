@@ -31,7 +31,7 @@
       "x": {
         "speed": 800,
         "accel": 200,
-        "decel": 200
+        "decel": 180
       },
       "y": {
         "speed": 70,
@@ -39,9 +39,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 200,
-        "accel": 80,
-        "decel": 40
+        "speed": 250,
+        "accel": 120,
+        "decel": 70
       }
     },
     "2": {
@@ -53,7 +53,7 @@
       "x": {
         "speed": 800,
         "accel": 200,
-        "decel": 200
+        "decel": 180
       },
       "y": {
         "speed": 70,
@@ -61,9 +61,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 200,
-        "accel": 80,
-        "decel": 40
+        "speed": 250,
+        "accel": 120,
+        "decel": 70
       }
     },
     "3": {
@@ -83,9 +83,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 200,
-        "accel": 80,
-        "decel": 40
+        "speed": 250,
+        "accel": 120,
+        "decel": 70
       }
     },
     "4": {
@@ -117,9 +117,9 @@
       "timeoutMs": 240000,
       "pollIntervalMs": 500,
       "x": {
-        "speed": 600,
+        "speed": 750,
         "accel": 200,
-        "decel": 160
+        "decel": 180
       },
       "y": {
         "speed": 70,
@@ -127,9 +127,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 200,
-        "accel": 80,
-        "decel": 40
+        "speed": 250,
+        "accel": 120,
+        "decel": 70
       }
     }
   },
@@ -168,9 +168,9 @@
         "decel": 80
       },
       "y": {
-        "speed": 600,
-        "accel": 300,
-        "decel": 100
+        "speed": 800,
+        "accel": 400,
+        "decel": 150
       },
       "z": {
         "speed": 160,
@@ -190,9 +190,9 @@
         "decel": 80
       },
       "y": {
-        "speed": 600,
-        "accel": 300,
-        "decel": 100
+        "speed": 800,
+        "accel": 400,
+        "decel": 150
       },
       "z": {
         "speed": 160,
@@ -381,41 +381,41 @@
     "pollIntervalMs": 500,
     "handshakeTimeoutMs": 120000,
     "x11StableDelayMs": 500,
-    "m731NotifyDelayMs": 1000,
+    "m731NotifyDelayMs": 2000,
     "m721NotifyDelayMs": 1000,
     "maxFifoCount": 2,
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,
-    "waitingForUnloadTimeoutMinutes": 20,
+    "waitingForUnloadTimeoutMinutes": 30,
     "unloadingTimeoutMinutes": 10
   },
   "balancing": {
     "rearCraneSafeX": -2000,
-    "m2ReleaseLocksBelowY": 5500,
-    "m3ReleaseLocksBelowY": 5500,
+    "m2ReleaseLocksBelowY": 4790,
+    "m3ReleaseLocksBelowY": 5737,
     "armCoords": {
       "M817": {
-        "y": 15701,
+        "y": 15060,
         "z": 472
       },
       "M818": {
-        "y": 5012,
+        "y": 4790,
         "z": 701
       },
       "M710": {
-        "y": 1000,
+        "y": 970,
         "z": 647
       },
       "M700": {
-        "y": 40,
+        "y": 30,
         "z": 685
       },
       "M821": {
-        "y": 5952,
+        "y": 5737,
         "z": 721
       },
       "M720": {
-        "y": 16755,
+        "y": 16110,
         "z": 439
       }
     }
@@ -472,8 +472,8 @@
     "manipulator1Line1SafeY": 10086,
     "manipulator1Line2SafeY": 3004,
     "manipulator1PickupStandbyY": 478,
-    "manipulator2SafeY": 1000,
-    "manipulator3SafeY": 40,
+    "manipulator2SafeY": 970,
+    "manipulator3SafeY": 30,
     "largeDiameterLine1OnlyMm": 280,
     "sharedAreaRetreatX": {
       "ST108": 1000,
