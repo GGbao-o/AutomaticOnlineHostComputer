@@ -295,11 +295,11 @@
                                     Click="AddTask_Click"
                                     Content="添加任务"
                                     Style="{StaticResource PrimaryButtonStyle}" />
-                                <Button
+                                <!--<Button
                                     Width="112"
                                     Margin="8,0,0,0"
                                     Command="{Binding AutoStartTasksCommand}"
-                                    Content="{Binding AutoStartTasksText}" />
+                                    Content="{Binding AutoStartTasksText}" />-->
                                 <Button
                                     Width="150"
                                     Margin="8,0,0,0"
@@ -323,7 +323,6 @@
                             Content="测试2号线后天车取料" />-->
 
                         <Separator Width="8" />
-
 
                     </Grid>
                 </Border>
@@ -349,6 +348,10 @@
                                 Width="30"
                                 Binding="{Binding Sequence}"
                                 Header="序号" />
+                            <DataGridTextColumn
+                                Width="45"
+                                Binding="{Binding QueueOrderText}"
+                                Header="顺序" />
                             <DataGridTextColumn
                                 Width="50"
                                 Binding="{Binding Length}"
@@ -425,6 +428,7 @@
                                                 Width="52"
                                                 Command="{Binding ToggleRunCommand}"
                                                 Content="{Binding ActionText}"
+                                                IsEnabled="{Binding CanToggleRun}"
                                                 Style="{StaticResource TaskActionButtonStyle}" />
                                             <Button
                                                 Width="52"

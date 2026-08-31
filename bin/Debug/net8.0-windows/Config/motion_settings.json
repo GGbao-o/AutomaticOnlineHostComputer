@@ -382,7 +382,7 @@
     "handshakeTimeoutMs": 120000,
     "x11StableDelayMs": 500,
     "m731NotifyDelayMs": 2000,
-    "m721NotifyDelayMs": 1000,
+    "m721NotifyDelayMs": 2000,
     "maxFifoCount": 2,
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,

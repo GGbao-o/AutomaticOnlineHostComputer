@@ -2460,6 +2460,8 @@ public sealed class BalancingFlowEngine : IDisposable
         {
             try
             {
+                //缓存中已有连接且 IsConnected=true：直接返回现有对象，不建立新TCP连接。
+                // 只有缓存没有连接或连接已失效：才创建并连接。
                 _mc65 = await _mcCache.GetOrCreateAsync(mc65Ip, mc65Port, ct);
                 var r = await ReadMc65MAlignedWordAsync(720, "M3锁后M720复查", ct);
                 if (r.IntValues.Length < 1)

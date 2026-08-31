@@ -3,6 +3,14 @@ using System.Windows.Input;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
+public enum TaskDispatchState
+{
+    NotQueued,
+    Queued,
+    Dispatching,
+    EnteredLine
+}
+
 /// <summary>
 /// 主页面任务表格单行模型。
 /// 点击「启动」按钮 → 触发 OnStartRequested 回调 → HomeViewModel 将工件分配到对应线路。
@@ -12,7 +20,8 @@ public sealed class TaskRowViewModel : ObservableObject
 {
     private string _state = "待执行";
     private string _step = "待上料";
-    private bool _isRunning;
+    private TaskDispatchState _dispatchState;
+    private int? _queuePosition;
     private int _assignedLine;
     private string _processType = "总工艺";
 
@@ -75,16 +84,34 @@ public sealed class TaskRowViewModel : ObservableObject
     /// <summary>ERP/手动任务统一显示是否跳过双头镗。这里只用于页面显示, 不改变原 ProcessType 业务判断。</summary>
     public string SkipBoringText => ProcessType == "省去双头镗工艺" ? "是" : "否";
 
-    public string ActionText => _isRunning ? "暂停" : "启动";
+    public TaskDispatchState DispatchState => _dispatchState;
 
-    /// <summary>当前任务行是否处于启动态。全局派发队列用它判断队头是否允许继续派发。</summary>
-    public bool IsRunning => _isRunning;
+    public int? QueuePosition => _queuePosition;
+
+    public string QueueOrderText => QueuePosition?.ToString() ?? "—";
+
+    public string ActionText => DispatchState switch
+    {
+        TaskDispatchState.NotQueued => "启动",
+        TaskDispatchState.Queued => "暂停",
+        TaskDispatchState.Dispatching => "派发中",
+        TaskDispatchState.EnteredLine => "已入线",
+        _ => "启动"
+    };
+
+    public bool CanToggleRun => DispatchState is TaskDispatchState.NotQueued or TaskDispatchState.Queued;
+
+    /// <summary>当前任务是否已经启动；用于一键启动计数和清除确认，不作为FIFO派发依据。</summary>
+    public bool IsRunning => DispatchState != TaskDispatchState.NotQueued;
 
     /// <summary>清除按钮始终可用。已进入现场流程的任务只隐藏页面行, 不清任何现场缓存。</summary>
     public bool CanDelete => true;
 
     /// <summary>用户点击「启动」时触发，参数为本行数据，HomeViewModel 订阅此回调</summary>
     public Action<TaskRowViewModel>? OnStartRequested { get; set; }
+
+    /// <summary>用户点击「暂停」时触发；由HomeViewModel原子地从待派发FIFO移除。</summary>
+    public Action<TaskRowViewModel>? OnPauseRequested { get; set; }
 
     /// <summary>用户点击「清除」时触发，HomeViewModel 做最终确认并移除页面行</summary>
     public Action<TaskRowViewModel>? OnDeleteRequested { get; set; }
@@ -94,41 +121,32 @@ public sealed class TaskRowViewModel : ObservableObject
 
     public TaskRowViewModel()
     {
-        ToggleRunCommand = new RelayCommand(ToggleRun);
+        ToggleRunCommand = new RelayCommand(ToggleRun, () => CanToggleRun);
         DeleteCommand = new RelayCommand(Delete, () => CanDelete);
     }
 
     public void RequestStart()
     {
-        if (_isRunning) return;
+        if (DispatchState != TaskDispatchState.NotQueued) return;
 
-        // 启动 → 通知 HomeViewModel 分配工件到线路
-        _isRunning = true;
-        State = "运行中";
-        OnPropertyChanged(nameof(ActionText));
-        OnPropertyChanged(nameof(IsRunning));
-        OnPropertyChanged(nameof(CanDelete));
-        RaiseDeleteCanExecuteChanged();
+        // 状态由HomeViewModel在真实入队/入线提交成功后更新，避免UI先行造成假启动。
         Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 启动 → 通知分配线路");
         OnStartRequested?.Invoke(this);
     }
 
     private void ToggleRun()
     {
-        if (!_isRunning)
+        if (DispatchState == TaskDispatchState.NotQueued)
         {
             RequestStart();
             return;
         }
 
-        // 暂停（暂不支持恢复，留作扩展）
-        _isRunning = false;
-        State = "已暂停";
-        OnPropertyChanged(nameof(ActionText));
-        OnPropertyChanged(nameof(IsRunning));
-        OnPropertyChanged(nameof(CanDelete));
-        RaiseDeleteCanExecuteChanged();
-        Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 已暂停");
+        if (DispatchState == TaskDispatchState.Queued)
+        {
+            Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 请求暂停并移出待派发FIFO");
+            OnPauseRequested?.Invoke(this);
+        }
     }
 
     private void Delete()
@@ -139,14 +157,63 @@ public sealed class TaskRowViewModel : ObservableObject
 
     public void RejectStart(string reason)
     {
-        _isRunning = false;
+        SetDispatchState(TaskDispatchState.NotQueued, null);
         State = "待执行";
         Step = reason;
+        Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 启动被拒绝: {reason}");
+    }
+
+    public void MarkQueued(int? position = null)
+    {
+        SetDispatchState(TaskDispatchState.Queued, position);
+        State = "运行中";
+        Step = "等待总上料架派发";
+    }
+
+    public void MarkPaused()
+    {
+        SetDispatchState(TaskDispatchState.NotQueued, null);
+        State = "已暂停";
+        Step = "待上料";
+    }
+
+    public void MarkDispatching()
+    {
+        SetDispatchState(TaskDispatchState.Dispatching, null);
+        State = "运行中";
+        Step = "派发中";
+    }
+
+    public void MarkEnteredLine()
+    {
+        SetDispatchState(TaskDispatchState.EnteredLine, null);
+        State = "运行中";
+    }
+
+    public void SetQueuePosition(int? position)
+    {
+        if (_queuePosition == position) return;
+        _queuePosition = position;
+        OnPropertyChanged(nameof(QueuePosition));
+        OnPropertyChanged(nameof(QueueOrderText));
+    }
+
+    private void SetDispatchState(TaskDispatchState state, int? queuePosition)
+    {
+        bool stateChanged = _dispatchState != state;
+        _dispatchState = state;
+        SetQueuePosition(queuePosition);
+
+        if (!stateChanged) return;
+
+        OnPropertyChanged(nameof(DispatchState));
         OnPropertyChanged(nameof(ActionText));
+        OnPropertyChanged(nameof(CanToggleRun));
         OnPropertyChanged(nameof(IsRunning));
         OnPropertyChanged(nameof(CanDelete));
+        if (ToggleRunCommand is RelayCommand toggleCommand)
+            toggleCommand.RaiseCanExecuteChanged();
         RaiseDeleteCanExecuteChanged();
-        Console.WriteLine($"[TaskRowVM] 版号={PlateNo} 序号={Sequence} 启动被拒绝: {reason}");
     }
 
     private void RaiseDeleteCanExecuteChanged()

@@ -407,26 +407,14 @@ public sealed class HomeViewModel : ObservableObject
     private CenteringRackService? _frontRackDispatchSvc;
     private CancellationTokenSource? _frontDispatchCts;
     private Task? _frontDispatchTask;
-    private readonly object _frontDispatchLock = new();
-    private readonly Queue<FrontDispatchItem> _frontDispatchQueue = new();
+    private readonly FrontDispatchQueueCoordinator _frontDispatchQueue = new();
+    private long _appliedFrontDispatchOrderVersion;
     private bool _frontDispatchWaitingM800Clear;
     private int _frontDispatchLoopCycle;
     /// <summary>总上料架全局分线的统一轮询周期。总上料架是一板一板到位，1秒足够且避免无意义刷屏。</summary>
     private static readonly TimeSpan FrontDispatchPollInterval = TimeSpan.FromSeconds(1);
     /// <summary>两线压力相同时的交替记忆；只在成功写入线路前端缓存后更新。</summary>
     private int _lastFrontDispatchLine;
-
-    private sealed class FrontDispatchItem
-    {
-        public FrontDispatchItem(TaskRowViewModel row, WorkpieceCache workpiece)
-        {
-            Row = row;
-            Workpiece = workpiece;
-        }
-
-        public TaskRowViewModel Row { get; }
-        public WorkpieceCache Workpiece { get; }
-    }
 
     /// <summary>后台任务：从引擎 DeviceStatus 同步到 UI 卡片（不另建连接）</summary>
     private async Task SyncLine1StatusToCardsAsync(CancellationToken ct)
@@ -1209,9 +1197,7 @@ public sealed class HomeViewModel : ObservableObject
 
         Collect("全局FIFO", "全局", () =>
         {
-            WorkpieceCache[] queued;
-            lock (_frontDispatchLock)
-                queued = _frontDispatchQueue.Select(x => x.Workpiece).ToArray();
+            WorkpieceCache[] queued = _frontDispatchQueue.GetQueuedWorkpieces();
 
             foreach (var wp in queued)
             {
@@ -1675,7 +1661,7 @@ public sealed class HomeViewModel : ObservableObject
     public string Line1CacheDetail => FormatCacheDetail(_line1Engine?.GetCachedWorkpiecesSnapshot());
 
     /// <summary>总上料架前的全局待派发队列数量。任务先进入这里, M800到位后再唯一派发到1/2号线。</summary>
-    public int FrontDispatchCachedCount { get { lock (_frontDispatchLock) return _frontDispatchQueue.Count; } }
+    public int FrontDispatchCachedCount => _frontDispatchQueue.Count;
 
     // ── 2号线运行状态 ────────────────────────────────────────────────
     private bool _isLine2Running;
@@ -3227,85 +3213,92 @@ public sealed class HomeViewModel : ObservableObject
 
     private void EnqueueFrontDispatch(TaskRowViewModel row, WorkpieceCache wp)
     {
-        lock (_frontDispatchLock)
+        if (!_frontDispatchQueue.TryEnqueue(row, wp, out int position, out var snapshot))
         {
-            if (_frontDispatchQueue.Any(x => ReferenceEquals(x.Row, row)))
-            {
-                Console.WriteLine($"[FrontDispatch] {wp.IdentityText} 已在全局队列中, 跳过重复入队");
-                wp.ReportStage("等待总上料架派发");
-                return;
-            }
-
-            _frontDispatchQueue.Enqueue(new FrontDispatchItem(row, wp));
+            Console.WriteLine($"[FrontDispatch] {wp.IdentityText} 已在全局队列或正在派发, 跳过重复入队");
+            return;
         }
 
+        row.MarkQueued(position);
+        ApplyFrontDispatchOrderSnapshot(snapshot);
         wp.ReportStage("等待总上料架派发");
         OnPropertyChanged(nameof(FrontDispatchCachedCount));
-        Console.WriteLine($"[FrontDispatch] 📥 入全局FIFO {wp.IdentityText} d={wp.Diameter} L={wp.Length} 队列={FrontDispatchCachedCount}");
+        Console.WriteLine($"[FrontDispatch] 📥 入全局FIFO队尾 {wp.IdentityText} d={wp.Diameter} L={wp.Length} 顺序={position} 队列={FrontDispatchCachedCount}");
     }
 
-    private bool TryPeekFrontDispatch(out FrontDispatchItem? item)
+    private void PauseTaskRow(TaskRowViewModel row)
     {
-        lock (_frontDispatchLock)
-            return _frontDispatchQueue.TryPeek(out item);
-    }
-
-    private bool TryDequeueFrontDispatch(FrontDispatchItem expected, out FrontDispatchItem? item)
-    {
-        lock (_frontDispatchLock)
+        var outcome = _frontDispatchQueue.TryPause(row, out int oldPosition, out var snapshot);
+        switch (outcome)
         {
-            if (!_frontDispatchQueue.TryPeek(out var head) || !ReferenceEquals(head, expected))
-            {
-                item = null;
-                return false;
-            }
+            case FrontDispatchPauseOutcome.Removed:
+                row.MarkPaused();
+                ApplyFrontDispatchOrderSnapshot(snapshot);
+                OnPropertyChanged(nameof(FrontDispatchCachedCount));
+                Console.WriteLine($"[FrontDispatch] ⏸ 暂停并移出全局FIFO 版号={row.PlateNo} 序号={row.Sequence} 原顺序={oldPosition} 剩余={FrontDispatchCachedCount}; 再启动将进入队尾");
+                break;
 
-            item = _frontDispatchQueue.Dequeue();
-            return true;
+            case FrontDispatchPauseOutcome.Dispatching:
+                // 点击和后台出队可能恰好交错；协调器已取得派发所有权时禁止再暂停。
+                row.MarkDispatching();
+                ApplyFrontDispatchOrderSnapshot(snapshot);
+                Console.WriteLine($"[FrontDispatch] 任务已进入派发提交窗口，忽略暂停请求 版号={row.PlateNo} 序号={row.Sequence}");
+                break;
+
+            default:
+                Console.WriteLine($"[FrontDispatch] 任务已不在待派发FIFO，忽略暂停请求 版号={row.PlateNo} 序号={row.Sequence}");
+                break;
         }
     }
 
     private bool RemoveFrontDispatch(TaskRowViewModel row)
     {
-        lock (_frontDispatchLock)
+        var outcome = _frontDispatchQueue.TryPause(row, out _, out var snapshot);
+        if (outcome == FrontDispatchPauseOutcome.Removed)
         {
-            if (_frontDispatchQueue.Count == 0) return false;
-
-            bool removed = false;
-            var kept = new Queue<FrontDispatchItem>(_frontDispatchQueue.Count);
-            while (_frontDispatchQueue.Count > 0)
-            {
-                var item = _frontDispatchQueue.Dequeue();
-                if (ReferenceEquals(item.Row, row))
-                {
-                    removed = true;
-                    continue;
-                }
-
-                kept.Enqueue(item);
-            }
-
-            while (kept.Count > 0)
-                _frontDispatchQueue.Enqueue(kept.Dequeue());
-
-            return removed;
+            ApplyFrontDispatchOrderSnapshot(snapshot);
+            return true;
         }
+
+        return false;
     }
 
-    private void RequeueFrontDispatchHead(FrontDispatchItem item)
+    private void ApplyFrontDispatchOrderSnapshot(FrontDispatchQueueCoordinator.Snapshot snapshot)
     {
-        lock (_frontDispatchLock)
+        void ApplySafely()
         {
-            var rebuilt = new Queue<FrontDispatchItem>(_frontDispatchQueue.Count + 1);
-            rebuilt.Enqueue(item);
-            while (_frontDispatchQueue.Count > 0)
-                rebuilt.Enqueue(_frontDispatchQueue.Dequeue());
-            while (rebuilt.Count > 0)
-                _frontDispatchQueue.Enqueue(rebuilt.Dequeue());
+            try
+            {
+                if (snapshot.Version < _appliedFrontDispatchOrderVersion)
+                    return;
+
+                _appliedFrontDispatchOrderVersion = snapshot.Version;
+                var positions = snapshot.Entries.ToDictionary(x => x.Row, x => (int?)x.Position);
+                foreach (var row in TaskRows)
+                {
+                    positions.TryGetValue(row, out int? position);
+                    row.SetQueuePosition(position);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 顺序显示属于旁路UI，失败不得影响真实FIFO派发。
+                Console.WriteLine($"[FrontDispatch] ⚠ 应用FIFO顺序快照失败 version={snapshot.Version}: {ex.Message}");
+            }
         }
 
-        OnPropertyChanged(nameof(FrontDispatchCachedCount));
-        Console.WriteLine($"[FrontDispatch] ↩ 派发失败, 已放回全局队头 {item.Workpiece.IdentityText} 队列={FrontDispatchCachedCount}");
+        try
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.CheckAccess())
+                ApplySafely();
+            else
+                dispatcher.BeginInvoke((Action)ApplySafely);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[FrontDispatch] ⚠ 调度FIFO顺序快照到UI失败 version={snapshot.Version}: {ex.Message}");
+        }
     }
 
     private async Task<CenteringRackStatus?> ReadFrontRackStatusForDispatchAsync(CancellationToken ct)
@@ -3330,7 +3323,7 @@ public sealed class HomeViewModel : ObservableObject
             {
                 _frontDispatchLoopCycle++;
 
-                bool hasPendingItem = TryPeekFrontDispatch(out var item) && item != null;
+                bool hasPendingItem = _frontDispatchQueue.TryPeek(out var item) && item != null;
 
                 // 派发上一块后必须亲眼看到M800从1复位为0，才能把下一次M800=1认作新物理板。
                 // 这个复位观察不能依赖全局FIFO非空：若上一块取走时FIFO刚好为空，跳过读取会漏掉
@@ -3388,15 +3381,6 @@ public sealed class HomeViewModel : ObservableObject
                     continue;
                 }
 
-                if (!item.Row.IsRunning)
-                {
-                    if (_frontDispatchLoopCycle % 10 == 1)
-                        Console.WriteLine($"[FrontDispatch] 队头{item.Workpiece.IdentityText} 当前任务行未启动/已暂停, 保持FIFO等待恢复或删除");
-                    item.Workpiece.ReportStage("任务行未启动/已暂停，等待恢复或删除", "等待中");
-                    await DelayFrontDispatchPollAsync(ct);
-                    continue;
-                }
-
                 if (!status.RequestPickup)
                 {
                     if (_frontDispatchLoopCycle % 20 == 1)
@@ -3440,17 +3424,18 @@ public sealed class HomeViewModel : ObservableObject
                     continue;
                 }
 
-                if (!TryDequeueFrontDispatch(item, out var dequeued) || dequeued == null)
+                if (!_frontDispatchQueue.TryBeginDispatch(item, out var dequeued, out var dispatchSnapshot)
+                    || dequeued == null)
                     continue;
 
+                bool acceptedByLineCache = false;
                 try
                 {
                     await RunOnUiAsync(() =>
                     {
-                        dequeued.Row.AssignedLine = line;
+                        dequeued.Row.MarkDispatching();
+                        ApplyFrontDispatchOrderSnapshot(dispatchSnapshot);
                         OnPropertyChanged(nameof(FrontDispatchCachedCount));
-                        OnPropertyChanged(nameof(Line1CachedCount));
-                        OnPropertyChanged(nameof(Line2CachedCount));
                         return true;
                     });
 
@@ -3464,19 +3449,36 @@ public sealed class HomeViewModel : ObservableObject
                         if (_line2Engine == null) throw new InvalidOperationException("2号线前端引擎为空");
                         _line2Engine.EnqueueWorkpiece(dequeued.Workpiece);
                     }
+
+                    acceptedByLineCache = true;
                 }
                 catch (Exception ex)
                 {
-                    dequeued.Row.AssignedLine = 0;
-                    RequeueFrontDispatchHead(dequeued);
+                    var requeueSnapshot = _frontDispatchQueue.RequeueHead(dequeued);
+                    await RunOnUiAsync(() =>
+                    {
+                        dequeued.Row.AssignedLine = 0;
+                        dequeued.Row.MarkQueued();
+                        ApplyFrontDispatchOrderSnapshot(requeueSnapshot);
+                        OnPropertyChanged(nameof(FrontDispatchCachedCount));
+                        return true;
+                    });
                     Console.WriteLine($"[FrontDispatch] ⚠ 写入{line}号线前端缓存失败, 已回队头: {ex.GetType().Name} - {ex.Message}");
                     dequeued.Workpiece.ReportStage($"写入{line}号线前端缓存失败，已回全局队头：{ex.Message}", "等待中");
                     await DelayFrontDispatchPollAsync(ct);
                     continue;
                 }
 
+                if (!acceptedByLineCache)
+                    continue;
+
+                var completedSnapshot = _frontDispatchQueue.CompleteDispatch(dequeued);
                 await RunOnUiAsync(() =>
                 {
+                    dequeued.Row.AssignedLine = line;
+                    dequeued.Row.MarkEnteredLine();
+                    ApplyFrontDispatchOrderSnapshot(completedSnapshot);
+                    OnPropertyChanged(nameof(FrontDispatchCachedCount));
                     OnPropertyChanged(nameof(Line1CachedCount));
                     OnPropertyChanged(nameof(Line2CachedCount));
                     OnPropertyChanged(nameof(Line1CacheDetail));
@@ -3773,6 +3775,7 @@ public sealed class HomeViewModel : ObservableObject
         }
 
         taskRow.AssignedLine = line;
+        taskRow.MarkEnteredLine();
         // 只写后端缓存, 不写PLC有板信号；后端仍需读到真实中转架有板信号后才会上料。
         wp.ReportStage($"人工上中转架 {rackCode}");
         Console.WriteLine($"[HomeViewModel] 📥 人工中转架任务写入缓存 {taskRow.TransferRackDisplayName} {wp.IdentityText} d={wp.Diameter} L={wp.Length}");
@@ -4062,6 +4065,7 @@ public sealed class HomeViewModel : ObservableObject
 
         // 设置启动回调：用户点任务行的「启动」→ 分配工件到对应线路
         row.OnStartRequested = taskRow => StartTaskRow(taskRow);
+        row.OnPauseRequested = PauseTaskRow;
 
         TaskRows.Add(row);
         Console.WriteLine($"[HomeViewModel] 新增任务：版号={row.PlateNo} 序号={row.Sequence} 版长={row.Length}mm");
@@ -4073,6 +4077,7 @@ public sealed class HomeViewModel : ObservableObject
     {
         if (taskRow.AssignedLine > 0)
         {
+            taskRow.MarkEnteredLine();
             taskRow.State = "运行中";
             Console.WriteLine($"[HomeViewModel] {taskRow.PlateNo}/{taskRow.Sequence} 已分配到{taskRow.AssignedLine}号线, 忽略重复启动入队");
             return;
