@@ -2609,7 +2609,8 @@ public sealed class HomeViewModel : ObservableObject
             .Where(r => !string.IsNullOrWhiteSpace(r.StationCode))
             .ToDictionary(r => r.StationCode.Trim().ToUpperInvariant(), r => r, StringComparer.OrdinalIgnoreCase);
         _stationDict = grindingCoords; // 缓存供弹窗查询
-        _grindingEngine = new GrindingFlowEngine(_craneCache, _cfg, grindingCoords, _mcCache, _exceptionReporter);
+        var st010PlacementFlags = new St010PlacementFlags();
+        _grindingEngine = new GrindingFlowEngine(_craneCache, _cfg, grindingCoords, _mcCache, _exceptionReporter, st010PlacementFlags);
         Console.WriteLine($"[HomeViewModel] 研磨流程引擎已创建（{grindingCoords.Count} 个工位坐标）");
 
         // ── 前后端共享中转架互斥锁 ──
@@ -2652,13 +2653,13 @@ public sealed class HomeViewModel : ObservableObject
         // M817+M720 锁传给1号线后端: DoUnload长工件→M817, 短工件→M720
         _line1RearEngine = new Line1RearFlowEngine(_craneCache, _manipulatorCache, _mcCache, _cfg, grindingCoords,
             _sharedTransferRackLock, sharedSafety, _exceptionReporter, _line1Engine.DeviceStatus,
-            lockM817: lockM817, lockM720: lockM720);
+            lockM817: lockM817, lockM720: lockM720, st010PlacementFlags: st010PlacementFlags);
         Console.WriteLine("[HomeViewModel] 1号线后端流程引擎已创建");
 
         // ── 创建机械手2动平衡流转引擎 ──
         // 4把锁全传: M2Flow用M817或M818, M3Flow用M821+M720
         _line1BalancingEngine = new BalancingFlowEngine(_manipulatorCache, _craneCache, _mcCache, _cfg, grindingCoords,
-            _exceptionReporter, lockM817, lockM818, lockM821, lockM720);
+            _exceptionReporter, lockM817, lockM818, lockM821, lockM720, st010PlacementFlags);
         Console.WriteLine("[HomeViewModel] 机械手2动平衡流转引擎已创建(两条线共用)");
 
         // ── 创建2号线流程引擎 ──────────────────────────────────────

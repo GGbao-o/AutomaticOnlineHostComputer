@@ -34,6 +34,7 @@ public sealed class GrindingFlowEngine : IDisposable
     private readonly MotionConfig _cfg;                   // 运动参数配置(速度/Z公式系数/超时/轮询间隔/X11延时等)
     private readonly Dictionary<string, MachineManagementRowVm> _stationCoords; // 工位坐标(数据库machine表, 含XYZ+偏移量)
     private readonly IOperationalEventReporter _exceptionReporter;
+    private readonly St010PlacementFlags _st010PlacementFlags;
     private readonly GrindingWorkpieceDisplayService _workpieceDisplay = new(); // ST709取料参数旁路显示，不参与业务准入
     // ── MC连接(共享McConnectionCache, 与平衡/后端引擎共用, 防重复TCP) ──
     //   MC65=192.168.2.65: 上料架(研磨上料架) M730(末位有板/允许取板) M731(取板完成) D200(2号位测长,读)
@@ -276,13 +277,14 @@ public sealed class GrindingFlowEngine : IDisposable
     /// <param name="mcc">MC共享连接缓存(与平衡/后端引擎共用, 防同一PLC重复TCP连接)</param>
     public GrindingFlowEngine(CraneConnectionCache craneCache, MotionConfig cfg,
         Dictionary<string, MachineManagementRowVm> stationCoords, McConnectionCache mcc,
-        IOperationalEventReporter exceptionReporter)
+        IOperationalEventReporter exceptionReporter, St010PlacementFlags st010PlacementFlags)
     {
         _craneCache = craneCache;
         _cfg = cfg;
         _stationCoords = stationCoords;
         _mcCache = mcc;
         _exceptionReporter = exceptionReporter;
+        _st010PlacementFlags = st010PlacementFlags;
 
         _grinders = new List<GrinderContext>
         {
@@ -1833,39 +1835,56 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine($"[GrindingEngine] [{craneName}] Z回升已启动，{_cfg.Grinding.M731NotifyDelayMs}ms后写M731并行通知PLC");
             await Task.Delay(_cfg.Grinding.M731NotifyDelayMs, ct);
 
-            // ── ⑥ 通知PLC已取走: M731=1 → PLC将M730清零+释放传送带 ──
-            if (_mc65?.IsConnected != true)
+            var st010Placement = _st010PlacementFlags.Snapshot();
+            if (st010Placement.AnyPlacing)
             {
                 await zSafeTask;
-                action.Confirm(new FlowActionPosition(null, null, safeZ), "持件后Z安全到位，MC65未连接无法写M731");
+                action.Confirm(new FlowActionPosition(null, null, safeZ),
+                    "Z安全到位；ST010正在放板，按PLC新逻辑跳过本趟M731");
                 physicalTracker?.TryConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
                 operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
-                throw new InvalidOperationException("MC65未连接, 工件已吸起但无法写M731通知取料完成");
+                Console.WriteLine($"[GrindingEngine] [{craneName}] ST010放板中(M3={st010Placement.M3St010Placing},天车2={st010Placement.Crane2St010Placing})，跳过本趟M731");
+                OperationalLog.Info("M731跳过", "ST010正在放板，研磨天车按PLC新逻辑跳过本趟M731",
+                    ("机械手3放板中", st010Placement.M3St010Placing ? "1" : "0"),
+                    ("2号天车放板中", st010Placement.Crane2St010Placing ? "1" : "0"),
+                    ("后续处理", "等待Z安全到位后继续去研磨机"));
             }
-
-            action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), safeZ), "M731通知ST709已取料");
-            action.MarkCommandSent();
-            Task m731Task = _mc65.WriteMBitInWordAsync(720, 11, true, ct);
-            try
+            else
             {
-                await Task.WhenAll(zSafeTask, m731Task);
-            }
-            catch (Exception ex)
-            {
-                if (zSafeTask.IsCompletedSuccessfully)
+                // ── ⑥ 通知PLC已取走: M731=1 → PLC将M730清零+释放传送带 ──
+                if (_mc65?.IsConnected != true)
                 {
-                    action.RecordFeedback(new FlowActionPosition(null, null, safeZ), true, true, "ST709取料后Z已安全到位，等待M731异常处理");
+                    await zSafeTask;
+                    action.Confirm(new FlowActionPosition(null, null, safeZ), "持件后Z安全到位，MC65未连接无法写M731");
                     physicalTracker?.TryConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
                     operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
+                    throw new InvalidOperationException("MC65未连接, 工件已吸起但无法写M731通知取料完成");
                 }
-                if (!m731Task.IsCompletedSuccessfully)
-                    throw new InvalidOperationException($"M731写入失败, 物理工件已取离ST709, 必须暂停人工确认/补写: {ex.Message}", ex);
-                throw;
+
+                action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), safeZ), "M731通知ST709已取料");
+                action.MarkCommandSent();
+                Task m731Task = _mc65.WriteMBitInWordAsync(720, 11, true, ct);
+                try
+                {
+                    await Task.WhenAll(zSafeTask, m731Task);
+                }
+                catch (Exception ex)
+                {
+                    if (zSafeTask.IsCompletedSuccessfully)
+                    {
+                        action.RecordFeedback(new FlowActionPosition(null, null, safeZ), true, true, "ST709取料后Z已安全到位，等待M731异常处理");
+                        physicalTracker?.TryConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
+                        operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
+                    }
+                    if (!m731Task.IsCompletedSuccessfully)
+                        throw new InvalidOperationException($"M731写入失败, 物理工件已取离ST709, 必须暂停人工确认/补写: {ex.Message}", ex);
+                    throw;
+                }
+                action.Confirm(new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), safeZ), "Z安全到位且M731写入成功返回");
+                physicalTracker?.TryConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
+                operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
+                Console.WriteLine($"[GrindingEngine] Z安全到位 + M731=1 通知PLC取料完成 ✓ {wp.IdentityText}");
             }
-            action.Confirm(new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), safeZ), "Z安全到位且M731写入成功返回");
-            physicalTracker?.TryConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
-            operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
-            Console.WriteLine($"[GrindingEngine] Z安全到位 + M731=1 通知PLC取料完成 ✓ {wp.IdentityText}");
 
             // ── ⑦ 目标XY与最终加工参数并行准备（加偏移）───────────
             if (!TryGetStationCoords(grinder.StationCode, out int gx, out int gy, out int gz))

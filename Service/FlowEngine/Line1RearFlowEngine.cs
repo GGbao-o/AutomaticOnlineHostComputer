@@ -238,11 +238,13 @@ public sealed class Line1RearFlowEngine : IDisposable
         McConnectionCache mcc, MotionConfig cfg, Dictionary<string, MachineManagementRowVm> sc,
         SemaphoreSlim trl, SafetyFlags sf, IOperationalEventReporter exceptionReporter,
         Line1FrontFlowEngine.Line1DeviceStatus? fd = null,
-        SemaphoreSlim? lockM817 = null, SemaphoreSlim? lockM720 = null)
+        SemaphoreSlim? lockM817 = null, SemaphoreSlim? lockM720 = null,
+        St010PlacementFlags? st010PlacementFlags = null)
     {
         _craneCache = cc; _manipulatorCache = mc; _mcCache = mcc; _cfg = cfg; _stationCoords = sc;
         _transferRackLock = trl; _safety = sf; _exceptionReporter = exceptionReporter; _frontDs = fd;
         _lockM817 = lockM817; _lockM720 = lockM720;
+        _st010PlacementFlags = st010PlacementFlags ?? new St010PlacementFlags();
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("  [后引擎] 1号线后端流程引擎 已创建");
         Console.WriteLine("  天车编号=2号  斜床=ST108~ST112");
@@ -253,6 +255,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     // ── 平衡料架位置锁(防止天车和机械手同时操作同位置) ──
     private readonly SemaphoreSlim? _lockM817; // M817位置: 后天车(放) vs M2Flow(取)
     private readonly SemaphoreSlim? _lockM720; // M720位置: 后天车(放) vs M3Flow(放) vs 研磨(取)
+    private readonly St010PlacementFlags _st010PlacementFlags;
 
     public void Start()
     {
@@ -2788,6 +2791,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             //   因此不按长短省锁, 避免目标位附近设备或研磨天车并行动作形成碰撞窗口。
             bool gotM817 = false;
             bool gotM720 = false;
+            bool crane2St010PlacementStarted = false;
             try
             {
                 //需要动平衡
@@ -2824,6 +2828,13 @@ public sealed class Line1RearFlowEngine : IDisposable
                         action.RegisterLock("M720"); gotM720 = true;
                     }
                     await WaitForM720CanPlaceBeforePlaceAsync(wp, ct);
+                    if (_st010PlacementFlags.BeginCrane2Placement())
+                    {
+                        Console.WriteLine("│ [分流] 2号天车ST010放板标志=1，研磨天车将跳过本趟M731");
+                        OperationalLog.Info("ST010放板标志置位", "2号天车已通过最终M720确认，开始向ST010放板",
+                            ("标志", "Crane2St010Placing"), ("当前值", "1"), ("用途", "研磨天车M731判断"));
+                    }
+                    crane2St010PlacementStarted = true;
                 }
 
                 // ③ XY移动+放料(持锁中)
@@ -3104,6 +3115,12 @@ public sealed class Line1RearFlowEngine : IDisposable
                     action.Confirm(new FlowActionPosition(gx + _ox, gy + _oy, sz), "M721、研磨缓存与ST010放料后Z安全到位均成功返回");
                     physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
                     operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "ST010放料后Z升安全命令成功返回");
+                    if (crane2St010PlacementStarted && _st010PlacementFlags.EndCrane2Placement())
+                    {
+                        Console.WriteLine("│ [分流] 2号天车ST010放板标志=0（M721和Z安全到位）");
+                        OperationalLog.Info("ST010放板标志清除", "2号天车ST010交接闭环，清除本趟M731判断标志",
+                            ("标志", "Crane2St010Placing"), ("当前值", "0"), ("原因", "M721和Z安全到位"));
+                    }
                     operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST010/M720完整交接",
                         "ST010退磁、Z安全回升、M721及M720研磨缓存回调均成功返回");
                     wp.ReportStage("1号线 研磨上料架 ST010/M720");
@@ -3116,6 +3133,12 @@ public sealed class Line1RearFlowEngine : IDisposable
             }
             finally
             {
+                if (crane2St010PlacementStarted && _st010PlacementFlags.EndCrane2Placement())
+                {
+                    Console.WriteLine("│ [分流] 2号天车ST010放板标志=0（流程退出兜底）");
+                    OperationalLog.Info("ST010放板标志清除", "2号天车流程退出，兜底清除本趟M731判断标志",
+                        ("标志", "Crane2St010Placing"), ("当前值", "0"), ("原因", "流程退出兜底"));
+                }
                 // 长短板都可能持有M720路径锁; 只释放真正拿到的锁。  gotM720   gotM817 都是True  短板 长版都是拿的两把锁
                 if (gotM720)
                 {

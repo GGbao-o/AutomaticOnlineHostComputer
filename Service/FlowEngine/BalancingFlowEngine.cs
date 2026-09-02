@@ -650,7 +650,8 @@ public sealed class BalancingFlowEngine : IDisposable
         McConnectionCache mcc, MotionConfig cfg, Dictionary<string, MachineManagementRowVm> sc,
         IOperationalEventReporter exceptionReporter,
         SemaphoreSlim? lockM817 = null, SemaphoreSlim? lockM818 = null,
-        SemaphoreSlim? lockM821 = null, SemaphoreSlim? lockM720 = null)
+        SemaphoreSlim? lockM821 = null, SemaphoreSlim? lockM720 = null,
+        St010PlacementFlags? st010PlacementFlags = null)
     {
         _manipulatorCache = mc;
         _craneCache = cc;
@@ -660,6 +661,7 @@ public sealed class BalancingFlowEngine : IDisposable
         _exceptionReporter = exceptionReporter;
         _lockM817 = lockM817; _lockM818 = lockM818;
         _lockM821 = lockM821; _lockM720 = lockM720;
+        _st010PlacementFlags = st010PlacementFlags ?? new St010PlacementFlags();
         Console.WriteLine($"[平衡引擎#{EngineId}] 实例已创建");
         Console.WriteLine($"  平衡锁: M817={L(_lockM817)} M818={L(_lockM818)} M821={L(_lockM821)} M720={L(_lockM720)}");
 
@@ -867,6 +869,7 @@ public sealed class BalancingFlowEngine : IDisposable
     private readonly SemaphoreSlim? _lockM818; // M818: Line2Rear(放) vs M2Flow(取)
     private readonly SemaphoreSlim? _lockM821; // M821: Line2Rear(放) vs M3Flow(取)
     private readonly SemaphoreSlim? _lockM720; // M720: Line1Rear(放) vs M3Flow(放) vs Grinding(取)
+    private readonly St010PlacementFlags _st010PlacementFlags;
 
     // ── 机械手偏移量(数据库machine表x_dis/y_dis/z_dis, 机械手只移YZ轴) ──
     private int _m2OffsetY, _m2OffsetZ; // 机械手2偏移量(ST902的YOffset/ZOffset)
@@ -2187,6 +2190,12 @@ public sealed class BalancingFlowEngine : IDisposable
             // M720在主循环里已经预检为空, 且M3已持有M720位置锁; 这里仍然动作前二次读PLC。
             // 锁只能防软件内部互斥, 不能防现场信号变化或人工干预, 所以M720有板/读失败都禁止继续放料。
             await ConfirmM720EmptyBeforePlaceAsync(ct);
+            if (_st010PlacementFlags.BeginM3Placement())
+            {
+                Console.WriteLine("[平衡引擎] [M3] ST010放板标志=1，研磨天车将跳过本趟M731");
+                OperationalLog.Info("ST010放板标志置位", "机械手3已通过最终M720确认，开始向ST010放板",
+                    ("标志", "M3St010Placing"), ("当前值", "1"), ("用途", "研磨天车M731判断"));
+            }
             var (destY, destZ) = GetArmCoord("M720", "ST010", _m3OffsetY, _m3OffsetZ);
             Console.WriteLine($"[平衡引擎] [M3] ② 放料 ST010 Y={destY}");
             //移动y
@@ -2269,6 +2278,12 @@ public sealed class BalancingFlowEngine : IDisposable
                         "M721写入成功返回，PLC放料通知已确认");
                     m721Notified = true;
                     Console.WriteLine($"[平衡引擎] [M3] M721=1 通知PLC放料完成 {sourceIdentity}");
+                    if (_st010PlacementFlags.EndM3Placement())
+                    {
+                        Console.WriteLine("[平衡引擎] [M3] ST010放板标志=0（M721成功）");
+                        OperationalLog.Info("ST010放板标志清除", "机械手3 M721通知成功，清除本趟M731判断标志",
+                            ("标志", "M3St010Placing"), ("当前值", "0"), ("原因", "M721成功"));
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -2397,6 +2412,12 @@ public sealed class BalancingFlowEngine : IDisposable
         }
         finally
         {
+            if (_st010PlacementFlags.EndM3Placement())
+            {
+                Console.WriteLine("[平衡引擎] [M3] ST010放板标志=0（流程退出兜底）");
+                OperationalLog.Info("ST010放板标志清除", "机械手3流程退出，兜底清除本趟M731判断标志",
+                    ("标志", "M3St010Placing"), ("当前值", "0"), ("原因", "流程退出兜底"));
+            }
             ReleaseM3RackLocks("finally兜底");
             if (IsM3ActionCurrent(actionVersion))
             {
