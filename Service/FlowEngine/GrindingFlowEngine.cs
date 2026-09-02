@@ -1831,11 +1831,14 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine($"[GrindingEngine] [{craneName}] ⑤c Z升到安全高度 {safeZ}（绝对坐标，不加偏移）");
             action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, null, safeZ), "持件后Z上升安全高度");
             action.MarkCommandSent();
+            //升安全高度
             Task zSafeTask = crane.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
             Console.WriteLine($"[GrindingEngine] [{craneName}] Z回升已启动，{_cfg.Grinding.M731NotifyDelayMs}ms后写M731并行通知PLC");
+            //延时2000ms  这个是配置文件配置的
             await Task.Delay(_cfg.Grinding.M731NotifyDelayMs, ct);
 
             var st010Placement = _st010PlacementFlags.Snapshot();
+            //机械手3/2号天车 正在往研磨上料架1号位放板
             if (st010Placement.AnyPlacing)
             {
                 await zSafeTask;
@@ -1849,6 +1852,7 @@ public sealed class GrindingFlowEngine : IDisposable
                     ("2号天车放板中", st010Placement.Crane2St010Placing ? "1" : "0"),
                     ("后续处理", "等待Z安全到位后继续去研磨机"));
             }
+            //机械手3/2号天车没有在研磨上料架1号位执行放板动作
             else
             {
                 // ── ⑥ 通知PLC已取走: M731=1 → PLC将M730清零+释放传送带 ──
@@ -1863,6 +1867,7 @@ public sealed class GrindingFlowEngine : IDisposable
 
                 action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), safeZ), "M731通知ST709已取料");
                 action.MarkCommandSent();
+                //写入M731=1
                 Task m731Task = _mc65.WriteMBitInWordAsync(720, 11, true, ct);
                 try
                 {
@@ -1889,7 +1894,7 @@ public sealed class GrindingFlowEngine : IDisposable
             // ── ⑦ 目标XY与最终加工参数并行准备（加偏移）───────────
             if (!TryGetStationCoords(grinder.StationCode, out int gx, out int gy, out int gz))
                 throw new InvalidOperationException($"数据库未找到 {grinder.StationCode} 坐标");
-
+            //给研磨机发数据和下发数据完成
             async Task SendTargetGrinderParametersAsync()
             {
                 await grinder.Svc!.SendRollerParamsAsync(wp.Diameter, wp.BoreType, wp.Length, ct);
@@ -2285,6 +2290,7 @@ public sealed class GrindingFlowEngine : IDisposable
 
             if (!TryGetStationCoords(grinder.StationCode, out int gx, out int gy, out int gz))
                 throw new InvalidOperationException($"数据库未找到 {grinder.StationCode} 坐标");
+            //获取研磨上料架坐标
             if (!TryGetStationCoords("ST709", out int st709X, out int st709Y, out int st709Z))
                 throw new InvalidOperationException("数据库未找到 ST709 上料架坐标，禁止开始研磨下料动作");
 
@@ -2301,6 +2307,7 @@ public sealed class GrindingFlowEngine : IDisposable
             var grSpd = _cfg.GetCraneSpeed(_cfg.Grinding.CraneNo);
             action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "设置研磨天车下料任务绝对速度");
             action.MarkCommandSent();
+            //设置速度
             await crane.SetAbsSpeedAsync(
                 grSpd.X.Speed, grSpd.X.Accel, grSpd.X.Decel,
                 grSpd.Y.Speed, grSpd.Y.Accel, grSpd.Y.Decel,

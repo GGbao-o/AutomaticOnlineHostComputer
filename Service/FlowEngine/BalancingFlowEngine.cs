@@ -2259,6 +2259,12 @@ public sealed class BalancingFlowEngine : IDisposable
             await _m3.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
             action.Confirm(new FlowActionPosition(null, destY, safeZ), "ST010/M720放料后Z安全到位");
             operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST010/M720放料后Z升安全命令成功返回");
+            if (_st010PlacementFlags.EndM3Placement())
+            {
+                Console.WriteLine("[平衡引擎] [M3] ST010放板标志=0（放料后Z安全到位）");
+                OperationalLog.Info("ST010放板标志清除", "机械手3已完成ST010放料并升到安全Z，清除本趟M731判断标志",
+                    ("标志", "M3St010Placing"), ("当前值", "0"), ("原因", "ST010放料后Z安全到位"));
+            }
             placedOnM720 = true; // 工件已物理放到研磨上料位并且Z已离开, 后续信号失败需人工补确认
             holdingWorkpiece = false;
             SetM3Display(actionVersion, m3DisplayWorkpiece, "已放到ST010/M720，等待M721及研磨缓存确认");
@@ -2278,12 +2284,6 @@ public sealed class BalancingFlowEngine : IDisposable
                         "M721写入成功返回，PLC放料通知已确认");
                     m721Notified = true;
                     Console.WriteLine($"[平衡引擎] [M3] M721=1 通知PLC放料完成 {sourceIdentity}");
-                    if (_st010PlacementFlags.EndM3Placement())
-                    {
-                        Console.WriteLine("[平衡引擎] [M3] ST010放板标志=0（M721成功）");
-                        OperationalLog.Info("ST010放板标志清除", "机械手3 M721通知成功，清除本趟M731判断标志",
-                            ("标志", "M3St010Placing"), ("当前值", "0"), ("原因", "M721成功"));
-                    }
                 }
                 catch (Exception ex)
                 {
