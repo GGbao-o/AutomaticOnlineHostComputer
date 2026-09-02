@@ -68,6 +68,8 @@ public sealed class HomeViewModel : ObservableObject
             await _grindingEngine.PauseAsync();
             IsGrindingRunning = false;
             OnPropertyChanged(nameof(GrindingCachedCount));
+            OnPropertyChanged(nameof(GrindingCacheDetail));
+            OnPropertyChanged(nameof(GrindingCacheTooltip));
         }
         else
         {
@@ -88,6 +90,8 @@ public sealed class HomeViewModel : ObservableObject
             }
             IsGrindingRunning = true;
             OnPropertyChanged(nameof(GrindingCachedCount));
+            OnPropertyChanged(nameof(GrindingCacheDetail));
+            OnPropertyChanged(nameof(GrindingCacheTooltip));
         }
     }
 
@@ -102,6 +106,8 @@ public sealed class HomeViewModel : ObservableObject
         Console.WriteLine($"[HomeViewModel] ▶ 点击按钮【写入缓存】 直径={CachedDiameter} 版孔={(CachedBoreType == 1 ? "大孔" : "小孔")} 长度={CachedLength}");
         _grindingEngine.EnqueueWorkpiece(CachedDiameter, CachedBoreType, CachedLength);
         OnPropertyChanged(nameof(GrindingCachedCount));
+        OnPropertyChanged(nameof(GrindingCacheDetail));
+        OnPropertyChanged(nameof(GrindingCacheTooltip));
         await Task.CompletedTask;
     }
 
@@ -389,6 +395,8 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>已缓存研磨工件数量</summary>
     public int GrindingCachedCount => _grindingEngine?.CachedCount ?? 0;
     public string GrindingCacheDetail => FormatCacheDetail(_grindingEngine?.GetCachedWorkpiecesSnapshot());
+    /// <summary>研磨FIFO全部缓存工件的只读悬浮明细。</summary>
+    public string GrindingCacheTooltip => FormatGrindingCacheTooltip(_grindingEngine?.GetCachedWorkpiecesSnapshot());
 
     // ── 1号线流程引擎 ────────────────────────────────────────────────
     private Line1FrontFlowEngine? _line1Engine;
@@ -528,6 +536,7 @@ public sealed class HomeViewModel : ObservableObject
                 OnPropertyChanged(nameof(Line1CacheDetail));
                 OnPropertyChanged(nameof(Line2CacheDetail));
                 OnPropertyChanged(nameof(GrindingCacheDetail));
+                OnPropertyChanged(nameof(GrindingCacheTooltip));
                 RefreshFlowStatusHoverDetails();
             }
             catch (Exception ex)
@@ -1680,6 +1689,22 @@ public sealed class HomeViewModel : ObservableObject
             : $"D={wp.Diameter}mm"));
     }
 
+    private static string FormatGrindingCacheTooltip(IEnumerable<WorkpieceCache>? workpieces)
+    {
+        var snapshot = workpieces?.ToArray() ?? Array.Empty<WorkpieceCache>();
+        if (snapshot.Length == 0) return "无缓存工件";
+
+        return string.Join(Environment.NewLine, snapshot.Select((wp, index) =>
+        {
+            var fields = new List<string>();
+            if (!string.IsNullOrWhiteSpace(wp.PlateNo)) fields.Add($"版号={wp.PlateNo}");
+            if (!string.IsNullOrWhiteSpace(wp.Sequence)) fields.Add($"序={wp.Sequence}");
+            fields.Add($"D={wp.Diameter}mm");
+            if (wp.Length > 0) fields.Add($"L={wp.Length}mm");
+            return $"{index + 1}. {string.Join("，", fields)}";
+        }));
+    }
+
     // ── 动平衡引擎 ────────────────────────────────────────────────
     private bool _isBalancingRunning;
     private bool _balancingSafetyPopupShown;
@@ -2349,6 +2374,7 @@ public sealed class HomeViewModel : ObservableObject
         IsGrindingRunning = _grindingEngine.IsRunning && !_grindingEngine.IsPaused;
         OnPropertyChanged(nameof(GrindingCachedCount));
         OnPropertyChanged(nameof(GrindingCacheDetail));
+        OnPropertyChanged(nameof(GrindingCacheTooltip));
         return result;
     }
 
@@ -2415,6 +2441,7 @@ public sealed class HomeViewModel : ObservableObject
         OnPropertyChanged(nameof(Line1CacheDetail));
         OnPropertyChanged(nameof(Line2CacheDetail));
         OnPropertyChanged(nameof(GrindingCacheDetail));
+        OnPropertyChanged(nameof(GrindingCacheTooltip));
         Console.WriteLine("[HomeViewModel] LoadAsync轻量刷新: 引擎已初始化, 保留现有引擎/锁/缓存, 不重新连接、不重建流程实例");
         if (_cfg.ErpTaskImport.EnabledOnStartup && !IsErpTaskImportRunning)
             StartErpTaskImport();

@@ -470,7 +470,11 @@
                                 TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
-                    <Border Height="98" Style="{StaticResource KpiStyle}">
+                    <Border
+                        Height="98"
+                        Style="{StaticResource KpiStyle}"
+                        ToolTip="{Binding GrindingCacheTooltip}"
+                        ToolTipService.InitialShowDelay="1000">
                         <StackPanel>
                             <TextBlock Foreground="{StaticResource MutedBrush}" Text="研磨缓存" />
                             <TextBlock
