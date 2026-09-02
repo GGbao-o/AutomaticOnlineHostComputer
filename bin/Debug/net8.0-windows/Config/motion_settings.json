@@ -127,9 +127,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 250,
-        "accel": 120,
-        "decel": 70
+        "speed": 350,
+        "accel": 170,
+        "decel": 150
       }
     }
   },
@@ -383,7 +383,7 @@
     "x11StableDelayMs": 500,
     "m731NotifyDelayMs": 2000,
     "m721NotifyDelayMs": 2000,
-    "maxFifoCount": 2,
+    "maxFifoCount": 13,
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,
     "waitingForUnloadTimeoutMinutes": 30,

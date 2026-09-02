@@ -1411,6 +1411,40 @@ public sealed class GrindingFlowEngine : IDisposable
             $"阶段={result.Stage} d={wp.Diameter} L={wp.Length}: {result.Error?.Message}");
     }
 
+    /// <summary>
+    /// 目标研磨机上料准备阶段（持件XY、加工参数/数据完成、目标微调）失败后的安全清理。
+    /// 工件已经确认由研磨天车持有，故只清目标机参数/上位机输出；不得清Pending或回研磨FIFO。
+    /// </summary>
+    private async Task ClearTargetGrinderPreparationAsync(
+        GrinderContext grinder, WorkpieceCache wp, Exception originalException)
+    {
+        const string phase = "自动清理研磨机目标位准备参数";
+        Console.WriteLine(
+            $"[GrindingEngine] [{grinder.Name}] ⚠ {phase}开始: 工件={wp.IdentityText}; 原始异常={originalException.Message}");
+        OperationalLog.Warn(phase, "XY/参数链/微调异常，清目标机参数和上位机输出后暂停；Pending保留",
+            ("研磨机", grinder.StationCode), ("工件", wp.IdentityText), ("原始异常", originalException.Message),
+            ("后续处理", "ClearEmergencyRegistersAsync；Pending保留；由外层异常暂停"));
+
+        try
+        {
+            await grinder.Svc!.ClearEmergencyRegistersAsync(CancellationToken.None);
+            Console.WriteLine(
+                $"[GrindingEngine] [{grinder.Name}] ✓ {phase}成功: 参数及上位机输出已清零; Pending保留");
+            OperationalLog.Info(phase, "参数及上位机输出已清零，Pending保留，等待外层异常暂停",
+                ("研磨机", grinder.StationCode), ("工件", wp.IdentityText));
+        }
+        catch (Exception clearEx)
+        {
+            Console.WriteLine(
+                $"[GrindingEngine] [{grinder.Name}] ⚠ {phase}失败: 原始异常={originalException.Message}; " +
+                $"清理异常={clearEx.Message}; Pending保留");
+            OperationalLog.Warn(phase, "自动清理失败，保留原始异常语义并暂停",
+                ("研磨机", grinder.StationCode), ("工件", wp.IdentityText),
+                ("原始异常", originalException.Message), ("清理异常", clearEx.Message),
+                ("后续处理", "Pending保留；由外层异常暂停"));
+        }
+    }
+
     /// <summary>从 _stationCoords 读指定站号的 XYZ 坐标，未找到返回 false。</summary>
     private bool TryGetStationCoords(string stationCode, out int x, out int y, out int z)
     {
@@ -1428,21 +1462,22 @@ public sealed class GrindingFlowEngine : IDisposable
 
     /// <summary>
     /// 天车取料 + 送料到研磨机 + 握手全流程（由主循环 fire-and-forget 调用）。
-    /// <para>14 个步骤：</para>
+    /// <para>15 个步骤：</para>
     /// <para>  ① 等待研磨机请求数据（避免 PLC 未就绪就写参数）</para>
     /// <para>  ② 检查磨石厚度报警（仅 TypeA；报警机停止新任务分配，其他机继续）</para>
-    /// <para>  ③ 写工件参数 + 数据传输完成(3s长信号) — 通知 PLC 参数已下发</para>
+    /// <para>  ③ 复核工件、补D200长度并写旁路显示屏</para>
     /// <para>  ④ 天车 XY+Z 到上料架 ST709（坐标从数据库读）</para>
     /// <para>  ⑤ 充磁取料（轮询 X6=1 确认充磁到位）</para>
     /// <para>  ⑥ Z 升到安全高度(绝对Z=400)</para>
-    /// <para>  ⑦ XY 移到研磨机位置</para>
-    /// <para>  ⑧ 等待研磨机请求上料 + 门打开（装载需门开）</para>
-    /// <para>  ⑨ Z 下降到装料位置(研磨机Z + d/2)——Z变大=向下，此步 200ms 轮询 X2 下压限位</para>
-    /// <para>  ⑩ 上料到达锁紧位置(3s长信号) — 通知 PLC 尾座可夹紧</para>
-    /// <para>  ⑪ 等待尾座锁紧完成</para>
-    /// <para>  ⑫ 退磁释放工件（轮询 X7=1 + D5029=0 确认退磁到位）</para>
-    /// <para>  ⑬ Z 升到安全高度(绝对Z=400)</para>
-    /// <para>  ⑭ 上料完成(3s长信号) → 标记研磨机=加工中，PLC 开始加工</para>
+    /// <para>  ⑦ XY移向研磨机与最终参数、数据传输完成(3s长信号)并行执行</para>
+    /// <para>  ⑧ 目标X绝对编码器微调</para>
+    /// <para>  ⑨ 等待研磨机请求上料 + 门打开（装载需门开）</para>
+    /// <para>  ⑩ Z 下降到装料位置(研磨机Z - d/2)——Z变大=向下，此步 200ms 轮询 X2 下压限位</para>
+    /// <para>  ⑪ 上料到达锁紧位置(3s长信号) — 通知 PLC 尾座可夹紧</para>
+    /// <para>  ⑫ 等待尾座锁紧完成</para>
+    /// <para>  ⑬ 退磁释放工件（轮询 X7=1 + D5029=0 确认退磁到位）</para>
+    /// <para>  ⑭ Z 升到安全高度(绝对Z=400)</para>
+    /// <para>  ⑮ 上料完成(3s长信号) → 标记研磨机=加工中，PLC 开始加工</para>
     /// <para>⚠ 异常时：下压急停(PressureStopException)暂停引擎。</para>
     /// <para>⚠ 充磁前失败 → 工件还在 ST709 架上 → 自动放回缓存队列。</para>
     /// <para>⚠ 充磁后失败 → 工件已在天车上 → 无法自动恢复，需人工处理。</para>
@@ -1832,26 +1867,71 @@ public sealed class GrindingFlowEngine : IDisposable
             operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST709取料后Z升安全命令成功返回");
             Console.WriteLine($"[GrindingEngine] Z安全到位 + M731=1 通知PLC取料完成 ✓ {wp.IdentityText}");
 
-            // ── ⑦ XY 移到研磨机位置（加偏移）─────────────────────
+            // ── ⑦ 目标XY与最终加工参数并行准备（加偏移）───────────
             if (!TryGetStationCoords(grinder.StationCode, out int gx, out int gy, out int gz))
                 throw new InvalidOperationException($"数据库未找到 {grinder.StationCode} 坐标");
-            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑦ XY移到研磨机位置({gx}+{_craneOffsetX},{gy}+{_craneOffsetY})");
+
+            async Task SendTargetGrinderParametersAsync()
+            {
+                await grinder.Svc!.SendRollerParamsAsync(wp.Diameter, wp.BoreType, wp.Length, ct);
+                await grinder.Svc.SetDataSentDoneAsync(ct);
+            }
+
+            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑦ 并行准备目标研磨机：XY→({gx}+{_craneOffsetX},{gy}+{_craneOffsetY})，同时下发最终加工参数");
             action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), $"持件XY到{grinder.StationCode}");
             action.MarkCommandSent();
-            await crane.MoveAbsoluteAsync(ApplyOffsetX(gx), ApplyOffsetY(gy), -1, ct: ct);
+
+            OperationalLog.Info("研磨目标并行准备开始", "天车持件XY与最终加工参数链同时启动",
+                ("研磨机", grinder.StationCode), ("工件", wp.IdentityText),
+                ("XY目标", $"{ApplyOffsetX(gx)}/{ApplyOffsetY(gy)}"),
+                ("参数", $"直径={wp.Diameter}; 孔型={wp.BoreType}; 长度={wp.Length}"));
+            Task xyMoveTask = crane.MoveAbsoluteAsync(ApplyOffsetX(gx), ApplyOffsetY(gy), -1, ct: ct);
+            Task parameterTransferTask = SendTargetGrinderParametersAsync();
+
+            try
+            {
+                await Task.WhenAll(xyMoveTask, parameterTransferTask);
+            }
+            catch (Exception ex)
+            {
+                await ClearTargetGrinderPreparationAsync(grinder, wp, ex);
+                throw;
+            }
+
             action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), "研磨机目标上方XY到位");
-            //写研磨机加工参数
-            //方法体内会把doule类型转为int
             action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), $"{grinder.StationCode}研磨参数与数据完成通知");
             action.MarkCommandSent();
-            //下发研磨机参数
-            await grinder.Svc!.SendRollerParamsAsync(wp.Diameter, wp.BoreType, wp.Length, ct);
-            await grinder.Svc.SetDataSentDoneAsync(ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), "研磨参数与数据完成通知成功返回");
-            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ③ 工件参数已下发(d={wp.Diameter} L={wp.Length})");
+            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ✓ 目标XY、最终参数与数据传输完成信号均完成，开始目标微调");
+            OperationalLog.Info("研磨目标并行准备完成", "XY和最终加工参数链均成功返回，继续目标位微调",
+                ("研磨机", grinder.StationCode), ("工件", wp.IdentityText));
 
-            // ── ⑧ 等研磨机请求上料 + 门打开 ──────────────────────
-            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑧ 等待请求上料+门打开...");
+            // ── ⑧ 目标位绝对编码器微调 ───────────────────────────
+            action.BeginStep(FlowActionStep.FineTuneTarget, new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), $"{grinder.StationCode}上料前X绝对编码器微调");
+            action.MarkCommandSent();
+            try
+            {
+                await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
+                    crane, _cfg, _cfg.Grinding.CraneNo, grinder.StationCode, $"研磨天车-{grinder.StationCode}上料放入前",
+                    reporter: _exceptionReporter,
+                    failureContext: OperationalEventContextFactory.FineTuneFailure(
+                        scope: "研磨", engine: "研磨引擎", deviceNo: _cfg.Grinding.CraneNo.ToString(), station: grinder.StationCode,
+                        actionStage: $"{grinder.StationCode}上料放入前XY微调", workpiece: wp,
+                        source: OperationalEventContextFactory.ConfirmedLocation("ST709", "本物理周期来源"),
+                        target: OperationalEventContextFactory.ConfirmedLocation(grinder.StationCode, "已选研磨机目标"),
+                        owner: "研磨天车", targetZ: EvidenceValue<int>.Unavailable("业务在微调后调用ApplyOffsetZ计算研磨机装料目标"),
+                        physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, physicalTracker, "ST709取料X11=1且研磨机尚未进入上料请求等待", "天车/研磨机上方")),
+                    actionId: actionId, physicalTracker: physicalTracker, ct: ct);
+            }
+            catch (Exception ex)
+            {
+                await ClearTargetGrinderPreparationAsync(grinder, wp, ex);
+                throw;
+            }
+            action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), "研磨机上料前微调成功返回");
+
+            // ── ⑨ 等研磨机请求上料 + 门打开 ──────────────────────
+            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑨ 目标微调完成，等待请求上料+门打开...");
             await WaitForGrinderSignalAsync(grinder,
                 async () => await grinder.Svc!.IsRequestLoadAsync(ct),
                 "请求上料", _cfg.Grinding.HandshakeTimeoutMs, ct);
@@ -1861,23 +1941,9 @@ public sealed class GrindingFlowEngine : IDisposable
                 "门打开", _cfg.Grinding.HandshakeTimeoutMs, ct);
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}]   门已打开 ✓，准备下降送料");
 
-            // ── ⑨ Z 下降到研磨机装料位置（加 Z 偏移）─────────────
+            // ── ⑩ Z 下降到研磨机装料位置（加 Z 偏移）─────────────
             int loadZ = ComputeGrinderLoadZ(gz, wp.Diameter);
-            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑨ Z下降到装料位置 {loadZ}+{_craneOffsetZ} (研磨机Z={gz} - d/2={wp.Diameter / 2})");
-            action.BeginStep(FlowActionStep.FineTuneTarget, new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), $"{grinder.StationCode}上料前X绝对编码器微调");
-            action.MarkCommandSent();
-            await XAbsFineTuneHelper.VerifyAndFineTuneAsync(
-                crane, _cfg, _cfg.Grinding.CraneNo, grinder.StationCode, $"研磨天车-{grinder.StationCode}上料放入前",
-                reporter: _exceptionReporter,
-                failureContext: OperationalEventContextFactory.FineTuneFailure(
-                    scope: "研磨", engine: "研磨引擎", deviceNo: _cfg.Grinding.CraneNo.ToString(), station: grinder.StationCode,
-                    actionStage: $"{grinder.StationCode}上料放入前XY微调", workpiece: wp,
-                    source: OperationalEventContextFactory.ConfirmedLocation("ST709", "本物理周期来源"),
-                    target: OperationalEventContextFactory.ConfirmedLocation(grinder.StationCode, "已选研磨机目标"),
-                    owner: "研磨天车", targetZ: EvidenceValue<int>.Unavailable("业务在微调后调用ApplyOffsetZ计算研磨机装料目标"),
-                    physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, physicalTracker, "ST709取料X11=1且研磨机已请求上料", "天车/研磨机上方")),
-                actionId: actionId, physicalTracker: physicalTracker, ct: ct);
-            action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), "研磨机上料前微调成功返回");
+            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑩ Z下降到装料位置 {loadZ}+{_craneOffsetZ} (研磨机Z={gz} - d/2={wp.Diameter / 2})");
             int loadTargetZ = ApplyOffsetZ(loadZ);
             operationalTracker.BeginZDown(loadTargetZ);
             try
@@ -1894,22 +1960,22 @@ public sealed class GrindingFlowEngine : IDisposable
                 throw;
             }
 
-            // ── ⑩ 上料到达锁紧位置 ───────────────────────────────
-            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑩ 上料到达锁紧位置(3s长信号)...");
+            // ── ⑪ 上料到达锁紧位置 ───────────────────────────────
+            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑪ 上料到达锁紧位置(3s长信号)...");
             action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), loadTargetZ), $"{grinder.StationCode} SetLoadInPlace上料到位通知");
             action.MarkCommandSent();
             await grinder.Svc.SetLoadInPlaceAsync(ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), loadTargetZ), "SetLoadInPlace成功返回");
 
-            // ── ⑪ 等锁紧完成 ─────────────────────────────────────
-            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑪ 等待尾座锁紧完成...");
+            // ── ⑫ 等锁紧完成 ─────────────────────────────────────
+            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑫ 等待尾座锁紧完成...");
             await WaitForGrinderSignalAsync(grinder,
                 async () => await grinder.Svc!.IsClampDoneLoadOutAsync(ct),
                 "锁紧完成", _cfg.Grinding.HandshakeTimeoutMs, ct);
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}]   锁紧完成，开始退磁");
 
-            // ── ⑫ 退磁 ──────────────────────────────────────────
-            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑫ 退磁释放工件...");
+            // ── ⑬ 退磁 ──────────────────────────────────────────
+            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑬ 退磁释放工件...");
             operationalTracker.BeginPlacementMagnetOff(grinder.StationCode);
             try
             {
@@ -1935,16 +2001,16 @@ public sealed class GrindingFlowEngine : IDisposable
             placedInGrinder = true; // MagnetOff成功返回后, 按物理现场处理为工件已放入研磨机。
             action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff, "目标退磁成功，工件已在研磨机等待SetLoadDone闭环");
 
-            // ── ⑬ Z 升到安全高度（不加偏移）───────────────────
-            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑬ Z升到安全高度 {safeZ}（绝对坐标，不加偏移）");
+            // ── ⑭ Z 升到安全高度（不加偏移）───────────────────
+            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑭ Z升到安全高度 {safeZ}（绝对坐标，不加偏移）");
             action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), "研磨机放料后Z升安全高度");
             action.MarkCommandSent();
             await crane.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), "研磨机放料后Z安全到位");
             operationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "研磨机放料后Z升安全命令成功返回");
 
-            // ── ⑭ 上料完成 ──────────────────────────────────────
-            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑭ 上料完成(3s长信号) {wp.IdentityText}");
+            // ── ⑮ 上料完成 ──────────────────────────────────────
+            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑮ 上料完成(3s长信号) {wp.IdentityText}");
             action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), safeZ), $"{grinder.StationCode} SetLoadDone上料完成通知");
             action.MarkCommandSent();
             operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "SetLoadDone",
