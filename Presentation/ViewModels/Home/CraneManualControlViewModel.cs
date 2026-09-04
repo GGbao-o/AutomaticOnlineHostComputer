@@ -83,6 +83,10 @@ public sealed class CraneManualControlViewModel : ObservableObject
                 IsXHomeCompleted = null;
                 IsYHomeCompleted = null;
                 IsZHomeCompleted = null;
+                IsAlarmFeedback = null;
+                ServoAlarmValue = null;
+                PlcServoAlarmValue = null;
+                PlcAlarmValue = null;
                 Console.WriteLine($"[CraneManualVM] 已切换设备 -> {SelectedDeviceDisplay}");
                 // 切换设备后自动读取当前位置填入目标输入框; 读状态请求合并, 不阻塞下拉框/UI。
                 RequestRefreshTargetsFromCurrent();
@@ -119,6 +123,61 @@ public sealed class CraneManualControlViewModel : ObservableObject
     public bool IsCraneSelected => _selectedDevice != null;
     /// <summary>当前选中设备是否是纯天车（有 X 轴/接液盘）。机械手为 false。</summary>
     public bool IsCraneOnly => _selectedDevice?.DeviceType == ManualDeviceType.Crane;
+
+    private bool? _isAlarmFeedback;
+    /// <summary>D5011/D5012/D5013 汇总报警实际状态；仅供手动页面显示，null 表示未读到状态。</summary>
+    public bool? IsAlarmFeedback
+    {
+        get => _isAlarmFeedback;
+        private set
+        {
+            if (SetField(ref _isAlarmFeedback, value))
+                OnPropertyChanged(nameof(AlarmFeedbackText));
+        }
+    }
+
+    private short? _servoAlarmValue;
+    /// <summary>D5011 伺服报警原始字；仅供手动页面显示。</summary>
+    public short? ServoAlarmValue
+    {
+        get => _servoAlarmValue;
+        private set
+        {
+            if (SetField(ref _servoAlarmValue, value))
+                OnPropertyChanged(nameof(AlarmFeedbackText));
+        }
+    }
+
+    private short? _plcServoAlarmValue;
+    /// <summary>D5012 PLC 伺服指令报警原始字；仅供手动页面显示。</summary>
+    public short? PlcServoAlarmValue
+    {
+        get => _plcServoAlarmValue;
+        private set
+        {
+            if (SetField(ref _plcServoAlarmValue, value))
+                OnPropertyChanged(nameof(AlarmFeedbackText));
+        }
+    }
+
+    private short? _plcAlarmValue;
+    /// <summary>D5013 PLC 报警原始字；仅供手动页面显示。</summary>
+    public short? PlcAlarmValue
+    {
+        get => _plcAlarmValue;
+        private set
+        {
+            if (SetField(ref _plcAlarmValue, value))
+                OnPropertyChanged(nameof(AlarmFeedbackText));
+        }
+    }
+
+    public string AlarmFeedbackText => IsAlarmFeedback switch
+    {
+        true => $"报警（D5011={ServoAlarmValue}，D5012={PlcServoAlarmValue}，D5013={PlcAlarmValue}）",
+        false => $"报警正常（D5011={ServoAlarmValue}，D5012={PlcServoAlarmValue}，D5013={PlcAlarmValue}）",
+        null => "报警状态未知"
+    };
 
     private bool? _isMagnetizeFeedback;
     /// <summary>X6充磁到位实际反馈；null 表示本次未能读取，不能按未充磁解释。</summary>
@@ -855,6 +914,10 @@ public sealed class CraneManualControlViewModel : ObservableObject
         IsXHomeCompleted = null;
         IsYHomeCompleted = null;
         IsZHomeCompleted = null;
+        IsAlarmFeedback = null;
+        ServoAlarmValue = null;
+        PlcServoAlarmValue = null;
+        PlcAlarmValue = null;
         ManualDeviceItem? deviceAtRead = SelectedDevice;
         bool isCraneAtRead = deviceAtRead?.DeviceType == ManualDeviceType.Crane;
         try
@@ -904,6 +967,13 @@ public sealed class CraneManualControlViewModel : ObservableObject
             IsXHomeCompleted = status == null ? null : status.XHomeCompleted != 0;
             IsYHomeCompleted = status == null ? null : status.YHomeCompleted != 0;
             IsZHomeCompleted = status == null ? null : status.ZHomeCompleted != 0;
+            if (status != null)
+            {
+                ServoAlarmValue = status.ServoAlarm;
+                PlcServoAlarmValue = status.PlcServoAlarm;
+                PlcAlarmValue = status.PlcAlarm;
+                IsAlarmFeedback = status.ServoAlarm != 0 || status.PlcServoAlarm != 0 || status.PlcAlarm != 0;
+            }
         }
         catch (Exception ex)
         {

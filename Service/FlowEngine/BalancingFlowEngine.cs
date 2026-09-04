@@ -1680,6 +1680,13 @@ public sealed class BalancingFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            if (ex is CraneMotionTimeoutException timeout)
+            {
+                // 运动超时的实际位置未知：无论是否已持件，都必须停止动平衡并把原始超时信息交给主页面弹窗。
+                // 不在这里变更工件、来源、动作账本或线路启动条件；既有通用异常处理和 finally 继续负责原有记录与本趟锁清理。
+                _paused = true;
+                OnSafetyAlarm?.Invoke(timeout.Message);
+            }
             // holdingWorkpiece=true: X11已确认工件在机械手上; 未放到目的位前必须暂停, 防止释放busy后继续派发。
             Console.WriteLine($"[平衡引擎] [M2] ✘ 异常: {ex.Message}");
             if (action is { IsFinalized: false } && action.CommandState != FlowCommandState.NotSent)
@@ -2348,6 +2355,13 @@ public sealed class BalancingFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            if (ex is CraneMotionTimeoutException timeout)
+            {
+                // 运动超时的实际位置未知：无论是否已持件，都必须停止动平衡并把原始超时信息交给主页面弹窗。
+                // 不在这里变更工件、来源、动作账本或线路启动条件；既有通用异常处理和 finally 继续负责原有记录与本趟锁清理。
+                _paused = true;
+                OnSafetyAlarm?.Invoke(timeout.Message);
+            }
             // holdingWorkpiece=true: X11已确认工件在机械手上; 未放到目的位前必须暂停, 防止释放busy后继续派发。
             Console.WriteLine($"[平衡引擎] [M3] ✘ 异常: {ex.Message}");
             if (action is { IsFinalized: false } && action.CommandState != FlowCommandState.NotSent)
