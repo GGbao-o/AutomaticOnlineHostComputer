@@ -1766,8 +1766,6 @@ public sealed class HomeViewModel : ObservableObject
             if (!await EnsureCranePositionsReadyForStartAsync(
                     new[] { (1, "1号线前天车"), (2, "1号线后天车") }, "1号线引擎启动/恢复前"))
                 return;
-            if (!EnsureNoPendingManualActionsForLine(1))
-                return;
 
             lock (_lineSafetyPopupLock) _line1SafetyPopupShown = false;
 
@@ -1803,8 +1801,6 @@ public sealed class HomeViewModel : ObservableObject
         {
             if (!await EnsureCranePositionsReadyForStartAsync(
                     new[] { (3, "2号线前天车"), (4, "2号线后天车") }, "2号线引擎启动/恢复前"))
-                return;
-            if (!EnsureNoPendingManualActionsForLine(2))
                 return;
 
             lock (_lineSafetyPopupLock) _line2SafetyPopupShown = false;
