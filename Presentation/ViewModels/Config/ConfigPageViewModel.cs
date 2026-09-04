@@ -50,6 +50,8 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     //  Tab3 — 斜床参数
     // ═══════════════════════════════════════════════════════════════
     public ObservableCollection<SkewBedParamRow> SkewBedRows { get; } = new();
+    /// <summary>四台研磨机最大加工长度(mm)，直接引用配置字典。</summary>
+    public ObservableCollection<GrindingLengthRow> GrindingLengthRows { get; } = new();
 
     // ═══════════════════════════════════════════════════════════════
     //  Tab4 — 机械手坐标
@@ -195,6 +197,11 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
             SkewBedRows.Add(new SkewBedParamRow(code, 1, cd, ml));
         foreach (var code in MotionConfig.SkewBedSection.GetBedCodesForLine(2))
             SkewBedRows.Add(new SkewBedParamRow(code, 2, cd, ml));
+
+        // Tab3 — 研磨机最大加工长度（mm）
+        GrindingLengthRows.Clear();
+        foreach (var code in new[] { "ST701", "ST702", "ST703", "ST704" })
+            GrindingLengthRows.Add(new GrindingLengthRow(code, _cfg.Grinding.MaxWorkpieceLengthMm));
 
         // Tab4 — 机械手坐标：每行直接引用 ArmCoords 字典
         ArmCoordRows.Clear();
@@ -479,6 +486,29 @@ public sealed class SkewBedParamRow : INotifyPropertyChanged
     public int MaxWorkpieceLength
     {
         get => _maxLen.TryGetValue(StationCode, out var v) ? v : 1300;
+        set { _maxLen[StationCode] = value; OnProp(); }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    private void OnProp([CallerMemberName] string? n = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
+}
+
+public sealed class GrindingLengthRow : INotifyPropertyChanged
+{
+    private readonly Dictionary<string, int> _maxLen;
+    public string StationCode { get; }
+    public string StationDisplayName => ConfigStationNames.Format(StationCode);
+
+    public GrindingLengthRow(string stationCode, Dictionary<string, int> maxLen)
+    {
+        StationCode = stationCode;
+        _maxLen = maxLen;
+    }
+
+    /// <summary>最大加工长度，单位mm；0表示当前机台禁止自动派发。</summary>
+    public int MaxWorkpieceLength
+    {
+        get => _maxLen.TryGetValue(StationCode, out var value) ? value : 0;
         set { _maxLen[StationCode] = value; OnProp(); }
     }
 

@@ -722,6 +722,80 @@ public sealed class GrindingFlowEngine : IDisposable
         return false;
     }
 
+    /// <summary>只读取研磨FIFO队头，不改变FIFO或页面缓存数量。</summary>
+    private bool TryPeekCache(out WorkpieceCache wp)
+    {
+        lock (_cacheLock)
+        {
+            if (_cacheQueue.First != null)
+            {
+                wp = _cacheQueue.First.Value;
+                return true;
+            }
+        }
+        wp = default;
+        return false;
+    }
+
+    /// <summary>
+    /// 仅当FIFO队头仍是预检时看到的同一工件才出队。
+    /// 研磨应急可能在派发门闩外清队头；此复核避免长度已按旧队头选机后误取新队头。
+    /// </summary>
+    private bool TryDequeueCacheIfHeadMatches(WorkpieceCache expected, out WorkpieceCache wp)
+    {
+        lock (_cacheLock)
+        {
+            if (_cacheQueue.First == null || !_cacheQueue.First.Value.Equals(expected))
+            {
+                wp = default;
+                return false;
+            }
+
+            wp = _cacheQueue.First.Value;
+            _cacheQueue.RemoveFirst();
+            if (_cachedList.Count > 0) _cachedList.RemoveAt(0);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// 派发前取得队头真实长度(mm)。M700来源且FIFO长度为0时，D200保存了上料架测得的真实长度；
+    /// 此处只读D200，不出队、不写PLC、不移动天车。无有效长度时本轮保留队头等待。
+    /// </summary>
+    private async Task<WorkpieceCache?> ResolveDispatchWorkpieceLengthAsync(WorkpieceCache wp, CancellationToken ct)
+    {
+        if (wp.Length > 0) return wp;
+
+        if (_mc65?.IsConnected != true)
+        {
+            if (ShouldLogWaiting("grinding-length:mc65-disconnected"))
+                Console.WriteLine("[GrindingEngine] ⏳ M700来源且FIFO长度为0，但MC65未连接，不能读取D200进行研磨机长度匹配");
+            return null;
+        }
+
+        try
+        {
+            var d200 = await _mc65.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, ct);
+            double length = d200.IntValues.Length > 0 ? d200.IntValues[0] : 0;
+            if (length <= 0)
+            {
+                if (ShouldLogWaiting("grinding-length:d200-invalid"))
+                    Console.WriteLine($"[GrindingEngine] ⏳ M700来源且FIFO长度为0，D200测长无效 len={length}mm；FIFO队头保留，不派发天车");
+                return null;
+            }
+
+            wp.Length = length;
+            Console.WriteLine($"[GrindingEngine] [长度准入] M700来源队头从D200补得长度={length}mm，开始筛选研磨机最大加工长度");
+            return wp;
+        }
+        catch (Exception ex)
+        {
+            if (ShouldLogWaiting("grinding-length:d200-read-failed"))
+                Console.WriteLine($"[GrindingEngine] ⏳ 读取D200补研磨队头长度失败，本轮不派发: {ex.Message}");
+            return null;
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  主循环
     // ═══════════════════════════════════════════════════════════════
@@ -989,24 +1063,10 @@ public sealed class GrindingFlowEngine : IDisposable
     /// </summary>
     private async Task<bool> TryDispatchLoadAsync(CancellationToken ct)
     {
-        var ready = FindReadyGrinder();
-        if (ready == null)
-        {
-            if (_cycleCount % 10 == 1)
-            {
-                var idleNoReq = _grinders.Where(g => g.State == GrinderState.Idle && !g.LastRequestData).ToList();
-                if (idleNoReq.Count > 0)
-                    Console.WriteLine($"[GrindingEngine] ⏳ 有空闲但无请求数据：{string.Join(", ", idleNoReq.Select(g => g.StationCode))}");
-                else
-                    Console.WriteLine("[GrindingEngine] ⏳ 无就绪研磨机(全部忙或未联机)");
-            }
-            return false;
-        }
-
         if (CachedCount == 0)
         {
             if (_cycleCount % 10 == 1)
-                Console.WriteLine($"[GrindingEngine] ⏳ 有研磨机{ready.Name}就绪但缓存空, 等待工件入队...");
+                Console.WriteLine("[GrindingEngine] ⏳ 研磨FIFO为空，等待工件入队...");
             return false;
         }
 
@@ -1018,7 +1078,7 @@ public sealed class GrindingFlowEngine : IDisposable
         if (!await _craneLock.WaitAsync(0, ct))
         {
             if (ShouldLogWaiting("crane-busy:grinding-load"))
-                Console.WriteLine($"[GrindingEngine] [{ready.Name}] ⏳ 上料条件满足但天车锁忙，等待下一轮...");
+                Console.WriteLine("[GrindingEngine] ⏳ 上料条件满足但天车锁忙，等待下一轮...");
             return false;
         }
 
@@ -1033,7 +1093,7 @@ public sealed class GrindingFlowEngine : IDisposable
             // 应急可能在本轮顶部暂停检查之后发生，拿到天车锁后必须再次确认。
             if (_paused)
             {
-                Console.WriteLine($"[GrindingEngine] [{ready.Name}] 应急/暂停已生效, 放弃本次上料派发并释放天车锁");
+                Console.WriteLine("[GrindingEngine] 应急/暂停已生效, 放弃本次上料派发并释放天车锁");
                 return false;
             }
 
@@ -1051,17 +1111,52 @@ public sealed class GrindingFlowEngine : IDisposable
                 return false;
             }
 
+            // 队头必须先按真实长度(mm)选择可加工的Idle研磨机；不匹配时不进行零位保护、
+            // 不出队、不设Pending，确保ST709物理板与软件FIFO身份都不被改变。
+            if (!TryPeekCache(out var queuedWp))
+            {
+                if (_cycleCount % 10 == 1)
+                    Console.WriteLine("[GrindingEngine] 上料派发进入门闩后FIFO已空，改为检查下料");
+                return false;
+            }
+
+            WorkpieceCache? resolvedWp = await ResolveDispatchWorkpieceLengthAsync(queuedWp, ct);
+            if (!resolvedWp.HasValue)
+                return false;
+            WorkpieceCache dispatchWp = resolvedWp.Value;
+            //找到可用研磨机
+            var ready = FindReadyGrinder(dispatchWp.Length);
+            if (ready == null)
+            {
+                if (ShouldLogWaiting($"grinding-length:no-match:{Math.Round(dispatchWp.Length)}"))
+                {
+                    string machineLengths = string.Join(", ", _grinders.Select(g =>
+                        $"{g.StationCode}={_cfg.Grinding.MaxWorkpieceLengthMm.GetValueOrDefault(g.StationCode, 0)}mm"));
+                    Console.WriteLine($"[GrindingEngine] ⏳ FIFO队头 {dispatchWp.IdentityText} 长度={dispatchWp.Length}mm 无可用匹配研磨机；" +
+                        $"各机最大加工长度: {machineLengths}。队头保留，不派发天车");
+                }
+                return false;
+            }
+
             // 必须在 FIFO 出队和研磨机状态变化前校验，报警时任务仍留在原缓存。
             if (!await EnsureGrindingCranePositionReadyAsync("研磨上料任务出队前", ct))
                 return false;   
-            
-            //拿缓存数据 
-            if (!TryDequeueCache(out var wp))
+
+            // 零位保护期间PLC状态可能变化；最终出队前复核该机仍可加工这件工件。
+            if (!IsReadyGrinderForLength(ready, dispatchWp.Length))
             {
-                if (_cycleCount % 10 == 1)
-                    Console.WriteLine($"[GrindingEngine] [{ready.Name}] 上料派发时缓存已空，改为检查下料");
+                Console.WriteLine($"[GrindingEngine] [{ready.Name}] 上料最终复核未通过，FIFO队头保留，不出队");
                 return false;
             }
+            
+            // 只有队头仍为刚才做过长度匹配的同一件工件才允许最终出队。
+            if (!TryDequeueCacheIfHeadMatches(queuedWp, out _))
+            {
+                if (_cycleCount % 10 == 1)
+                    Console.WriteLine($"[GrindingEngine] [{ready.Name}] 上料派发时FIFO队头已变化，保守取消本轮派发");
+                return false;
+            }
+            WorkpieceCache wp = dispatchWp;
 
             var actionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1336,10 +1431,7 @@ public sealed class GrindingFlowEngine : IDisposable
         return true;
     }
 
-    /// <summary>
-    /// 按优先级找可用的研磨机(Idle+PLC请求数据+无PendingWorkpiece+无磨石报警)。
-    /// 西门子 TypeA 还必须为40001-3联机模式；单机和磨石报警都只排除本机新上料。
-    /// </summary>
+    /// <summary>按键限频记录等待日志，避免500ms主循环重复刷屏。</summary>
     private bool ShouldLogWaiting(string key)
     {
         var now = DateTime.UtcNow;
@@ -1349,16 +1441,27 @@ public sealed class GrindingFlowEngine : IDisposable
         return true;
     }
 
-    private GrinderContext? FindReadyGrinder()
+    /// <summary>
+    /// 按优先级找可用且最大加工长度满足工件长度(mm)的研磨机。
+    /// 西门子 TypeA 还必须为40001-3联机模式；单机和磨石报警都只排除本机新上料。
+    /// </summary>
+    private GrinderContext? FindReadyGrinder(double workpieceLength)
     {
-        return _grinders.FirstOrDefault(g =>
+        return _grinders.FirstOrDefault(g => IsReadyGrinderForLength(g, workpieceLength));
+    }
+
+    /// <summary>新上料准入：既有机台就绪条件 + 配置最大长度(mm)同时满足。</summary>
+    private bool IsReadyGrinderForLength(GrinderContext g, double workpieceLength)
+    {
+        return
             g.State == GrinderState.Idle          // 空闲
             && g.LastRequestData                   // PLC已联机(请求数据=1)
             && g.Svc != null                      // 共享服务已注入(GrinderPoll)
             && g.Svc.IsConnected                  // Modbus已连接
             && g.PendingWorkpiece == null          // 无在途工件(后台流程跑完会清)
             && !g.HasGrindStoneAlarm               // 磨石厚度报警：仅本机停止自动分配
-            && (g.GrinderType != PlcGrinderService.GrinderType.TypeA || g.LastOnlineMode)); // TypeA单机时禁止新上料
+            && (g.GrinderType != PlcGrinderService.GrinderType.TypeA || g.LastOnlineMode) // TypeA单机时禁止新上料
+            && _cfg.Grinding.CanProcessLength(g.StationCode, workpieceLength);
     }
 
     // ═══════════════════════════════════════════════════════════════

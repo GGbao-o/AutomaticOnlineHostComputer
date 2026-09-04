@@ -80,6 +80,9 @@ public sealed class CraneManualControlViewModel : ObservableObject
                 IsMagnetPressureFeedback = null;
                 IsDrainOpenFeedback = null;
                 IsDrainClosedFeedback = null;
+                IsXHomeCompleted = null;
+                IsYHomeCompleted = null;
+                IsZHomeCompleted = null;
                 Console.WriteLine($"[CraneManualVM] 已切换设备 -> {SelectedDeviceDisplay}");
                 // 切换设备后自动读取当前位置填入目标输入框; 读状态请求合并, 不阻塞下拉框/UI。
                 RequestRefreshTargetsFromCurrent();
@@ -229,6 +232,51 @@ public sealed class CraneManualControlViewModel : ObservableObject
         true => "门关到位（X1=1）",
         false => "门关未到位（X1=0）",
         null => "门关读取未知"
+    };
+
+    private bool? _isXHomeCompleted;
+    /// <summary>D5006 X轴是否已经回原点；null 表示本次未能读取。</summary>
+    public bool? IsXHomeCompleted
+    {
+        get => _isXHomeCompleted;
+        private set { if (SetField(ref _isXHomeCompleted, value)) OnPropertyChanged(nameof(XHomeCompletedText)); }
+    }
+
+    private bool? _isYHomeCompleted;
+    /// <summary>D5007 Y轴是否已经回原点；null 表示本次未能读取。</summary>
+    public bool? IsYHomeCompleted
+    {
+        get => _isYHomeCompleted;
+        private set { if (SetField(ref _isYHomeCompleted, value)) OnPropertyChanged(nameof(YHomeCompletedText)); }
+    }
+
+    private bool? _isZHomeCompleted;
+    /// <summary>D5008 Z轴是否已经回原点；null 表示本次未能读取。</summary>
+    public bool? IsZHomeCompleted
+    {
+        get => _isZHomeCompleted;
+        private set { if (SetField(ref _isZHomeCompleted, value)) OnPropertyChanged(nameof(ZHomeCompletedText)); }
+    }
+
+    public string XHomeCompletedText => IsXHomeCompleted switch
+    {
+        true => "X轴已回原点（D5006=1）",
+        false => "X轴未回原点（D5006=0）",
+        null => "X轴回原点状态未知"
+    };
+
+    public string YHomeCompletedText => IsYHomeCompleted switch
+    {
+        true => "Y轴已回原点（D5007=1）",
+        false => "Y轴未回原点（D5007=0）",
+        null => "Y轴回原点状态未知"
+    };
+
+    public string ZHomeCompletedText => IsZHomeCompleted switch
+    {
+        true => "Z轴已回原点（D5008=1）",
+        false => "Z轴未回原点（D5008=0）",
+        null => "Z轴回原点状态未知"
     };
 
     // ═══════════════════════════════════════════════════════════════
@@ -804,6 +852,9 @@ public sealed class CraneManualControlViewModel : ObservableObject
         IsMagnetPressureFeedback = null;
         IsDrainOpenFeedback = null;
         IsDrainClosedFeedback = null;
+        IsXHomeCompleted = null;
+        IsYHomeCompleted = null;
+        IsZHomeCompleted = null;
         ManualDeviceItem? deviceAtRead = SelectedDevice;
         bool isCraneAtRead = deviceAtRead?.DeviceType == ManualDeviceType.Crane;
         try
@@ -850,6 +901,9 @@ public sealed class CraneManualControlViewModel : ObservableObject
             IsMagnetPressureFeedback = magnetPressureFeedback;
             IsDrainOpenFeedback = drainOpenFeedback;
             IsDrainClosedFeedback = drainClosedFeedback;
+            IsXHomeCompleted = status == null ? null : status.XHomeCompleted != 0;
+            IsYHomeCompleted = status == null ? null : status.YHomeCompleted != 0;
+            IsZHomeCompleted = status == null ? null : status.ZHomeCompleted != 0;
         }
         catch (Exception ex)
         {

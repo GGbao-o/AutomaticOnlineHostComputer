@@ -156,7 +156,7 @@ public partial class CraneMoveDialog : Window
                 _currentX = s.XPos;
                 _currentY = s.YPos;
                 _currentZ = s.ZPos;
-                TxtCurrent.Text = $"X={_currentX}  Y={_currentY}  Z={_currentZ}  {(s.Busy != 0 ? "⚠ 忙碌" : "✓ 空闲")}";
+                TxtCurrent.Text = $"X={_currentX}  Y={_currentY}  Z={_currentZ}  回原点 X={s.XHomeCompleted} Y={s.YHomeCompleted} Z={s.ZHomeCompleted}";
             }
         }
         catch (Exception ex) { TxtCurrent.Text = $"读取失败: {ex.Message}"; }
@@ -239,7 +239,7 @@ public partial class CraneMoveDialog : Window
             _currentY = pos?.YPos ?? _currentY;
             _currentZ = pos?.ZPos ?? _currentZ;
             TxtCurrent.Text = pos != null
-                ? $"X={pos.XPos}  Y={pos.YPos}  Z={pos.ZPos}  {(pos.Busy != 0 ? "⚠ 忙碌" : "✓ 空闲")}"
+                ? $"X={pos.XPos}  Y={pos.YPos}  Z={pos.ZPos}  回原点 X={pos.XHomeCompleted} Y={pos.YHomeCompleted} Z={pos.ZHomeCompleted}"
                 : "读取失败";
         }
         catch (Exception ex)

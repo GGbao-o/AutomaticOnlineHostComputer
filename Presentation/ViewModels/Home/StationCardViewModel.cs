@@ -76,7 +76,7 @@ public sealed class StationCardViewModel : ObservableObject, IDisposable
     public bool HasIp => !string.IsNullOrWhiteSpace(_ip) && _ip != "未配置IP";
 
     /// <summary>
-    /// 页面加载时调用：连一次 → 读 D5006~D5010 → 更新属性 → 断开。
+    /// 页面加载时调用：连一次 → 读 D5006~D5010（回原点/故障/条件）→ 更新属性 → 断开。
     /// 不重试不轮询。线路启动后由引擎接管刷新。
     /// </summary>
     public async Task StartPollingAsync()
@@ -122,20 +122,22 @@ public sealed class StationCardViewModel : ObservableObject, IDisposable
             await _modbusClient.ConnectAsync(cts.Token);
             Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} TCP连接成功 ✓");
 
-            // 读 D5006~D5010: [Busy][Step][Mode][Fault][Cond]
+            // 读 D5006~D5010: [X已回原点][Y已回原点][Z已回原点][Fault][Cond]
             var result = await _modbusClient.ReadAsync(5006, 5, cts.Token);
             if (result != null && result.IntValues.Length >= 5)
             {
-                int busy  = result.IntValues[0];
+                int xHome = result.IntValues[0];
+                int yHome = result.IntValues[1];
+                int zHome = result.IntValues[2];
                 int fault = result.IntValues[3];
                 int cond  = result.IntValues[4];
 
                 bool hasFault = fault != 0;
                 ConnectedBrush = hasFault ? Brushes.Red : Brushes.LimeGreen;
                 Status1Brush = hasFault ? Brushes.Red : Brushes.Green;
-                Status1 = hasFault ? "故障" : (busy == 1 ? "运行中" : "空闲");
+                Status1 = hasFault ? "故障" : $"回原点 X={xHome} Y={yHome} Z={zHome}";
                 Status2 = hasFault ? $"报警 D5009={fault}" : $"就绪 条件={cond}";
-                Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} ✔ 读成功 busy={busy} fault={fault}");
+                Console.WriteLine($"[StationCard] [{_stationCode}] {_stationName} ✔ 读成功 home={xHome}/{yHome}/{zHome} fault={fault}");
             }
             else
             {

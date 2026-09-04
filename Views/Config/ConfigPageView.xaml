@@ -213,6 +213,28 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+
+                        <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionHeaderStyle}" Text="研磨机最大加工长度 (mm)" />
+                        <TextBlock Margin="0,2,0,6" Foreground="#6B7280" Text="0 或未配置时，该研磨机不参与自动上料派发。" />
+                        <Border Padding="8,4" Margin="0,0,0,4" Background="{StaticResource HeaderBrush}" CornerRadius="4">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Width="220" Style="{StaticResource ColHeaderStyle}" Text="工位 / 设备" HorizontalAlignment="Left" />
+                                <TextBlock Width="90" Style="{StaticResource ColHeaderStyle}" Text="最大长度 (mm)" />
+                            </StackPanel>
+                        </Border>
+                        <ItemsControl ItemsSource="{Binding GrindingLengthRows}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,2" Padding="8,3" CornerRadius="4">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Width="220" Text="{Binding StationDisplayName}" Style="{StaticResource StationLabelStyle}" />
+                                            <TextBox Text="{Binding MaxWorkpieceLength, UpdateSourceTrigger=PropertyChanged}"
+                                                     Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

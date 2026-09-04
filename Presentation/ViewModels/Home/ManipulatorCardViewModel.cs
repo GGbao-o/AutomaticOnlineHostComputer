@@ -241,8 +241,8 @@ public sealed class ManipulatorCardViewModel : ObservableObject, IDisposable
         var fault = s.Fault != 0 || s.ServoAlarm != 0 || s.PlcAlarm != 0;
         ConnectedBrush = fault ? Brushes.Red : Brushes.LimeGreen;
         Line1 = fault ? "已连接 | 故障" : "已连接，就绪";
-        Line2 = s.Busy == 1 ? $"执行任务 #{s.CurrentTaskNo}" : "无任务";
-        Line3 = s.Mode == 1 ? "自动模式" : (s.Mode == 2 ? "手动模式" : $"模式未知({s.Mode})");
+        Line2 = $"任务 #{s.CurrentTaskNo} | 回原点 X={s.XHomeCompleted} Y={s.YHomeCompleted} Z={s.ZHomeCompleted}";
+        Line3 = $"回原点状态 X={s.XHomeCompleted} Y={s.YHomeCompleted} Z={s.ZHomeCompleted}";
         Line4 = s.RunConditionMissing != 0 ? $"条件缺失 0x{s.RunConditionMissing:X4}" : "运行条件满足";
         Line5 = $"X6={(x6MagnetOk ? 1 : 0)} X7={(x7DemagnetOk ? 1 : 0)} D5029={s.HasRoller} | Y={s.YPos} Z={s.ZPos}";
 

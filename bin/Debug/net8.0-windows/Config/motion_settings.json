@@ -384,6 +384,12 @@
     "m731NotifyDelayMs": 2000,
     "m721NotifyDelayMs": 2000,
     "maxFifoCount": 13,
+    "maxWorkpieceLengthMm": {
+      "ST701": 0,
+      "ST702": 0,
+      "ST703": 0,
+      "ST704": 0
+    },
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,
     "waitingForUnloadTimeoutMinutes": 30,

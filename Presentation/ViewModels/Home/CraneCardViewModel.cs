@@ -261,9 +261,7 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
         Line1 = hasFault ? "已连接 | 故障" : "已连接，就绪";
         Line1Brush = hasFault ? Brushes.Red : Brushes.Green;
         ConnectedBrush = hasFault ? Brushes.Red : Brushes.LimeGreen;
-        Line2 = s.Busy == 1 ? $"执行任务 #{s.CurrentTaskNo}" : "无任务";
-
-        string modeText = s.Mode switch { 1 => "自动", 2 => "手动", _ => "待机" };
+        Line2 = $"任务 #{s.CurrentTaskNo} | 回原点 X={s.XHomeCompleted} Y={s.YHomeCompleted} Z={s.ZHomeCompleted}";
         // 磁铁状态：X6(充磁反馈线圈) + X7(退磁反馈线圈) + D5029(有版信号) 三重确认
         string magText;
         if (x6MagnetOk)
@@ -274,7 +272,7 @@ public sealed class CraneCardViewModel : ObservableObject, IDisposable
             magText = " | 有版(D5029)";
         else
             magText = " | 无版";
-        Line3 = $"{modeText}模式{magText}";
+        Line3 = $"磁铁状态{magText}";
 
         Line4 = s.RunConditionMissing != 0 ? $"条件缺失 0x{s.RunConditionMissing:X4}" : "运行条件满足";
         // Line5：坐标 + 磁铁线圈原始值

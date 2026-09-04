@@ -170,9 +170,9 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     ArrivedTarget       = (short)r[3],   // D5003
                     LoadDone            = (short)r[4],   // D5004
                     CurrentTaskNo       = (short)r[5],   // D5005
-                    Busy                = (short)r[6],   // D5006
-                    StateMachineStep    = (short)r[7],   // D5007
-                    Mode                = (short)r[8],   // D5008
+                    XHomeCompleted      = (short)r[6],   // D5006
+                    YHomeCompleted      = (short)r[7],   // D5007
+                    ZHomeCompleted      = (short)r[8],   // D5008
                     Fault               = (short)r[9],   // D5009
                     RunConditionMissing = (short)r[10],  // D5010
                     ServoAlarm          = (short)r[11],  // D5011
@@ -200,7 +200,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 if (ShouldLogStatus(status))
                 {
                     Console.WriteLine($"[CraneService] [{_name}] 状态快照 | " +
-                        $"Mode={status.Mode} Busy={status.Busy} Fault={status.Fault} " +
+                        $"Home X={status.XHomeCompleted} Y={status.YHomeCompleted} Z={status.ZHomeCompleted} Fault={status.Fault} " +
                         $"ServoAlarm={status.ServoAlarm} PlcAlarm={status.PlcAlarm} " +
                         $"HasPlate={status.HasRoller} X={status.XPos} Y={status.YPos} Z={status.ZPos}");
                 }
@@ -615,10 +615,9 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
         /// <summary>
         /// 天车任务启动前安全检查：
-        ///   1. 天车是否正在运动（D5006 Busy ≠ 0）      → 等待（不可同时发两条运动指令）
-        ///   2. 天车是否故障（D5009 Fault ≠ 0）          → 拒绝
-        ///   3. 伺服是否报警（D5011 ServoAlarm ≠ 0）    → 拒绝
-        ///   4. 天车是否已有版（D5029 HasRoller ≠ 0）   → 暂停（需人工确认）
+        ///   1. 天车是否故障（D5009 Fault ≠ 0）          → 拒绝
+        ///   2. 伺服是否报警（D5011 ServoAlarm ≠ 0）    → 拒绝
+        ///   3. 天车是否已有版（D5029 HasRoller ≠ 0）   → 暂停（需人工确认）
         /// 全部通过返回 Passed，否则返回 Failed(reason)。
         /// </summary>
         public async Task<SafetyCheckResult> CheckSafetyAsync(CancellationToken ct = default)
@@ -631,13 +630,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 return SafetyCheckResult.Failed("无法读取天车状态");
             }
 
-            Console.WriteLine($"[CraneService] [{_name}]   忙闲={status.Busy} 故障={status.Fault} 伺服报警={status.ServoAlarm} 有版={status.HasRoller}");
-
-            if (status.Busy != 0)
-            {
-                Console.WriteLine($"[CraneService] [{_name}] ⚠ 安全检查：天车正在运动中 D5006={status.Busy}，等待空闲");
-                return SafetyCheckResult.Failed($"天车正在运动中（D5006={status.Busy}），请等待当前操作完成");
-            }
+            Console.WriteLine($"[CraneService] [{_name}]   回原点 X={status.XHomeCompleted} Y={status.YHomeCompleted} Z={status.ZHomeCompleted} 故障={status.Fault} 伺服报警={status.ServoAlarm} 有版={status.HasRoller}");
             if (status.Fault != 0)
             {
                 Console.WriteLine($"[CraneService] [{_name}] ✘ 安全检查：天车故障 D5009={status.Fault}");
@@ -1142,8 +1135,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
         private bool ShouldLogStatus(CraneStatus status)
         {
-            string key = $"{status.Mode}|{status.Busy}|{status.Fault}|{status.ServoAlarm}|" +
-                         $"{status.PlcAlarm}|{status.HasRoller}|{status.CurrentTaskNo}|{status.StateMachineStep}";
+            string key = $"{status.XHomeCompleted}|{status.YHomeCompleted}|{status.ZHomeCompleted}|{status.Fault}|{status.ServoAlarm}|" +
+                         $"{status.PlcAlarm}|{status.HasRoller}|{status.CurrentTaskNo}";
             var now = DateTime.UtcNow;
             lock (_statusLogLock)
             {
@@ -1273,11 +1266,12 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public short ArrivedTarget       { get; set; }  // D5003
         public short LoadDone            { get; set; }  // D5004
         public short CurrentTaskNo       { get; set; }  // D5005
-        /// <summary>忙碌(1) / 空闲(0)</summary>
-        public short Busy                { get; set; }  // D5006
-        public short StateMachineStep    { get; set; }  // D5007
-        /// <summary>模式：自动(1) / 手动(2)</summary>
-        public short Mode                { get; set; }  // D5008
+        /// <summary>X轴已回原点（非0=是，只读状态）</summary>
+        public short XHomeCompleted      { get; set; }  // D5006
+        /// <summary>Y轴已回原点（非0=是，只读状态）</summary>
+        public short YHomeCompleted      { get; set; }  // D5007
+        /// <summary>Z轴已回原点（非0=是，只读状态）</summary>
+        public short ZHomeCompleted      { get; set; }  // D5008
         /// <summary>故障标志：正常(0) / 故障(1)</summary>
         public short Fault               { get; set; }  // D5009
         /// <summary>运行条件缺失位图（0=全满足）</summary>

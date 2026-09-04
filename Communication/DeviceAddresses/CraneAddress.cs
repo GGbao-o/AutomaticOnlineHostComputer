@@ -47,14 +47,14 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         /// <summary>D5005 - 天车当前任务编号（INT）</summary>
         public const int D_CurrentTaskNo = 5005;
 
-        /// <summary>D5006 - 天车状态：忙碌(1) / 空闲(0)（INT）</summary>
-        public const int D_Busy = 5006;
+        /// <summary>D5006 - X轴已回原点（INT，非0=已回原点，只读状态）</summary>
+        public const int D_XHomeCompleted = 5006;
 
-        /// <summary>D5007 - 天车状态机步骤（INT，调试用）</summary>
-        public const int D_StateMachineStep = 5007;
+        /// <summary>D5007 - Y轴已回原点（INT，非0=已回原点，只读状态）</summary>
+        public const int D_YHomeCompleted = 5007;
 
-        /// <summary>D5008 - 天车模式：自动(1) / 手动(2)（INT）</summary>
-        public const int D_Mode = 5008;
+        /// <summary>D5008 - Z轴已回原点（INT，非0=已回原点，只读状态）</summary>
+        public const int D_ZHomeCompleted = 5008;
 
         /// <summary>D5009 - 天车运行状态：正常(0) / 故障(1)（INT）</summary>
         public const int D_Fault = 5009;

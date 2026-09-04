@@ -276,6 +276,22 @@ public sealed class MotionConfig
         public int M721NotifyDelayMs { get; set; } = 1000;
         /// <summary>研磨上料FIFO最大缓存笔数。超过该值时，天车5在下一次上料派发前软暂停并等待人工确认。</summary>
         public int MaxFifoCount { get; set; } = 2;
+        /// <summary>
+        /// 各研磨机允许加工的最大工件长度(mm)。未配置或配置为0/负数时不可派发，
+        /// 防止机台长度能力未知时将ST709队头误送入研磨机。
+        /// </summary>
+        public Dictionary<string, int> MaxWorkpieceLengthMm { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ST701"] = 0, ["ST702"] = 0, ["ST703"] = 0, ["ST704"] = 0,
+        };
+        /// <summary>判断指定研磨机是否能加工指定长度(mm)。</summary>
+        public bool CanProcessLength(string stationCode, double workpieceLength)
+        {
+            return workpieceLength > 0
+                && MaxWorkpieceLengthMm.TryGetValue(stationCode, out int max)
+                && max > 0
+                && workpieceLength <= max;
+        }
         /// <summary>PLC/CNC信号等待轮询间隔(ms)。200ms对秒级信号变化足够，降低Modbus轮询压力</summary>
         public int SignalPollIntervalMs { get; set; } = 200;
         /// <summary>研磨天车上料中观察时间(分钟)。超时后暂停引擎并保留状态/缓存，等待人工确认。</summary>
