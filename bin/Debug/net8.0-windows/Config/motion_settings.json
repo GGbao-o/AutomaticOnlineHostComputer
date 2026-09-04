@@ -39,9 +39,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 250,
-        "accel": 120,
-        "decel": 70
+        "speed": 350,
+        "accel": 170,
+        "decel": 150
       }
     },
     "2": {
@@ -61,9 +61,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 250,
-        "accel": 120,
-        "decel": 70
+        "speed": 350,
+        "accel": 170,
+        "decel": 150
       }
     },
     "3": {
@@ -83,9 +83,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 250,
-        "accel": 120,
-        "decel": 70
+        "speed": 350,
+        "accel": 170,
+        "decel": 150
       }
     },
     "4": {
@@ -105,9 +105,9 @@
         "decel": 40
       },
       "z": {
-        "speed": 250,
-        "accel": 120,
-        "decel": 70
+        "speed": 350,
+        "accel": 170,
+        "decel": 150
       }
     },
     "5": {
@@ -385,10 +385,14 @@
     "m721NotifyDelayMs": 2000,
     "maxFifoCount": 13,
     "maxWorkpieceLengthMm": {
-      "ST701": 0,
-      "ST702": 0,
-      "ST703": 0,
-      "ST704": 0
+      "ST 701": 0,
+      "ST 702": 0,
+      "ST 703": 0,
+      "ST 704": 0,
+      "ST701": 1000,
+      "ST702": 1000,
+      "ST703": 1500,
+      "ST704": 1500
     },
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,
