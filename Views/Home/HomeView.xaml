@@ -349,7 +349,7 @@
                                 Binding="{Binding Sequence}"
                                 Header="序号" />
                             <DataGridTextColumn
-                                Width="45"
+                                Width="30"
                                 Binding="{Binding QueueOrderText}"
                                 Header="顺序" />
                             <DataGridTextColumn
@@ -381,7 +381,7 @@
                                 Binding="{Binding CornerSize}"
                                 Header="圆角大小" />
                             <DataGridTextColumn
-                                Width="100"
+                                Width="80"
                                 Binding="{Binding StartSourceText}"
                                 Header="任务起点" />
                             <DataGridTextColumn
@@ -393,7 +393,7 @@
                                 Binding="{Binding BalancingText}"
                                 Header="动平衡" />
                             <DataGridTextColumn
-                                Width="200"
+                                Width="240"
                                 Binding="{Binding Step}"
                                 Header="当前工序" />
                             <DataGridTextColumn
@@ -413,7 +413,7 @@
                                 Binding="{Binding SkewBedProcess}"
                                 Header="斜床工艺" />
                             <DataGridTextColumn
-                                Width="100"
+                                Width="120"
                                 Binding="{Binding MarkingContent}"
                                 Header="打号内容" />
                             <DataGridTextColumn

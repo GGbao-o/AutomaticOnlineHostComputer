@@ -208,8 +208,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         public const int D_X7_DemagnetizeOk  = 63495;
         /// <summary>D63490 — X2 磁铁下压限位（读，1=触发）</summary>
         public const int D_X2_MagnetLimit    = 63490;
-        /// <summary>D63499 — X11 检测有版（读，1=有版）</summary>
-        public const int D_X11_HasPlate      = 63499;
+        /// <summary>D63497 — X11 检测有版（读，1=有版）</summary>
+        public const int D_X11_HasPlate      = 63497;
         /// <summary>D4519 - Z JOG+（INT，写2触发）</summary>
         public const int D_ManualZJogPlus    = 4519;
         /// <summary>D4520 - 手动Z绝对位移（INT，写2触发）</summary>

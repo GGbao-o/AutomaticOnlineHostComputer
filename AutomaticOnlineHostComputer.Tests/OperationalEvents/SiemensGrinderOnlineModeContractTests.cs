@@ -3,7 +3,7 @@ namespace AutomaticOnlineHostComputer.Tests.OperationalEvents;
 public sealed class SiemensGrinderOnlineModeContractTests
 {
     [Fact]
-    public void TypeA_online_mode_blocks_only_new_automatic_load_dispatch()
+    public void TypeA_online_mode_blocks_new_automatic_load_and_unload_dispatch()
     {
         string address = Read("Communication", "DeviceAddresses", "PlcGrinderAddress.cs");
         string service = Read("Communication", "DeviceServices", "PlcGrinderService.cs");
@@ -19,6 +19,15 @@ public sealed class SiemensGrinderOnlineModeContractTests
         Assert.Contains("!snapshot.OnlineMode", prePick, StringComparison.Ordinal);
         Assert.Contains("RequeueWorkpiece(wp)", prePick, StringComparison.Ordinal);
         Assert.DoesNotContain("_paused = true", prePick, StringComparison.Ordinal);
+
+        string unloadCandidate = Slice(engine,
+            "// ── 检查下料架MC64",
+            "if (await _craneLock.WaitAsync(0, ct))");
+        Assert.Contains("g.GrinderType == PlcGrinderService.GrinderType.TypeA && !g.LastOnlineMode",
+            unloadCandidate, StringComparison.Ordinal);
+        Assert.Contains("continue; // 西门子单机模式仅跳过本轮自动下料", unloadCandidate,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("_paused = true", unloadCandidate, StringComparison.Ordinal);
     }
 
     [Fact]

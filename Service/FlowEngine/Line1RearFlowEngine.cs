@@ -826,6 +826,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     private async Task<UnloadCandidateScan> BuildUnloadCandidateScanAsync(Line1FrontFlowEngine.Line1DeviceStatus? fds, bool logDetails, CancellationToken ct)
     {
         var scan = new UnloadCandidateScan();
+        bool? manipulatorsAlarmFree = null; // 每轮候选扫描只读一次；后天车锁内重扫时自动再次复核。
         foreach (var b in _beds)
         {
             if (b == null || !b.Ok) continue;
@@ -877,6 +878,12 @@ public sealed class Line1RearFlowEngine : IDisposable
             }
 
             if (!await CanUnloadDestinationAcceptAsync(fds, wp, ct))
+                continue;
+
+            // 机械手2/3任一报警或读不到状态时，只禁止新下料候选，不改变斜床的WaitingUnload状态。
+            manipulatorsAlarmFree ??= await ManipulatorAlarmDispatchGate.CanDispatchRearSkewUnloadAsync(
+                _manipulatorCache, "1号线", ct);
+            if (!manipulatorsAlarmFree.Value)
                 continue;
 
             scan.Candidates.Add(new UnloadCandidate { Bed = b, Wp = wp });

@@ -103,7 +103,10 @@
         </Style>
 
         <DataTemplate x:Key="StationNodeTemplate">
-            <Border Style="{StaticResource FlowNodeStyle}" ToolTip="{Binding TooltipText}" ToolTipService.InitialShowDelay="1000">
+            <Border
+                Style="{StaticResource FlowNodeStyle}"
+                ToolTip="{Binding TooltipText}"
+                ToolTipService.InitialShowDelay="1000">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="6" />
@@ -164,7 +167,10 @@
         </DataTemplate>
 
         <DataTemplate x:Key="DetailedStationNodeTemplate">
-            <Border Style="{StaticResource DetailedNodeStyle}" ToolTip="{Binding TooltipText}" ToolTipService.InitialShowDelay="1000">
+            <Border
+                Style="{StaticResource DetailedNodeStyle}"
+                ToolTip="{Binding TooltipText}"
+                ToolTipService.InitialShowDelay="1000">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="6" />
@@ -227,7 +233,10 @@
         </DataTemplate>
 
         <DataTemplate x:Key="CompactStationNodeTemplate">
-            <Border Style="{StaticResource CompactNodeStyle}" ToolTip="{Binding TooltipText}" ToolTipService.InitialShowDelay="1000">
+            <Border
+                Style="{StaticResource CompactNodeStyle}"
+                ToolTip="{Binding TooltipText}"
+                ToolTipService.InitialShowDelay="1000">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="6" />
@@ -297,7 +306,10 @@
         </Style>
 
         <DataTemplate x:Key="CraneMotionNodeTemplate">
-            <Border Style="{StaticResource MotionNodeStyle}" ToolTip="{Binding FlowTaskTooltipText}" ToolTipService.InitialShowDelay="1000">
+            <Border
+                Style="{StaticResource MotionNodeStyle}"
+                ToolTip="{Binding FlowTaskTooltipText}"
+                ToolTipService.InitialShowDelay="1000">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="5" />
@@ -336,7 +348,10 @@
         </DataTemplate>
 
         <DataTemplate x:Key="ManipulatorMotionNodeTemplate">
-            <Border Style="{StaticResource MotionNodeStyle}" ToolTip="{Binding FlowTaskTooltipText}" ToolTipService.InitialShowDelay="1000">
+            <Border
+                Style="{StaticResource MotionNodeStyle}"
+                ToolTip="{Binding FlowTaskTooltipText}"
+                ToolTipService.InitialShowDelay="1000">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="5" />
@@ -535,7 +550,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-
+                    <!--  1号线  -->
                     <Border
                         Grid.Row="0"
                         Grid.Column="0"
@@ -579,7 +594,11 @@
                                         Style="{StaticResource NodeHostStyle}"
                                         Tag="打号机1 ST501" />
                                     <TextBlock Style="{StaticResource ArrowStyle}" />
-                                    <Border Width="212" Style="{StaticResource FlowNodeStyle}" ToolTip="{Binding Line1TransferRackTooltip}" ToolTipService.InitialShowDelay="1000">
+                                    <Border
+                                        Width="212"
+                                        Style="{StaticResource FlowNodeStyle}"
+                                        ToolTip="{Binding Line1TransferRackTooltip}"
+                                        ToolTipService.InitialShowDelay="1000">
                                         <StackPanel>
                                             <DockPanel>
                                                 <Border
@@ -607,7 +626,7 @@
                                     <TextBlock Style="{StaticResource ArrowStyle}" />
                                     <!--<ContentControl Style="{StaticResource NodeHostStyle}" Tag="后天车 ST902" Content="{Binding StationCards[ST902]}" />
                             <TextBlock Style="{StaticResource ArrowStyle}" />-->
-                                    <Border ToolTip="{Binding Line1SkewTooltip}" ToolTipService.InitialShowDelay="1000"
+                                    <Border
                                         Width="500"
                                         Height="178"
                                         Margin="0,0,9,0"
@@ -615,7 +634,9 @@
                                         Background="{StaticResource CardBrush}"
                                         BorderBrush="#C9D5E4"
                                         BorderThickness="1"
-                                        CornerRadius="7">
+                                        CornerRadius="7"
+                                        ToolTip="{Binding Line1SkewTooltip}"
+                                        ToolTipService.InitialShowDelay="1000">
                                         <Grid>
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
@@ -753,14 +774,14 @@
                                             <TextBlock
                                                 Margin="0,4,0,0"
                                                 Style="{StaticResource NodeSubStyle}"
-                                                Text="动平衡 / 研磨上料" />
+                                                Text="长版下料 / 短板下料" />
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
                             </ScrollViewer>
                         </Grid>
                     </Border>
-
+                    <!--  2号线  -->
                     <Border
                         Grid.Row="1"
                         Grid.Column="0"
@@ -802,7 +823,11 @@
                                         Style="{StaticResource NodeHostStyle}"
                                         Tag="打号机2 ST502" />
                                     <TextBlock Style="{StaticResource ArrowStyle}" />
-                                    <Border Width="212" Style="{StaticResource FlowNodeStyle}" ToolTip="{Binding Line2TransferRackTooltip}" ToolTipService.InitialShowDelay="1000">
+                                    <Border
+                                        Width="212"
+                                        Style="{StaticResource FlowNodeStyle}"
+                                        ToolTip="{Binding Line2TransferRackTooltip}"
+                                        ToolTipService.InitialShowDelay="1000">
                                         <StackPanel>
                                             <DockPanel>
                                                 <Border
@@ -833,7 +858,7 @@
                                 Style="{StaticResource NodeHostStyle}"
                                 Tag="后天车 ST904" />
                             <TextBlock Style="{StaticResource ArrowStyle}" />-->
-                                    <Border ToolTip="{Binding Line2SkewTooltip}" ToolTipService.InitialShowDelay="1000"
+                                    <Border
                                         Width="500"
                                         Height="178"
                                         Margin="0,0,9,0"
@@ -841,7 +866,9 @@
                                         Background="{StaticResource CardBrush}"
                                         BorderBrush="#C9D5E4"
                                         BorderThickness="1"
-                                        CornerRadius="7">
+                                        CornerRadius="7"
+                                        ToolTip="{Binding Line2SkewTooltip}"
+                                        ToolTipService.InitialShowDelay="1000">
                                         <Grid>
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
@@ -961,17 +988,17 @@
                                     <ContentControl
                                         Content="{Binding StationCards[ST020]}"
                                         Style="{StaticResource DetailedNodeHostStyle}"
-                                        Tag="2号线动平衡下料架 ST020" />
+                                        Tag="长版下料架 ST020" />
                                     <ContentControl
                                         Content="{Binding StationCards[ST021]}"
                                         Style="{StaticResource DetailedNodeHostStyle}"
-                                        Tag="2号线短板中转位 ST021" />
+                                        Tag="短板下料架 ST021" />
                                 </StackPanel>
                             </ScrollViewer>
                         </Grid>
                     </Border>
                 </Grid>
-
+                <!--  动平衡 研磨  -->
                 <Border Margin="0" Style="{StaticResource PanelStyle}">
                     <Grid>
                         <Grid.RowDefinitions>
@@ -994,24 +1021,24 @@
                                 <ContentControl
                                     Content="{Binding StationCards[ST008]}"
                                     Style="{StaticResource CompactNodeHostStyle}"
-                                    Tag="平衡下料1 ST008" />
+                                    Tag="动平衡入料架 ST008" />
                                 <TextBlock Style="{StaticResource ArrowStyle}" />
                                 <ContentControl
                                     Content="{Binding StationCards[ST009]}"
                                     Style="{StaticResource CompactNodeHostStyle}"
-                                    Tag="平衡下料2 ST009" />
+                                    Tag="动平衡出料架 ST009" />
                                 <TextBlock Style="{StaticResource ArrowStyle}" />
                                 <ContentControl
                                     Content="{Binding StationCards[ST010]}"
                                     Style="{StaticResource CompactNodeHostStyle}"
-                                    Tag="研磨上料1号位 ST010" />
+                                    Tag="研磨上料架放料位 ST010" />
                                 <TextBlock Style="{StaticResource ArrowStyle}" />
                                 <ContentControl
                                     Content="{Binding StationCards[ST709]}"
                                     Style="{StaticResource CompactNodeHostStyle}"
-                                    Tag="研磨上料3号位 ST709" />
+                                    Tag="研磨上料架取料位 ST709" />
                                 <TextBlock Style="{StaticResource ArrowStyle}" />
-                                <Border ToolTip="{Binding GrindingTooltip}" ToolTipService.InitialShowDelay="1000"
+                                <Border
                                     Width="550"
                                     Height="150"
                                     Margin="0,0,9,0"
@@ -1019,7 +1046,9 @@
                                     Background="{StaticResource CardBrush}"
                                     BorderBrush="#C9D5E4"
                                     BorderThickness="1"
-                                    CornerRadius="7">
+                                    CornerRadius="7"
+                                    ToolTip="{Binding GrindingTooltip}"
+                                    ToolTipService.InitialShowDelay="1000">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />

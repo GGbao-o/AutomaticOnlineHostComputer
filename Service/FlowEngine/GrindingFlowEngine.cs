@@ -51,7 +51,7 @@ public sealed class GrindingFlowEngine : IDisposable
     private readonly Dictionary<string, DateTime> _waitingLogAtUtc = new(StringComparer.Ordinal);
     private static readonly TimeSpan WaitingLogHeartbeat = TimeSpan.FromSeconds(10);
 
-    /// <summary>天车信号量：保证一次只有一个研磨动作占用天车#5(充磁限制)。</summary>
+    /// <summary>天车信号量：保证一次只有一个研磨动作占用天车#5(充磁限制)。</summary>   异步版本的互斥锁
     private readonly SemaphoreSlim _craneLock = new(1, 1);
     // 应急清除和主循环派发共用此门闩：拿到天车锁后必须在门闩内再次检查暂停状态，
     // 防止主循环已经越过轮询顶部的暂停判断时，又恰好启动一个新动作。
@@ -146,6 +146,8 @@ public sealed class GrindingFlowEngine : IDisposable
     /// <summary>研磨天车当前动作的只读展示快照；仅复制内存状态，不读取设备。</summary>
     public CraneTaskSnapshot GetCraneTaskSnapshot()
     {
+        
+        //lock不适合异步代码 但是这个 仅仅是展示快照数据的
         lock (_emergencyLock)
         {
             var target = _grinders.FirstOrDefault(g => string.Equals(g.StationCode, _craneLockStation, StringComparison.OrdinalIgnoreCase));
@@ -960,6 +962,14 @@ public sealed class GrindingFlowEngine : IDisposable
                             Console.WriteLine($"[GrindingEngine] [{g.Name}] PendingWorkpiece已恢复, WpRecoveryNeeded清除");
                         }
                         // ── 检查下料架MC64: M720=1表示无板且允许放版(不满足则等下轮, 不破坏研磨机状态) ──
+                        // 西门子单机不接收新的自动下料；保留等待下料状态，恢复联机后由后续轮次重试。
+                        if (g.GrinderType == PlcGrinderService.GrinderType.TypeA && !g.LastOnlineMode)
+                        {
+                            if (ShouldLogWaiting($"unload-standalone:{g.StationCode}"))
+                                Console.WriteLine($"[GrindingEngine] [{g.Name}] ⏳ 单机模式(OnlineMode=0)，本轮不派发自动下料");
+                            continue; // 西门子单机模式仅跳过本轮自动下料
+                        }
+
                         bool unloadRackOk = false; // MC64未连接/读失败时保守等待, 不允许盲放到ST710。
                         if (_mc64?.IsConnected == true)
                         {
