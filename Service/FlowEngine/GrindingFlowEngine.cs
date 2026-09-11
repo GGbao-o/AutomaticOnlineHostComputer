@@ -1273,6 +1273,51 @@ public sealed class GrindingFlowEngine : IDisposable
     }
 
     /// <summary>
+    /// 研磨天车已经确认持件并升到安全Z后的ST710二次确认。
+    /// 有效读取到M720=0只表示下料架暂不允许放料，保持本趟天车和工件原地等待；
+    /// 连接、读取或取消异常仍是状态未知，必须交由外层暂停并保留持件事实。
+    /// </summary>
+    private async Task WaitForGrindingUnloadRackReadyAsync(CancellationToken ct)
+    {
+        int waitCount = 0;
+        while (true)
+        {
+            if (_mc64?.IsConnected != true)
+                throw new InvalidOperationException("MC64未连接, ST710/M720状态未知");
+
+            try
+            {
+                var r = await _mc64.ReadMAlignedWordAsync(720, 1, ct);
+                int raw = r.IntValues.Length > 0 ? r.IntValues[0] : 0;
+                bool m720CanPlace = (raw & 1) != 0;
+                if (m720CanPlace)
+                {
+                    if (waitCount > 0)
+                        Console.WriteLine($"[GrindingEngine] 持件等待ST710/M720结束，已允许放料 raw=0x{raw:X4}");
+                    return;
+                }
+
+                waitCount++;
+                if (waitCount == 1 || waitCount % 10 == 0)
+                    Console.WriteLine($"[GrindingEngine] 持件等待ST710/M720允许放料 raw=0x{raw:X4}，保持安全Z和本趟天车锁");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[GrindingEngine] 持件等待ST710/M720读取失败，状态未知并暂停: {ex.Message}");
+                await _mcCache.InvalidateAsync("192.168.2.64", 9000);
+                _mc64 = null;
+                throw new InvalidOperationException("持件等待ST710/M720时读取失败, 成品仍由天车保持, 暂停等待人工确认", ex);
+            }
+
+            await Task.Delay(_cfg.Grinding.SignalPollIntervalMs, ct);
+        }
+    }
+
+    /// <summary>
     /// 扫描4台研磨机状态(请求数据/请求下料/加工中/门开)。
     /// <para>重连失败→跳过本轮读取不阻塞; TypeB用临时变量原子赋值避免部分更新。</para>
     /// </summary>
@@ -2637,10 +2682,9 @@ public sealed class GrindingFlowEngine : IDisposable
 
             // ── ⑦ XY 移到下料架 ST710（加偏移）───────────────
             // 主循环预检到实际放料之间要等待门开、松尾座、Z升安全。
-            // ST710可能在这段时间被人工/设备改变状态, 因此动作前必须重新确认。
-            if (!await ConfirmGrindingUnloadRackReadyAsync("下料动作前", ct))
-                throw new InvalidOperationException("ST710/M720动作前确认失败, 成品仍由天车保持, 暂停等待人工确认");
-
+            // ST710可能在这段时间被人工/设备改变状态, 因此动作前必须重新确认。  ST710二次确认。
+            await WaitForGrindingUnloadRackReadyAsync(ct);
+            //下面是研磨下料架二次确认后的流程
             if (!TryGetStationCoords("ST710", out int unloadX, out int unloadY, out int unloadRackZ))
                 throw new InvalidOperationException("数据库未找到 ST710 下料架坐标");
             Console.WriteLine($"[GrindingEngine] [{craneName}] ⑦ XY移到下料架 ST710({unloadX}+{_craneOffsetX},{unloadY}+{_craneOffsetY}) Z基准={unloadRackZ}");

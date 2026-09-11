@@ -65,7 +65,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public int Attempts { get; }
         public bool LastX6 { get; }
         public bool LastX7 { get; }
-
+        //自定义异常
         public MagnetFeedbackTimeoutException(string craneName, string operation, int attempts, bool lastX6, bool lastX7)
             : base($"[{craneName}] {operation}反馈未确认，已尝试 {attempts} 次，最后反馈 X6={(lastX6 ? 1 : 0)} X7={(lastX7 ? 1 : 0)}")
         {
@@ -519,6 +519,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     while (DateTime.UtcNow < deadline)
                     {
                         await Task.Delay(100, ct);
+                        //读充磁信号
                         x6 = await ReadXBitAsync(Addr.D_X6_MagnetizeOk, ct);
                         if (x6)
                         {
@@ -535,7 +536,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
 
                 Console.WriteLine($"[CraneService] [{_name}] ⚠ 充磁反馈未到位 第{attempt}/{options.MaxAttempts}次 X6={(x6 ? 1 : 0)}");
             }
-
+            //说明失败了 抛出异常
             throw new MagnetFeedbackTimeoutException(_name, "充磁", options.MaxAttempts, x6, false);
         }
 
