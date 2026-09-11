@@ -55,6 +55,32 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
     }
 
     /// <summary>
+    /// 充磁或退磁已按配置次数发送指令，但始终未得到可信的X6/X7反馈。
+    /// 自动流程必须把它作为安全异常暂停；手动页只显示本次操作失败。
+    /// </summary>
+    public sealed class MagnetFeedbackTimeoutException : TimeoutException
+    {
+        public string CraneName { get; }
+        public string Operation { get; }
+        public int Attempts { get; }
+        public bool LastX6 { get; }
+        public bool LastX7 { get; }
+
+        public MagnetFeedbackTimeoutException(string craneName, string operation, int attempts, bool lastX6, bool lastX7)
+            : base($"[{craneName}] {operation}反馈未确认，已尝试 {attempts} 次，最后反馈 X6={(lastX6 ? 1 : 0)} X7={(lastX7 ? 1 : 0)}")
+        {
+            CraneName = craneName;
+            Operation = operation;
+            Attempts = attempts;
+            LastX6 = lastX6;
+            LastX7 = lastX7;
+        }
+    }
+
+    /// <summary>磁铁反馈确认参数。由连接缓存从配置实时提供，直接构造服务时使用安全默认值。</summary>
+    public readonly record struct MagnetFeedbackOptions(int MaxAttempts, int TimeoutMs);
+
+    /// <summary>
     /// 天车通信服务（汇川 PLC，Modbus TCP）。
     /// <para>
     /// 每台天车实例化一个 CraneService，传入对应 IP 地址。<br/>
@@ -79,6 +105,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         private readonly int _xyTimeoutMs;
         private readonly int _zTimeoutMs;
         private readonly Func<int> _pressureStopNormalPositionToleranceProvider;
+        private readonly Func<MagnetFeedbackOptions> _magnetFeedbackOptionsProvider;
         private readonly SemaphoreSlim _connectionLock = new(1, 1); // 连接/断开串行化，防止UI和引擎同时重连同一设备
         private readonly object _statusLogLock = new(); // UI与流程会共享服务，保护状态日志节流字段
         private bool _manualModeSet;   // 是否已确认 PLC 处于手动模式，避免重复写 D4500
@@ -94,13 +121,15 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         /// <param name="port">Modbus TCP 端口，默认 502</param>
         public CraneService(string name, string ip, int port = 502,
             int xyTimeoutMs = 240_000, int zTimeoutMs = 240_000,
-            Func<int>? pressureStopNormalPositionToleranceProvider = null)
+            Func<int>? pressureStopNormalPositionToleranceProvider = null,
+            Func<MagnetFeedbackOptions>? magnetFeedbackOptionsProvider = null)
         {
             _name   = name;
             _client = new ModbusTcpClient(ip, port, unitId: 1, timeoutMs: 3000);
             _xyTimeoutMs = ValidateTimeout(xyTimeoutMs, nameof(xyTimeoutMs));
             _zTimeoutMs = ValidateTimeout(zTimeoutMs, nameof(zTimeoutMs));
             _pressureStopNormalPositionToleranceProvider = pressureStopNormalPositionToleranceProvider ?? (() => 15);
+            _magnetFeedbackOptionsProvider = magnetFeedbackOptionsProvider ?? (() => new MagnetFeedbackOptions(3, 3_000));
             Console.WriteLine($"[CraneService] [{_name}] 创建实例，IP={ip}:{port}");
         }
 
@@ -473,56 +502,70 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         }
 
         /// <summary>
-        /// 充磁：D4510=2触发 → 轮询X6(FC01)或D5029=1 → D4510=0停止。
+        /// 充磁：每次D4510=2触发后必须确认X6=1；无论成功或失败均写D4510=0停止本次触发。
         /// </summary>
         public async Task MagnetOnAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[CraneService] [{_name}] ▶ 充磁 D4510=2");
+            MagnetFeedbackOptions options = GetMagnetFeedbackOptions();
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 充磁 D4510=2，最多{options.MaxAttempts}次");
             await EnsureManualModeAsync(ct);
-            await WriteRegAsync(Addr.D_ManualMagnetOn, 2, "充磁(触发)", ct);
-
-            var deadline = DateTime.UtcNow.AddSeconds(3);
-            bool ok = false;
-            while (DateTime.UtcNow < deadline)
+            bool x6 = false;
+            for (int attempt = 1; attempt <= options.MaxAttempts; attempt++)
             {
-                await Task.Delay(100, ct);
-                bool x6 = await ReadXBitAsync(Addr.D_X6_MagnetizeOk, ct);
-                if (x6) { Console.WriteLine($"[CraneService] [{_name}] ✔ X6充磁反馈=1"); ok = true; break; }
+                try
+                {
+                    await WriteRegAsync(Addr.D_ManualMagnetOn, 2, "充磁(触发)", ct);
+                    DateTime deadline = DateTime.UtcNow.AddMilliseconds(options.TimeoutMs);
+                    while (DateTime.UtcNow < deadline)
+                    {
+                        await Task.Delay(100, ct);
+                        x6 = await ReadXBitAsync(Addr.D_X6_MagnetizeOk, ct);
+                        if (x6)
+                        {
+                            Console.WriteLine($"[CraneService] [{_name}] ✔ X6充磁反馈=1（第{attempt}次）");
+                            return;
+                        }
+                    }
+                }
+                finally
+                {
+                    // 触发寄存器始终复位，避免失败后持续占用充磁触发状态。
+                    await WriteRegAsync(Addr.D_ManualMagnetOn, 0, "充磁(停止)", ct);
+                }
+
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 充磁反馈未到位 第{attempt}/{options.MaxAttempts}次 X6={(x6 ? 1 : 0)}");
             }
-            if (!ok) Console.WriteLine($"[CraneService] [{_name}] ⚠ 充磁反馈超时3s，X6未置1");
-            await WriteRegAsync(Addr.D_ManualMagnetOn, 0, "充磁(停止)", ct);
+
+            throw new MagnetFeedbackTimeoutException(_name, "充磁", options.MaxAttempts, x6, false);
         }
 
         /// <summary>
         /// 退磁释放工件：D4511=2 → 轮询X7(FC01)=1且X6=0 → D4511=0。
-        /// D5029不作为退磁成功条件；X7不到位则重新触发退磁，最多10次。
+        /// D5029不作为退磁成功条件；每次必须同时确认X7=1且X6=0，次数和单次等待时间由配置控制。
         /// </summary>
         public async Task MagnetOffAsync(CancellationToken ct = default)
         {
-            Console.WriteLine($"[CraneService] [{_name}] ▶ 退磁释放工件");
+            MagnetFeedbackOptions options = GetMagnetFeedbackOptions();
+            Console.WriteLine($"[CraneService] [{_name}] ▶ 退磁释放工件，最多{options.MaxAttempts}次");
             await EnsureManualModeAsync(ct);
 
-            const int maxRetries = 10;
-
-            for (int retry = 1; retry <= maxRetries; retry++)
+            bool x6 = true;
+            bool x7 = false;
+            for (int attempt = 1; attempt <= options.MaxAttempts; attempt++)
             {
-                bool x7ok = false;
-                bool x6on = true;
-
                 try
                 {
                     await WriteRegAsync(Addr.D_ManualMagnetOff, 2, "退磁(触发)", ct);
-
-                    var deadline = DateTime.UtcNow.AddSeconds(3);
+                    DateTime deadline = DateTime.UtcNow.AddMilliseconds(options.TimeoutMs);
                     while (DateTime.UtcNow < deadline)
                     {
                         await Task.Delay(100, ct);
-                        x6on = await ReadXBitAsync(Addr.D_X6_MagnetizeOk, ct);
-                        x7ok = await ReadXBitAsync(Addr.D_X7_DemagnetizeOk, ct);
+                        x6 = await ReadXBitAsync(Addr.D_X6_MagnetizeOk, ct);
+                        x7 = await ReadXBitAsync(Addr.D_X7_DemagnetizeOk, ct);
 
-                        if (x7ok && !x6on)
+                        if (x7 && !x6)
                         {
-                            Console.WriteLine($"[CraneService] [{_name}] ✔ 退磁成功 X6=0 X7=1（第{retry}次）");
+                            Console.WriteLine($"[CraneService] [{_name}] ✔ 退磁成功 X6=0 X7=1（第{attempt}次）");
                             return;
                         }
                     }
@@ -532,10 +575,19 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                     await WriteRegAsync(Addr.D_ManualMagnetOff, 0, "退磁(停止)", ct);
                 }
 
-                Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁未到位 第{retry}/{maxRetries}次 X6={(x6on ? 1 : 0)} X7={(x7ok ? 1 : 0)}");
+                Console.WriteLine($"[CraneService] [{_name}] ⚠ 退磁未到位 第{attempt}/{options.MaxAttempts}次 X6={(x6 ? 1 : 0)} X7={(x7 ? 1 : 0)}");
             }
 
-            throw new TimeoutException($"退磁失败：X7退磁反馈未到位或X6仍为充磁状态，已重试 {maxRetries} 次，请检查电磁铁");
+            throw new MagnetFeedbackTimeoutException(_name, "退磁", options.MaxAttempts, x6, x7);
+        }
+
+        private MagnetFeedbackOptions GetMagnetFeedbackOptions()
+        {
+            MagnetFeedbackOptions options = _magnetFeedbackOptionsProvider();
+            // 配置被误填为非正数时保持安全默认值，不能让磁铁操作变成零次确认。
+            return new MagnetFeedbackOptions(
+                options.MaxAttempts > 0 ? options.MaxAttempts : 3,
+                options.TimeoutMs > 0 ? options.TimeoutMs : 3_000);
         }
 
         /// <summary>

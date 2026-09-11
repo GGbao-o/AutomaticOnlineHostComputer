@@ -216,8 +216,8 @@
   },
   "safety": {
     "maxRetries": 3,
-    "magnetOffMaxRetries": 50,
-    "magnetOffRetryIntervalMs": 500,
+    "magnetFeedbackMaxAttempts": 3,
+    "magnetFeedbackTimeoutMs": 3000,
     "pressureStopNormalPositionToleranceMm": 15
   },
   "shake": {
@@ -389,10 +389,10 @@
       "ST 702": 0,
       "ST 703": 0,
       "ST 704": 0,
-      "ST701": 1000,
-      "ST702": 1000,
-      "ST703": 1500,
-      "ST704": 1500
+      "ST701": 1100,
+      "ST702": 1200,
+      "ST703": 1300,
+      "ST704": 1300
     },
     "signalPollIntervalMs": 200,
     "loadingTimeoutMinutes": 10,

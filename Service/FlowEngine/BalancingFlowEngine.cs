@@ -1680,7 +1680,19 @@ public sealed class BalancingFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
-            if (ex is CraneMotionTimeoutException timeout)
+            if (ex is MagnetFeedbackTimeoutException magnetFeedback)
+            {
+                // 磁铁反馈连续失败时，尚不能把mag=true当作持件事实；但命令和磁铁真实状态未知，必须暂停并交给人工。
+                _paused = true;
+                if (IsM2ActionCurrent(actionVersion))
+                {
+                    keepDisplayForManualConfirmation = true;
+                    if (displayWorkpiece.HasValue)
+                        SetM2Display(actionVersion, displayWorkpiece.Value, "机械手2磁铁反馈未确认，需人工确认");
+                }
+                OnSafetyAlarm?.Invoke($"动平衡机械手2{magnetFeedback.Operation}反馈连续{magnetFeedback.Attempts}次未确认。引擎已暂停，请人工确认磁铁、机械手和工件位置。异常：{magnetFeedback.Message}");
+            }
+            else if (ex is CraneMotionTimeoutException timeout)
             {
                 // 运动超时的实际位置未知：无论是否已持件，都必须停止动平衡并把原始超时信息交给主页面弹窗。
                 // 不在这里变更工件、来源、动作账本或线路启动条件；既有通用异常处理和 finally 继续负责原有记录与本趟锁清理。
@@ -1711,6 +1723,10 @@ public sealed class BalancingFlowEngine : IDisposable
             if (!IsM2ActionCurrent(actionVersion))
             {
                 Console.WriteLine("[平衡引擎] [M2] 旧动作已被应急取消, 跳过暂停/状态写回");
+            }
+            else if (ex is MagnetFeedbackTimeoutException)
+            {
+                // 上面已暂停并保留页面身份；不按“未充磁”分支自动放行或改写来源缓存。
             }
             else if (holdingWorkpiece && !placedOnM710)
             {
@@ -2355,7 +2371,19 @@ public sealed class BalancingFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
-            if (ex is CraneMotionTimeoutException timeout)
+            if (ex is MagnetFeedbackTimeoutException magnetFeedback)
+            {
+                // 同M2：三次反馈失败不是“没取到料”，真实磁铁状态未知，必须暂停等待人工确认。
+                _paused = true;
+                if (IsM3ActionCurrent(actionVersion))
+                {
+                    keepDisplayForManualConfirmation = true;
+                    if (displayWorkpiece.HasValue)
+                        SetM3Display(actionVersion, displayWorkpiece.Value, "机械手3磁铁反馈未确认，需人工确认");
+                }
+                OnSafetyAlarm?.Invoke($"动平衡机械手3{magnetFeedback.Operation}反馈连续{magnetFeedback.Attempts}次未确认。引擎已暂停，请人工确认磁铁、机械手和工件位置。异常：{magnetFeedback.Message}");
+            }
+            else if (ex is CraneMotionTimeoutException timeout)
             {
                 // 运动超时的实际位置未知：无论是否已持件，都必须停止动平衡并把原始超时信息交给主页面弹窗。
                 // 不在这里变更工件、来源、动作账本或线路启动条件；既有通用异常处理和 finally 继续负责原有记录与本趟锁清理。
@@ -2386,6 +2414,10 @@ public sealed class BalancingFlowEngine : IDisposable
             if (!IsM3ActionCurrent(actionVersion))
             {
                 Console.WriteLine("[平衡引擎] [M3] 旧动作已被应急取消, 跳过暂停/状态写回");
+            }
+            else if (ex is MagnetFeedbackTimeoutException)
+            {
+                // 上面已暂停并保留页面身份；不按“未充磁”分支自动放行或改写来源缓存。
             }
             else if (holdingWorkpiece && !placedOnM720)
             {

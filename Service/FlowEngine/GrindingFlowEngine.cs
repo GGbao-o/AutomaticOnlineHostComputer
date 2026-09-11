@@ -2258,7 +2258,16 @@ public sealed class GrindingFlowEngine : IDisposable
                 Console.WriteLine($"[GrindingEngine] [{grinder.Name}] 旧上料动作已被应急取消, 跳过状态/缓存写回");
                 return;
             }
-            if (placedInGrinder)
+            if (ex is MagnetFeedbackTimeoutException magnetFeedback)
+            {
+                // 反馈三次未确认时，不能把工件当作仍在ST709而回缓存；先暂停保留本轮身份供人工核实。
+                _paused = true;
+                grinder.State = GrinderState.Loading;
+                grinder.PendingWorkpiece = wp;
+                Console.WriteLine($"[GrindingEngine] ⚠ {magnetFeedback.Operation}反馈未确认，保留工件并暂停，不能自动回缓存");
+                OnSafetyAlarm?.Invoke($"{grinder.Name}{magnetFeedback.Operation}反馈连续{magnetFeedback.Attempts}次未确认。研磨引擎已暂停，工件={wp.IdentityText}，请人工确认磁铁、天车和工件位置。异常：{magnetFeedback.Message}");
+            }
+            else if (placedInGrinder)
             {
                 // 已放进研磨机后, 即使磁铁已退磁也不能回缓存, 否则同一块板会被再次分配。
                 _paused = true;
@@ -2844,15 +2853,22 @@ public sealed class GrindingFlowEngine : IDisposable
                 return;
             }
             _paused = true;
+            // 磁铁反馈失败：真实磁铁状态未知，保留Unloading和Pending等待人工确认。
             // 未吸住: 成品大概率还在研磨机内, 保持WaitingForUnload。
             // 已吸住未放: 成品在天车上, 保持Unloading并暂停。
             // 已放ST710但未闭环: 成品在下料架, 保持Unloading并要求人工补写/确认M721或SetUnloadDone。
-            grinder.State = placedOnUnloadRack && unloadDoneNotified ? GrinderState.Idle
-                : (holdingWorkpiece || magnetOn || placedOnUnloadRack ? GrinderState.Unloading : GrinderState.WaitingForUnload);
+            bool magnetFeedbackFailed = ex is MagnetFeedbackTimeoutException;
+            grinder.State = magnetFeedbackFailed
+                ? GrinderState.Unloading
+                : placedOnUnloadRack && unloadDoneNotified ? GrinderState.Idle
+                    : (holdingWorkpiece || magnetOn || placedOnUnloadRack ? GrinderState.Unloading : GrinderState.WaitingForUnload);
             grinder.StateChangedAt = DateTime.UtcNow;
-            grinder.PendingWorkpiece = placedOnUnloadRack && unloadRackNotified && unloadDoneNotified ? null : wp;
+            grinder.PendingWorkpiece = !magnetFeedbackFailed && placedOnUnloadRack && unloadRackNotified && unloadDoneNotified ? null : wp;
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠ 下料异常后已暂停, 状态={grinder.State}, placedOnUnloadRack={placedOnUnloadRack}, unloadRackNotified={unloadRackNotified}, unloadDoneNotified={unloadDoneNotified}");
-            OnSafetyAlarm?.Invoke($"{grinder.Name}下料流程异常。研磨引擎已暂停，状态={grinder.State}，工件={grinder.PendingWorkpiece?.IdentityText ?? "未知"}。异常：{ex.Message}");
+            string alarmPrefix = magnetFeedbackFailed
+                ? $"{grinder.Name}磁铁反馈连续{((MagnetFeedbackTimeoutException)ex).Attempts}次未确认"
+                : $"{grinder.Name}下料流程异常";
+            OnSafetyAlarm?.Invoke($"{alarmPrefix}。研磨引擎已暂停，状态={grinder.State}，工件={grinder.PendingWorkpiece?.IdentityText ?? "未知"}。异常：{ex.Message}");
         }
         finally
         {
@@ -2972,7 +2988,8 @@ public sealed class GrindingFlowEngine : IDisposable
             }
             await action(ct);
         }
-        catch (Exception ex) when (ex is IOException || ex is InvalidOperationException || ex is TimeoutException || ex is SocketException)
+        catch (Exception ex) when (ex is not MagnetFeedbackTimeoutException &&
+                                   (ex is IOException || ex is InvalidOperationException || ex is TimeoutException || ex is SocketException))
         {
             // 网络瞬断: 重连后重试一次, 失败则向上抛让上层catch兜底
             Console.WriteLine($"[GrindingEngine] ⚠ 天车操作「{desc}」网络异常: {ex.Message}, 重连后重试一次...");

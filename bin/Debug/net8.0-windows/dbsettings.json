@@ -1,8 +1,7 @@
 {
-  "Host": "172.31.59.203",
-  "Port": 3307,
+  "Host": "localhost",
+  "Port": 3306,
   "Database": "automatic_online_host",
   "User": "root",
-  "Password": "bu6666"
+  "Password": "123456"
 }
-

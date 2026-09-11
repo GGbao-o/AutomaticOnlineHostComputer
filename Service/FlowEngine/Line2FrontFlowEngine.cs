@@ -2155,7 +2155,14 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     actionSnapshot: action.Snapshot());
             }
             Console.WriteLine($"[Line2Front] [机械手1] ✘ 异常：{ex.Message}");
-            if (holdingWorkpiece && !placedOnFork)
+            if (ex is MagnetFeedbackTimeoutException magnetFeedback)
+            {
+                // X6/X7三次未确认时不能按“尚未取到”把工件回缓存：磁铁真实状态未知，保留本趟身份等待人工确认。
+                _paused = true;
+                Console.WriteLine("[Line2Front] ⚠ 机械手1磁铁反馈未确认，保留当前工件并暂停，禁止自动回缓存");
+                OnSafetyAlarm?.Invoke($"2号线机械手1{magnetFeedback.Operation}反馈连续{magnetFeedback.Attempts}次未确认。引擎已暂停，请人工确认磁铁、机械手和工件位置。异常：{magnetFeedback.Message}");
+            }
+            else if (holdingWorkpiece && !placedOnFork)
             {
                 // X11已确认吸住, 但还没有安全放到货叉; 此时最危险, 必须停住等人工确认。
                 lock (_wpLock) { _currentWp = null; }
@@ -3407,7 +3414,6 @@ public sealed class Line2FrontFlowEngine : IDisposable
         Console.WriteLine("[Line2Front] 引擎已释放");
     }
 }
-
 
 
 

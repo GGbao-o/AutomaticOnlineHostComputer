@@ -92,8 +92,10 @@ public sealed class MotionConfig
     public sealed class SafetySection
     {
         public int MaxRetries { get; set; } = 3;
-        public int MagnetOffMaxRetries { get; set; } = 50;
-        public int MagnetOffRetryIntervalMs { get; set; } = 500;
+        /// <summary>单次充磁或退磁指令的最大反馈确认次数。每次均须收到对应反馈才可视为成功。</summary>
+        public int MagnetFeedbackMaxAttempts { get; set; } = 3;
+        /// <summary>每次充磁或退磁指令等待X6/X7反馈的最长时间（毫秒）。</summary>
+        public int MagnetFeedbackTimeoutMs { get; set; } = 3_000;
         /// <summary>
         /// Z 下降时 X2 下压触发后，停止位置与目标 Z 的最大允许差值。
         /// 在此范围内视为正常接触到位，恢复伺服后继续充/退磁等后续步骤；超出范围才暂停人工确认。

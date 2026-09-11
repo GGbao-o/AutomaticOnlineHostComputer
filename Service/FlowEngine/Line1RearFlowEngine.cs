@@ -565,6 +565,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 // ═══════════════════════════════════════════════════════════
                 bool logDetails = _cycleCount % 10 == 1;
                 if (logDetails) Console.WriteLine("│ [步骤4/5] 后天车动态调度候选扫描...");
+                //生成下料候选   这里面包含了机械手2/3无报警 
                 var unloadScan = await BuildUnloadCandidateScanAsync(fds, logDetails, ct);
                 var loadScan = BuildLoadCandidateScan(logDetails);
                 var baselineDecision = RearSkewDispatchPlanner.Decide(
@@ -602,8 +603,10 @@ public sealed class Line1RearFlowEngine : IDisposable
                 }
 
                 if (decision.Action == RearSkewDispatchAction.Load)
+                    //上料
                     await TryDispatchLoadAsync(ct);
                 else if (decision.Action == RearSkewDispatchAction.Unload)
+                    //下料
                     await TryDispatchUnloadAsync(fds, ct, preferredUnloadBedCode);
 
                 // ── 刷新后天车连接状态到UI ──
@@ -995,6 +998,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             pair.Bed.St = SkewState.Loading;
             SetRearCraneTask(pair.Wp, "准备从中转架取料", pair.RackCode, pair.Bed.Code);
             triggered = true;
+            //上料流程
             _ = DoLoad(pair.Bed, pair.RackCode, ct);
         }
         catch (Exception ex)
@@ -1028,7 +1032,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         {
             if (!await EnsureRearCranePositionReadyAsync("斜床下料任务派发前", ct))
                 return;
-
+            //锁后再次复合下料候选
             var scan = await BuildUnloadCandidateScanAsync(fds, logDetails: true, ct);
             if (scan.Candidates.Count == 0)
             {
@@ -1056,6 +1060,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             triggered = true;
             Console.WriteLine($"│   ▶ {candidate.Bed.Code} 开始下料! {candidate.Wp.IdentityText} 工件={candidate.Wp.Diameter}mm L={candidate.Wp.Length}mm");
             SetRearCraneTask(candidate.Wp, "准备从斜床下料", candidate.Bed.Code, "分流目的地待确认");
+            //下料
             _ = DoUnload(candidate.Bed, ct);
         }
         finally

@@ -345,11 +345,11 @@
                                 Binding="{Binding PlateNo}"
                                 Header="版号" />
                             <DataGridTextColumn
-                                Width="30"
+                                Width="50"
                                 Binding="{Binding Sequence}"
                                 Header="序号" />
                             <DataGridTextColumn
-                                Width="30"
+                                Width="50"
                                 Binding="{Binding QueueOrderText}"
                                 Header="顺序" />
                             <DataGridTextColumn
@@ -393,7 +393,7 @@
                                 Binding="{Binding BalancingText}"
                                 Header="动平衡" />
                             <DataGridTextColumn
-                                Width="240"
+                                Width="250"
                                 Binding="{Binding Step}"
                                 Header="当前工序" />
                             <DataGridTextColumn
@@ -413,7 +413,7 @@
                                 Binding="{Binding SkewBedProcess}"
                                 Header="斜床工艺" />
                             <DataGridTextColumn
-                                Width="120"
+                                Width="150"
                                 Binding="{Binding MarkingContent}"
                                 Header="打号内容" />
                             <DataGridTextColumn

@@ -92,7 +92,12 @@ public sealed class ManipulatorConnectionCache
             var service = new CraneService(info.Name, info.Ip,
                 pressureStopNormalPositionToleranceProvider: _motionConfig == null
                     ? null
-                    : () => _motionConfig.Safety.PressureStopNormalPositionToleranceMm);
+                    : () => _motionConfig.Safety.PressureStopNormalPositionToleranceMm,
+                magnetFeedbackOptionsProvider: _motionConfig == null
+                    ? null
+                    : () => new MagnetFeedbackOptions(
+                        _motionConfig.Safety.MagnetFeedbackMaxAttempts,
+                        _motionConfig.Safety.MagnetFeedbackTimeoutMs));
             _services[no] = service;
             Console.WriteLine($"[ManipulatorCache] 新建服务：{no}号 {info.Name} {info.Ip}");
             return service;
