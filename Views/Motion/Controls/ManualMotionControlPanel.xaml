@@ -149,10 +149,19 @@
                                  <Border Margin="0,0,6,0" Padding="7,2" BorderBrush="#C9D3DE" BorderThickness="1" CornerRadius="3">
                                      <TextBlock Text="{Binding ManualControl.YHomeCompletedText}" />
                                  </Border>
-                                 <Border Margin="0,0,6,0" Padding="7,2" BorderBrush="#C9D3DE" BorderThickness="1" CornerRadius="3">
-                                     <TextBlock Text="{Binding ManualControl.ZHomeCompletedText}" />
-                                 </Border>
-                                 <Border
+                                  <Border Margin="0,0,6,0" Padding="7,2" BorderBrush="#C9D3DE" BorderThickness="1" CornerRadius="3">
+                                      <TextBlock Text="{Binding ManualControl.ZHomeCompletedText}" />
+                                  </Border>
+                                  <Border Margin="0,0,6,0" Padding="7,2" BorderBrush="#C9D3DE" BorderThickness="1" CornerRadius="3">
+                                      <TextBlock Text="{Binding ManualControl.XOriginInputText}" />
+                                  </Border>
+                                  <Border Margin="0,0,6,0" Padding="7,2" BorderBrush="#C9D3DE" BorderThickness="1" CornerRadius="3">
+                                      <TextBlock Text="{Binding ManualControl.YOriginInputText}" />
+                                  </Border>
+                                  <Border Margin="0,0,6,0" Padding="7,2" BorderBrush="#C9D3DE" BorderThickness="1" CornerRadius="3">
+                                      <TextBlock Text="{Binding ManualControl.ZOriginInputText}" />
+                                  </Border>
+                                  <Border
                                      Margin="0,0,8,0"
                                      Padding="7,2"
                                      BorderBrush="#C9D3DE"

@@ -508,12 +508,14 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         {
             MagnetFeedbackOptions options = GetMagnetFeedbackOptions();
             Console.WriteLine($"[CraneService] [{_name}] ▶ 充磁 D4510=2，最多{options.MaxAttempts}次");
+            //确保在手动模式
             await EnsureManualModeAsync(ct);
             bool x6 = false;
             for (int attempt = 1; attempt <= options.MaxAttempts; attempt++)
             {
                 try
                 {
+                    //地址写2
                     await WriteRegAsync(Addr.D_ManualMagnetOn, 2, "充磁(触发)", ct);
                     DateTime deadline = DateTime.UtcNow.AddMilliseconds(options.TimeoutMs);
                     while (DateTime.UtcNow < deadline)

@@ -1287,6 +1287,7 @@ public sealed class GrindingFlowEngine : IDisposable
 
             try
             {
+                //读取
                 var r = await _mc64.ReadMAlignedWordAsync(720, 1, ct);
                 int raw = r.IntValues.Length > 0 ? r.IntValues[0] : 0;
                 bool m720CanPlace = (raw & 1) != 0;

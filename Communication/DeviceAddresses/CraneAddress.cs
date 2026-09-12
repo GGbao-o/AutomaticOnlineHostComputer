@@ -202,6 +202,12 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
         public const int D_X0_DrainOpenOk    = 63488;
         /// <summary>D63489 — X1 接液盘门关到位反馈（读，1=门关到位）</summary>
         public const int D_X1_DrainCloseOk   = 63489;
+        /// <summary>D63491 — X3 X轴物理原点输入（读，仅供手动页面显示）</summary>
+        public const int D_X3_XHome          = 63491;
+        /// <summary>D63492 — X4 Y轴物理原点输入（读，仅供手动页面显示）</summary>
+        public const int D_X4_YHome          = 63492;
+        /// <summary>D63493 — X5 Z轴物理原点输入（读，仅供手动页面显示）</summary>
+        public const int D_X5_ZHome          = 63493;
         /// <summary>D63494 — X6 充磁反馈（读，1=充磁到位）</summary>
         public const int D_X6_MagnetizeOk    = 63494;
         /// <summary>D63495 — X7 退磁反馈（读，1=退磁到位）</summary>

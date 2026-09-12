@@ -78,6 +78,9 @@ public sealed class CraneManualControlViewModel : ObservableObject
                 IsDemagnetizeFeedback = null;
                 IsPlateFeedback = null;
                 IsMagnetPressureFeedback = null;
+                IsXOriginInput = null;
+                IsYOriginInput = null;
+                IsZOriginInput = null;
                 IsDrainOpenFeedback = null;
                 IsDrainClosedFeedback = null;
                 IsXHomeCompleted = null;
@@ -253,6 +256,52 @@ public sealed class CraneManualControlViewModel : ObservableObject
         true => "下压触发（X2=1）",
         false => "下压未触发（X2=0）",
         null => "下压读取未知"
+    };
+
+    // X3/X4/X5 仅供手动页面显示物理原点输入，绝不作为自动流程、锁或回原点完成判断。
+    private bool? _isXOriginInput;
+    /// <summary>X3 X轴物理原点输入；null 表示本次未能读取。</summary>
+    public bool? IsXOriginInput
+    {
+        get => _isXOriginInput;
+        private set { if (SetField(ref _isXOriginInput, value)) OnPropertyChanged(nameof(XOriginInputText)); }
+    }
+
+    private bool? _isYOriginInput;
+    /// <summary>X4 Y轴物理原点输入；null 表示本次未能读取。</summary>
+    public bool? IsYOriginInput
+    {
+        get => _isYOriginInput;
+        private set { if (SetField(ref _isYOriginInput, value)) OnPropertyChanged(nameof(YOriginInputText)); }
+    }
+
+    private bool? _isZOriginInput;
+    /// <summary>X5 Z轴物理原点输入；null 表示本次未能读取。</summary>
+    public bool? IsZOriginInput
+    {
+        get => _isZOriginInput;
+        private set { if (SetField(ref _isZOriginInput, value)) OnPropertyChanged(nameof(ZOriginInputText)); }
+    }
+
+    public string XOriginInputText => IsXOriginInput switch
+    {
+        true => "X轴原点已触发（X3=1）",
+        false => "X轴原点未触发（X3=0）",
+        null => "X轴原点读取未知"
+    };
+
+    public string YOriginInputText => IsYOriginInput switch
+    {
+        true => "Y轴原点已触发（X4=1）",
+        false => "Y轴原点未触发（X4=0）",
+        null => "Y轴原点读取未知"
+    };
+
+    public string ZOriginInputText => IsZOriginInput switch
+    {
+        true => "Z轴原点已触发（X5=1）",
+        false => "Z轴原点未触发（X5=0）",
+        null => "Z轴原点读取未知"
     };
 
     private bool? _isDrainOpenFeedback;
@@ -909,6 +958,9 @@ public sealed class CraneManualControlViewModel : ObservableObject
         IsDemagnetizeFeedback = null;
         IsPlateFeedback = null;
         IsMagnetPressureFeedback = null;
+        IsXOriginInput = null;
+        IsYOriginInput = null;
+        IsZOriginInput = null;
         IsDrainOpenFeedback = null;
         IsDrainClosedFeedback = null;
         IsXHomeCompleted = null;
@@ -933,6 +985,12 @@ public sealed class CraneManualControlViewModel : ObservableObject
                 service, CraneAddress.D_X11_HasPlate, "X11有板", cts.Token);
             bool? magnetPressureFeedback = await TryReadXFeedbackAsync(
                 service, CraneAddress.D_X2_MagnetLimit, "X2磁铁下压限位", cts.Token);
+            bool? xOriginInput = await TryReadXFeedbackAsync(
+                service, CraneAddress.D_X3_XHome, "X3 X轴原点", cts.Token);
+            bool? yOriginInput = await TryReadXFeedbackAsync(
+                service, CraneAddress.D_X4_YHome, "X4 Y轴原点", cts.Token);
+            bool? zOriginInput = await TryReadXFeedbackAsync(
+                service, CraneAddress.D_X5_ZHome, "X5 Z轴原点", cts.Token);
             bool? drainOpenFeedback = null;
             bool? drainClosedFeedback = null;
             if (isCraneAtRead)
@@ -962,6 +1020,9 @@ public sealed class CraneManualControlViewModel : ObservableObject
             IsDemagnetizeFeedback = demagnetizeFeedback;
             IsPlateFeedback = plateFeedback;
             IsMagnetPressureFeedback = magnetPressureFeedback;
+            IsXOriginInput = xOriginInput;
+            IsYOriginInput = yOriginInput;
+            IsZOriginInput = zOriginInput;
             IsDrainOpenFeedback = drainOpenFeedback;
             IsDrainClosedFeedback = drainClosedFeedback;
             IsXHomeCompleted = status == null ? null : status.XHomeCompleted != 0;
