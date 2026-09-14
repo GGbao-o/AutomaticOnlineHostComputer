@@ -3167,10 +3167,11 @@ public sealed class Line1RearFlowEngine : IDisposable
             
             Console.WriteLine("│ [下料] ⑤ 后天车回自定义位置 X→home Z回原点 并发执行");
             int homeX = _cfg.GetCraneHomeX(CraneRearNo); // 后天车归位X(配置文件, 默认-4000)
+            //homex是配置文件定义的 这个数据是没有加偏移的 实际也不需要加
             var xTask = cr.MoveAbsoluteAsync(homeX, -1, -1, ct: ct);
             //回z轴原点
             var zTask = cr.HomeZAsync(ct);
-            //并发执行
+            //z回原点和x回homex并发执行
             await Task.WhenAll(xTask, zTask);
             bed.St = SkewState.Idle;
             bed.Wp = null;

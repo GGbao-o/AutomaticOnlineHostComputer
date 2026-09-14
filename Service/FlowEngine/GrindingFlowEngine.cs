@@ -2788,24 +2788,28 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine($"[GrindingEngine] [{craneName}]   MC64 M721=1 通知放版完成 ✓ {workpiece.IdentityText}");
             unloadRackNotified = true;
 
-            // ── ⑪ 下料完成 + 空载回ST709 ─────────────────────────────
-            // 研磨机下料完成信号、XY回上料架3号位和硬件Z回原点并发；三项调用都成功才允许研磨机回Idle。
-            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑪ 下料完成(3s长信号) + 天车空载回ST709 + Z回原点并发... {workpiece.IdentityText}");
+            // ── ⑪ Z回原点后，下料完成 + 空载回ST709 ──────────────────
+            // Z回原点是研磨机释放和空载XY返回的前置条件；失败由既有下料异常分支暂停并保留Pending。
+            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑪ 天车Z回原点... {workpiece.IdentityText}");
+            await crane.HomeZAsync(ct);
+
+            // 仅在Z回原点成功后，研磨机下料完成信号与空载XY回ST709才允许并发；两项成功才允许研磨机回Idle。
+            Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑪ Z回原点成功，开始下料完成(3s长信号)与天车空载回ST709并发... {workpiece.IdentityText}");
             operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "SetUnloadDone",
                 "SetUnloadDone调用已开始，研磨机PLC是否收到结果未知");
             action.BeginStep(FlowActionStep.NotifyDownstream,
                 new FlowActionPosition(ApplyOffsetX(st709X), ApplyOffsetY(st709Y), 0),
                 $"通知{grinder.StationCode}下料完成并空载回ST709");
             action.MarkCommandSent();
-            //三个并发执行
+            // Z已回原点；下料完成通知与空载XY返回并发执行。
             Task unloadDoneTask = grinder.Svc.SetUnloadDoneAsync(ct);
+            // 空载XY返回仍使用天车偏移后的ST709坐标。
             Task st709ReturnXyTask = crane.MoveAbsoluteAsync(ApplyOffsetX(st709X), ApplyOffsetY(st709Y), -1, ct: ct);
-            Task zHomeTask = crane.HomeZAsync(ct);
-            await Task.WhenAll(unloadDoneTask, st709ReturnXyTask, zHomeTask);
+            await Task.WhenAll(unloadDoneTask, st709ReturnXyTask);
             operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "SetUnloadDone",
                 "SetUnloadDone成功返回，研磨机下料完成通知已确认");
             action.Confirm(new FlowActionPosition(ApplyOffsetX(st709X), ApplyOffsetY(st709Y), 0),
-                "研磨机下料完成通知、空载XY回ST709和Z回原点命令均成功返回");
+                "Z回原点成功后，研磨机下料完成通知和空载XY回ST709命令均成功返回");
             unloadDoneNotified = true;
             operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST710下料完整交接",
                 "退磁、Z安全回升、M721和SetUnloadDone通知均成功返回");

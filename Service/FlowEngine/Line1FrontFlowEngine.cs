@@ -2631,7 +2631,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
 
                 int homeX = _cfg.GetCraneHomeX(CraneFront1No);
                 Console.WriteLine($"[Line1Front] [前天车] X→{homeX + _craneOffsetX} Z回原点 并发执行");
-                //回homex 回z轴原点 并发执行
+                //回homex 回z轴原点 并发执行你    第二个参数f2y是货叉3号位的坐标
                 var xTask = crane.MoveAbsoluteAsync(homeX + _craneOffsetX, f2y, -1, ct: ct);
                 var zTask = crane.HomeZAsync(ct);
                 //两个任务同时执行

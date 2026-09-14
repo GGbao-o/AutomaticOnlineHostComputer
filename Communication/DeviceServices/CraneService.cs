@@ -389,6 +389,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public async Task HomeZAsync(CancellationToken ct = default)
         {
             Console.WriteLine($"[CraneService] [{_name}] ▶ Z轴回原点 D4506=2");
+            //确保位手动模式
             await EnsureManualModeAsync(ct);
             await WriteRegAsync(Addr.D_ManualHomeZ, 2, "Z轴回原点(触发)", ct);
             await Task.Delay(200, ct);
