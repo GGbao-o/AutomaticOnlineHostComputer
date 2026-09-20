@@ -2567,6 +2567,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 // 清除2/3位置, 通知货叉去待机位置。
                 forkStandbyTask = _forkSvc.GoStandbyAsync(ct);
             }
+            //z升0点和货叉回待机位并行
             await Task.WhenAll(zSafeTask, forkStandbyTask);
             action.Confirm(new FlowActionPosition(f2xOff, f2yOff, safeZ), "持件后Z已升安全高度");
             pos3OperationalTracker.ConfirmSafeZ(safeZ, _cfg.AbsMove.Tolerance, "ST713取料后Z升安全命令成功返回");
@@ -2584,6 +2585,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
             {
                 try
                 {
+                    //读取中转架是否有空位置
                     var crs = await _rackSvc.ReadAllStatusAsync(ct);
                     if (!crs.Station1HasPlate || !crs.Station2HasPlate || !crs.Station3HasPlate) break;
                     Console.WriteLine("[Line1Front] [前天车] 中转架1/2/3全满, 等后天车取走...");
@@ -2617,7 +2619,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 action.RegisterLock("ZoneTS");
                 Console.WriteLine("[Line1Front] [前天车] ZoneTS已获取 ✓，当前持有ZoneMT+ZoneTS，可进入中转架");
 
-                //中转架放料  放完回升了
+                //中转架放料流程  
                 await PlaceOnTransferRackAsync(crane, wp, safeZ, actionId, physicalTracker,
                     markerOperationalTracker, markerOperationalSite, action, ct);
                 _safety.TransferSkew1CollisionLock.Release();
@@ -2634,7 +2636,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 //回homex 回z轴原点 并发执行你    第二个参数f2y是货叉3号位的坐标
                 var xTask = crane.MoveAbsoluteAsync(homeX + _craneOffsetX, f2y, -1, ct: ct);
                 var zTask = crane.HomeZAsync(ct);
-                //两个任务同时执行
+                //两个任务同时执行  homex和回原点并发执行
                 await Task.WhenAll(xTask, zTask);
                 ClearFrontCraneTask();
                 action.Complete("前天车已完成中转架交接并回到安全位");

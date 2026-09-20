@@ -259,7 +259,7 @@
     "stationTargets": {
       "1": {
         "ST713": -2770,
-        "ST107": 419,
+        "ST107": 416,
         "ST105": 1347,
         "ST101": 1919,
         "ST106": 2444
@@ -401,8 +401,8 @@
   },
   "balancing": {
     "rearCraneSafeX": -2000,
-    "m2ReleaseLocksBelowY": 4790,
-    "m3ReleaseLocksBelowY": 5737,
+    "m2ReleaseLocksBelowY": 3000,
+    "m3ReleaseLocksBelowY": 3000,
     "armCoords": {
       "M817": {
         "y": 15060,

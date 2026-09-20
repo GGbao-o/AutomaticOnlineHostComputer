@@ -2819,6 +2819,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                     if (_lockM720 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M720路径保护)..."); await operation.AcquireAsync("M720", _lockM720, ct); action.RegisterLock("M720"); gotM720 = true; }
                     //二次确认
                     await ConfirmM817EmptyBeforePlaceAsync(ct);
+                    // 锁内、目的地确认后再确认机械手2/3已离开料架区，之后才允许后天车进入分流区。
+                    await WaitManipulatorsClearOfRackAsync(ct);
                 }
                 else
                 {
@@ -2840,6 +2842,9 @@ public sealed class Line1RearFlowEngine : IDisposable
                         action.RegisterLock("M720"); gotM720 = true;
                     }
                     await WaitForM720CanPlaceBeforePlaceAsync(wp, ct);
+                    // 先确认机械手2/3已离开料架区，再置位ST010放板标志并发送XY，
+                    // 避免Crane2St010Placing在等待机械手期间一直为1而让研磨天车持续跳过M731。
+                    await WaitManipulatorsClearOfRackAsync(ct);
                     if (_st010PlacementFlags.BeginCrane2Placement())
                     {
                         Console.WriteLine("│ [分流] 2号天车ST010放板标志=1，研磨天车将跳过本趟M731");
@@ -2852,12 +2857,6 @@ public sealed class Line1RearFlowEngine : IDisposable
                 // ③ XY移动+放料(持锁中)
                 if (needsBalancing) // 需要动平衡 → ST019动平衡架
                 {
-                    // 去ST019前检查机械手2/3安全位, 防天车与机械手碰撞
-                    //   ST019(M817)与ST021(M821)相邻, M3Flow可能正在附近操作
-                    // Console.WriteLine("│   等机械手安全位...");
-                    // await WaitManipulators(2, 3, ct);
-                    // Console.WriteLine("│   机械手已在安全位 ✓");
-
                     if (!TryCoords("ST019", out int dx, out int dy, out int dz)) throw new Exception("缺少ST019坐标");
                     Console.WriteLine($"│   XY到ST019({dx + _ox},{dy + _oy})");
                     action.SetTarget("ST019", "已选择M817/ST019作为实际分流目标");
@@ -2957,10 +2956,6 @@ public sealed class Line1RearFlowEngine : IDisposable
                 }
                 else //短板  去M720
                 {
-                    // Console.WriteLine("│   等机械手安全位...");
-                    // await WaitManipulators(2, 3, ct);
-                    // Console.WriteLine("│   机械手已在安全位 ✓");
-
                     if (!TryCoords("ST010", out int gx, out int gy, out int gz)) throw new Exception("缺少ST010坐标");
                     Console.WriteLine($"│   XY到ST010({gx + _ox},{gy + _oy})");
                     action.SetTarget("ST010", "已选择M720/ST010作为实际分流目标");
@@ -3735,23 +3730,49 @@ public sealed class Line1RearFlowEngine : IDisposable
     /// <summary>bool→"1"/"0" (日志用)</summary>
     private static string YN(bool b) => b ? "1" : "0";
 
-    /// <summary>等待机械手n1+n2到达安全Y位(下料分流到研磨架前, 防碰撞)</summary>
-    private async Task WaitManipulators(int n1, int n2, CancellationToken ct)
+    /// <summary>
+    /// 后天车进入平衡料架/研磨上料架分流区前，确认机械手2和机械手3都已降到各自的
+    /// “离开料架区”Y阈值（<c>balancing.m2ReleaseLocksBelowY</c> / <c>m3ReleaseLocksBelowY</c>）以下。
+    /// 复用提前放锁阈值：低于该Y表示机械手已离开料架争夺区。
+    /// 任一机械手未满足就一直轮询等待，无超时；状态读取失败或报警同样继续等待，
+    /// 不暂停引擎、不移动后天车、保持持件和位置锁。
+    /// </summary>
+    private async Task WaitManipulatorsClearOfRackAsync(CancellationToken ct)
     {
-        int ms = _cfg.Grinding.HandshakeTimeoutMs; var dl = DateTime.UtcNow.AddMilliseconds(ms);
-        int sy1 = n1 == 2 ? _cfg.SkewBed.Manipulator2SafeY : _cfg.SkewBed.Manipulator3SafeY;
-        int sy2 = n2 == 2 ? _cfg.SkewBed.Manipulator2SafeY : _cfg.SkewBed.Manipulator3SafeY;
-        Console.WriteLine($"│   等待机械手{n1}号(Y={sy1})和{n2}号(Y={sy2})到达安全位...");
-        while (DateTime.UtcNow < dl)
+        int m2Below = _cfg.Balancing.M2ReleaseLocksBelowY;
+        int m3Below = _cfg.Balancing.M3ReleaseLocksBelowY;
+        int pollMs = Math.Max(_cfg.Grinding.SignalPollIntervalMs, 200);
+        int waitCount = 0;
+        Console.WriteLine($"│   分流前确认机械手2(Y<{m2Below})、机械手3(Y<{m3Below})已离开料架区...");
+        while (true)
         {
             ct.ThrowIfCancellationRequested();
-            bool o1 = false, o2 = false;
-            try { var s = await _manipulatorCache.GetOrCreateService(n1).ReadStatusAsync(ct); o1 = s != null && Math.Abs(s.YPos - sy1) <= 10; } catch { }
-            try { var s = await _manipulatorCache.GetOrCreateService(n2).ReadStatusAsync(ct); o2 = s != null && Math.Abs(s.YPos - sy2) <= 10; } catch { }
-            if (o1 && o2) { Console.WriteLine("│   机械手已在安全位"); return; }
-            await Task.Delay(500, ct);
+            int? m2Y = null, m3Y = null;
+            string m2Err = "", m3Err = "";
+            try { var s = await _manipulatorCache.GetOrCreateService(2).ReadStatusAsync(ct); m2Y = s?.YPos; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { m2Err = ex.Message; }
+            try { var s = await _manipulatorCache.GetOrCreateService(3).ReadStatusAsync(ct); m3Y = s?.YPos; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { m3Err = ex.Message; }
+
+            bool m2Clear = m2Y is int y2 && y2 < m2Below;
+            bool m3Clear = m3Y is int y3 && y3 < m3Below;
+            if (m2Clear && m3Clear)
+            {
+                Console.WriteLine($"│   机械手2 Y={m2Y}(<{m2Below})、机械手3 Y={m3Y}(<{m3Below}) 已离开料架区 ✓");
+                return;
+            }
+
+            waitCount++;
+            if (waitCount == 1 || waitCount % 10 == 0)
+            {
+                string m2Text = m2Y.HasValue ? m2Y.Value.ToString() : (string.IsNullOrEmpty(m2Err) ? "读失败" : $"读失败({m2Err})");
+                string m3Text = m3Y.HasValue ? m3Y.Value.ToString() : (string.IsNullOrEmpty(m3Err) ? "读失败" : $"读失败({m3Err})");
+                Console.WriteLine($"│   [分流等待] 机械手2 Y={m2Text}(需<{m2Below}) 机械手3 Y={m3Text}(需<{m3Below})，继续等待；保持持件和位置锁");
+            }
+            await Task.Delay(pollMs, ct);
         }
-        throw new TimeoutException("等待机械手安全位超时");
     }
 
     public void Dispose()

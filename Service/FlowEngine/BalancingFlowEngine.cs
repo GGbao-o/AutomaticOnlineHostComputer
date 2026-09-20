@@ -1112,7 +1112,7 @@ public sealed class BalancingFlowEngine : IDisposable
                     // 只要M818缓存存在就认为ST020有实体工件, 等M823允许后先清ST020, 不绕行取M817。
                     bool useM817 = !m818Cached && _m817 && m817Cached;
                     bool rearCranesSafe = useM817
-                        ? await AreM817PathRearCranesAtSafeXAsync(ct)
+                        ? await AreBothRearCranesAtSafeXAsync(ct)
                         : await IsCraneAtSafeXAsync(4, ct);
                     if (!rearCranesSafe)
                     {
@@ -1144,10 +1144,11 @@ public sealed class BalancingFlowEngine : IDisposable
                 {
                     bool useM700 = !m821Cached;
                     // M821优先: 先把M3路径上的2号线短板位清空, 再允许M700来源穿越该区域。
-                    if (!useM700 && !await IsCraneAtSafeXAsync(4, ct))
+                    // 无论M821还是M700来源, M3动作路径都要求2号和4号后天车X都不大于配置安全X。
+                    if (!await AreBothRearCranesAtSafeXAsync(ct))
                     {
                         if (_cycleCount % 10 == 1)
-                            Console.WriteLine("[平衡引擎] M3等: 天车4号X>safeX未离开(M821需要后天车离开)");
+                            Console.WriteLine("[平衡引擎] M3等: 2号或4号后天车X>safeX未离开(M3路径需要两辆后天车都离开)");
                     }
                     else if (!_m720)
                     {
@@ -1185,8 +1186,8 @@ public sealed class BalancingFlowEngine : IDisposable
     private void ClearM2Busy() => System.Threading.Volatile.Write(ref _m2BusyFlag, 0);
     private void ClearM3Busy() => System.Threading.Volatile.Write(ref _m3BusyFlag, 0);
 
-    /// <summary>M817→ST008路径会经过ST020/M818区域，2号和4号后天车都必须离开。</summary>
-    private async Task<bool> AreM817PathRearCranesAtSafeXAsync(CancellationToken ct)
+    /// <summary>M2的M817路径与M3的搬运路径都会经过2号线动平衡/短板区域，2号和4号后天车都必须离开(X≤配置安全X)。</summary>
+    private async Task<bool> AreBothRearCranesAtSafeXAsync(CancellationToken ct)
     {
         if (!await IsCraneAtSafeXAsync(2, ct)) return false;
         return await IsCraneAtSafeXAsync(4, ct);

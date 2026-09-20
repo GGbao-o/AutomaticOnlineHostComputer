@@ -2791,8 +2791,8 @@ public sealed class GrindingFlowEngine : IDisposable
             // ── ⑪ Z回原点后，下料完成 + 空载回ST709 ──────────────────
             // Z回原点是研磨机释放和空载XY返回的前置条件；失败由既有下料异常分支暂停并保留Pending。
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑪ 天车Z回原点... {workpiece.IdentityText}");
+            //z回原点
             await crane.HomeZAsync(ct);
-
             // 仅在Z回原点成功后，研磨机下料完成信号与空载XY回ST709才允许并发；两项成功才允许研磨机回Idle。
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⑪ Z回原点成功，开始下料完成(3s长信号)与天车空载回ST709并发... {workpiece.IdentityText}");
             operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, "SetUnloadDone",
