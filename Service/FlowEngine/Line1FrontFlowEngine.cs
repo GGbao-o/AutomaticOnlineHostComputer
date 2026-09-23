@@ -1474,16 +1474,19 @@ public sealed class Line1FrontFlowEngine : IDisposable
                             case ForkBoringPhase.GoingToBoring:
                                 if (!_forkHandshakeInProgress)
                                 {
+                                    //其实这个if写的有问题 但是能跑 还是不改了   因为其实分派条件就要求 fs.HasPlate && fs.AtStandbyPos    时间 9.22
                                     if (!(fs.AtStandbyPos && !fs.HasPlate))
                                     {
                                         if (!_m912Sent)
                                         {
                                             Console.WriteLine("[Line1Front] [货叉] ⑤ M912=1 送料到双头镗并自动回待机");
+                                            //写货叉M912=1
                                             await _forkSvc.GoFeedToBoringAsync(ct);
                                             forkCycleReadTask = null; // 命令写入后不得继续使用写入前状态
                                             _m912Sent = true;
                                         }
                                     }
+                                    //货叉在待机位且无板
                                     else
                                     {
                                         Console.WriteLine("[Line1Front] [货叉] 送料完成: 待机位且无板 → R6104=1 上料完成");

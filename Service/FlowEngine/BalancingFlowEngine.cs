@@ -1277,6 +1277,7 @@ public sealed class BalancingFlowEngine : IDisposable
             if (useM817 && _lockM817 != null)//去M817取料
             {
                 Console.WriteLine("[平衡引擎] [M2] 等待 M817锁..."); 
+                //不阻塞线程，返回一个 Task，await 时当前线程被释放（让出），拿到锁后通过回调/续体继续执行   这个就是一直拿锁 拿到了其实可能有些设备信号就变了
                 await _lockM817.WaitAsync(ct);
                 gotM817 = true;
                 MarkM2Lock("M817", true);
@@ -1288,6 +1289,13 @@ public sealed class BalancingFlowEngine : IDisposable
                 await _lockM818.WaitAsync(ct);
                 gotM818 = true;
                 MarkM2Lock("M818", true);
+            }
+            // 锁后再次复核两辆后天车都已离开安全X(天车2、天车4)；不满足则本趟不取料, 释放锁等待下一轮。
+            if (!await AreBothRearCranesAtSafeXAsync(ct))
+            {
+                Console.WriteLine("[平衡引擎] [M2] 锁后复核未通过: 天车2或天车4未离开安全X, 本趟不取料, 释放锁等待下一轮");
+                ReleaseM2RackLocks("锁后天车复核未通过");
+                return;
             }
             // 忙标志已由主循环原子占坑, 这里只负责动作和finally释放。
 
@@ -1858,6 +1866,13 @@ public sealed class BalancingFlowEngine : IDisposable
                 await _lockM720.WaitAsync(ct);
                 gotM720 = true;
                 MarkM3Lock("M720", true);
+            }
+            // 锁后再次复核两辆后天车都已离开安全X(天车2、天车4)；不满足则本趟不取料, 释放锁等待下一轮。
+            if (!await AreBothRearCranesAtSafeXAsync(ct))
+            {
+                Console.WriteLine("[平衡引擎] [M3] 锁后复核未通过: 天车2或天车4未离开安全X, 本趟不取料, 释放锁等待下一轮");
+                ReleaseM3RackLocks("锁后天车复核未通过");
+                return;
             }
             // 忙标志已由主循环原子占坑, 锁等待期间不会重复派发M3Flow。
 
