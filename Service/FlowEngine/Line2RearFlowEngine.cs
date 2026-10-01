@@ -1556,6 +1556,31 @@ public sealed class Line2RearFlowEngine : IDisposable
 
             if (!RackHasPhysicalPlateSnapshot(rs))
                 throw new InvalidOperationException($"中转架{rs}物理信号无板, 禁止后天车取料; 软件缓存将恢复等待人工/下轮确认");
+            // 锁后复核（获取ZoneMT/ZoneTS可能持续较久）：
+            //   ① 来源预约必须仍属于本动作、且中转架缓存身份未变（防止等锁期间工人取走+前台补入新板）；
+            //   ② 目标斜床必须仍处于“请求数据”状态。
+            // 任一不满足：本趟尚未取料，解除预约、目标床回Idle，释放锁等待下一轮。
+            bool sourceUnchanged =
+                _rackLedger.IsReserved(rs, out string reservedOp) &&
+                StringComparer.Ordinal.Equals(reservedOp, actionId) &&
+                _rackLedger.TryGet(rs, out WorkpieceCache currentWp) &&
+                StringComparer.Ordinal.Equals(currentWp.IdentityText, wp.IdentityText);
+            bool targetRequestData = false;
+            try
+            {
+                if (bed.F != null) targetRequestData = await bed.F.IsRequestDataAsync(ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Console.WriteLine($"│ [上料] {bed.Code} 锁后复核请求数据读取失败: {ex.Message}");
+            }
+            if (!sourceUnchanged || !targetRequestData)
+            {
+                _rackLedger.ReleaseReservation(rs, actionId);
+                bed.St = SkewState.Idle;
+                Console.WriteLine($"[上料] ⏳ 锁后复核未通过(来源未变={sourceUnchanged}, {bed.Code}请求数据={targetRequestData}), 未取中转架{rs}工件, 释放预约等待下一轮");
+                return;
+            }
             cr = _craneCache.GetOrCreateService(CraneRearNo);
             if (!cr.IsConnected)
             {
