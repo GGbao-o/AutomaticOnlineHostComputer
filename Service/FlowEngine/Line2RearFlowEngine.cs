@@ -1934,7 +1934,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 Console.WriteLine("│ [上料] ⚠ X11已确认工件在后天车上但未放到斜床; 引擎已暂停, 需人工确认后天车和工件位置");
                 pendingSafetyAlarm = $"2号线后天车给{bed.Code}上料时发生异常，X11已确认工件{wp.IdentityText}在天车上但尚未放入斜床。引擎已暂停，请人工确认位置。异常：{ex.Message}";
             }
-            else
+            else if (!requiresManualConfirmation)
             {
                 if (mag && cr != null)
                 {
