@@ -170,7 +170,7 @@ Define("PLATE_LENGTH_NOT_VERIFIED", "板长校验不可用", OperationalEventSev
 
 `PLATE_LENGTH_NOT_VERIFIED` 的 `required` 文本中需带上区分两类原因的具体说明（D100 读数为 0 / 任务板长无效）。
 
-> 说明：`LEGACY_WARNING` 只是 `AttentionEventCenter` 把既有 `AttentionEventKind.Warning` 映射进结构化库时用的代码，不是供引擎直接发事件的通道；引擎侧统一走 `OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "<CODE>", …)`，因此这里新增专用代码而不复用 `LEGACY_WARNING`。
+> 说明：`LEGACY_WARNING` 只是 `AttentionEventCenter` 把既有 `AttentionEventKind.Warning` 映射进结构化库时用的代码，不是供引擎直接发事件的通道；引擎侧统一通过 `OperationalEventContextFactory.TryReportPhysical` 上报，事件码作为其第一个业务参数传入。因此这里新增专用代码而不复用 `LEGACY_WARNING`。
 
 ## 9. 测试策略
 
