@@ -55,9 +55,12 @@ if (_rackSvc != null)
 新增纯函数：
 
 ```
-PlateLengthVerification.Evaluate(int measured, int taskLength, int toleranceMm)
+PlateLengthVerification.Evaluate(int measuredMm, double taskLengthMm, int toleranceMm)
     → PlateLengthVerdict { Pass, Mismatch, NotComparable }
 ```
+
+> `taskLengthMm` 用 `double`：`WorkpieceCache.Length` 本身就是 `double`（ERP 可能带小数），
+> 保留小数直接比较、不做取整，避免引入额外偏差。`measuredMm` 是 D100 的整数读数。
 
 | 输入情形 | 判定 | 动作 |
 |---|---|---|

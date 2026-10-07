@@ -1857,14 +1857,39 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 }
             }
 
-            // ① 读 D100 板长 — 仅日志输出，不影响流程
+            // ① 读 D100 板长，并校验它与任务板长是否一致
+            //    D100 = 总上料架居中架在 ST007 测得的本块板实测长度，是取料前唯一的物理长度证据。
+            //    任务板长来自 ERP/人工建单，是下游全局分线、斜床最大长度匹配、长短板动平衡分流
+            //    与研磨机长度准入门槛的判决依据；两者不一致时继续生产会把错误长度一路带下去
+            //    （例如把实际长板当短板，直接跳过动平衡送去 ST010）。
+            //    读取异常仍按原有语义向外抛出（沿用既有安全收尾）；读到 0 表示本次没有可用测量值，
+            //    按"校验不可用"放行，避免一次 MC 短报文就丢弃任务并停线。
+            //    ⚠ 判定必须早于本方法后面的 action.MarkCommandSent()：只有在此之前抛出，
+            //    外层收尾才会把它当"尚未下发物理命令"，从而允许丢弃本任务身份。
             int plateLen = 0;
             if (_rackSvc != null)
             {
                 plateLen = await _rackSvc.ReadPlateLengthAsync(ct);
                 Console.WriteLine($"[Line1Front] [机械手1] ① D100板长={plateLen}mm");
             }
-            
+
+            int plateLengthToleranceMm = _cfg.Safety.PlateLengthToleranceMm;
+            PlateLengthVerdict plateLengthVerdict =
+                PlateLengthVerification.Evaluate(plateLen, wp.Length, plateLengthToleranceMm);
+            if (plateLengthVerdict == PlateLengthVerdict.Mismatch)
+            {
+                Console.WriteLine(
+                    $"[Line1Front] [机械手1] ⚠ 板长校验不通过：D100实测={plateLen}mm 任务={wp.Length}mm " +
+                    $"偏差={Math.Abs(plateLen - wp.Length)}mm 容差={plateLengthToleranceMm}mm → 拒绝取料并丢弃本任务身份");
+                throw new PlateLengthMismatchException(plateLen, wp.Length, plateLengthToleranceMm);
+            }
+            if (plateLengthVerdict == PlateLengthVerdict.NotComparable)
+            {
+                // 不校验也放行，但必须留痕，便于事后判断校验是否一直在空转。
+                string reason = wp.Length <= 0 ? $"任务板长无效({wp.Length})" : $"D100无有效读数({plateLen})";
+                Console.WriteLine($"[Line1Front] [机械手1] ⚠ 板长校验不可用：{reason}，本次放行不校验");
+            }
+
             // ② ST007 取料
             if (!TryGetStationCoords("ST007", out int rx, out int ry, out int rz))
                 throw new InvalidOperationException("数据库未找到 ST007 坐标");
@@ -2185,6 +2210,31 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     // 第二阶段回待机由专用方法自行判断安全并告警；门闩已开时不回退货叉状态。
                     Console.WriteLine("[Line1Front] [机械手1] 工件已安全放在货叉且门闩已开，保持 _currentWp 让 ForkBoringPhase 接管");
                 }
+            }
+            else if (ex is PlateLengthMismatchException lengthMismatch)
+            {
+                // 板长校验不通过：D100 实测板长与任务板长偏差超过容差。
+                // 这是"数据不符"，不是"命令响应未知"；异常发生在任何物理命令之前（未充磁、未移动、
+                // 未写 PLC），因此直接【丢弃本块板的软件任务身份】——清 _currentWp，且不回退本线缓存。
+                // 丢弃后本线 CachedCount==0 且 _currentWp==null，机械手取料闸门不再成立；
+                // 另一条线的取料闸门同样要求"它自己的缓存非空"，所以两条线都不会去取 ST007 上这块
+                // 身份不明的板。全局派发器另有 M800 复位门与"两线前端缓存都空才派发"两道闸门，
+                // 保证不会把新任务绑到这块旧板上。物理板仍在 ST007，需人工处理。
+                lock (_wpLock) { _currentWp = null; }
+                _paused = true;
+                Console.WriteLine(
+                    $"[Line1Front] [机械手1] ⚠ 板长校验不一致，已丢弃本任务身份（不回退缓存）：{wp.IdentityText} " +
+                    $"D100实测={lengthMismatch.MeasuredMm}mm 任务={lengthMismatch.ExpectedMm}mm " +
+                    $"偏差={lengthMismatch.DeviationMm}mm 容差={lengthMismatch.ToleranceMm}mm");
+                OnSafetyAlarm?.Invoke(
+                    $"1号线机械手1在 {wp.IdentityText} 取料前发现板长不符，本任务已丢弃，未取料。\n" +
+                    $"  实测板长(D100)：{lengthMismatch.MeasuredMm} mm\n" +
+                    $"  任务板长(ERP)：{lengthMismatch.ExpectedMm} mm\n" +
+                    $"  偏        差：{lengthMismatch.DeviationMm} mm（容差 {lengthMismatch.ToleranceMm} mm）\n" +
+                    $"  来源工位：ST007\n" +
+                    $"实物板仍在ST007未被处理，机械手未充磁、未移动。引擎已暂停。\n" +
+                    $"处置：① 把ST007上的实物板拿走，让该位置空置；② 等到日志出现“已观察到上一块M800复位为0”；" +
+                    $"③ 再放上正确的新板；④ 按版号/序号从ERP重新导入正确任务。");
             }
             else
             {

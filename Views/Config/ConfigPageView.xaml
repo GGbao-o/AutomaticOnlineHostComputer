@@ -548,6 +548,21 @@
                             <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
                                 <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="机械手1取料板长校验" />
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
+                                               Text="机械手1从ST007取料前，把总上料架D100实测板长与任务板长比对；偏差超过该值即拒绝取料、丢弃本任务身份并暂停本线等人工核对。偏差正好等于该值算通过；D100读到0或任务板长无效时不校验。" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="允许偏差" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding PlateLengthToleranceMm, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ParamTextBoxStyle}" Width="60" />
+                                        <TextBlock Text="mm" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                                <StackPanel>
                                     <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Y轴偏移 (mm)" />
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                         <TextBlock Text="大孔(100)" Style="{StaticResource ParamLabelStyle}" />

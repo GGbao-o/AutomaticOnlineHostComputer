@@ -101,6 +101,12 @@ public sealed class MotionConfig
         /// 在此范围内视为正常接触到位，恢复伺服后继续充/退磁等后续步骤；超出范围才暂停人工确认。
         /// </summary>
         public int PressureStopNormalPositionToleranceMm { get; set; } = 15;
+        /// <summary>
+        /// 机械手1 取料前，总上料架 D100 居中实测板长与任务缓存板长的最大允许偏差（mm）。
+        /// 偏差正好等于该值算通过；超出即拒绝取料并丢弃本块板的软件任务身份。
+        /// D100 读到 0（无有效读数）或任务板长无效时不校验。
+        /// </summary>
+        public int PlateLengthToleranceMm { get; set; } = 15;
     }
 
     public sealed class ShakeSection

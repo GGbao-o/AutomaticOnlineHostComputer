@@ -165,6 +165,11 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
         get => _cfg.Safety.PressureStopNormalPositionToleranceMm;
         set { _cfg.Safety.PressureStopNormalPositionToleranceMm = value; OnPropertyChanged(); }
     }
+    public int PlateLengthToleranceMm
+    {
+        get => _cfg.Safety.PlateLengthToleranceMm;
+        set { _cfg.Safety.PlateLengthToleranceMm = value; OnPropertyChanged(); }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  初始化 — 每行持有对 _cfg 内对象的直接引用，修改即时生效
