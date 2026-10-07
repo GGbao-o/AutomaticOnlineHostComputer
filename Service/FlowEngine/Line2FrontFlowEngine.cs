@@ -869,6 +869,23 @@ public sealed class Line2FrontFlowEngine : IDisposable
     }
 
     /// <summary>
+    /// 兜底：确保指定工件不在本线显示缓存 _cachedList 中残留。
+    /// <para>
+    /// 正常路径下该工件在 TryDequeueCache 出队时就已同时从 _cacheQueue 与 _cachedList 移除，
+    /// 本方法因此通常什么也不做。加它是为了自愈一种会放大后果的失配：TryDequeueCache 里
+    /// <c>_cachedList.Remove(wp)</c> 的返回值被忽略，而 <see cref="CachedCount"/> 读的正是
+    /// _cachedList.Count；一旦两者不同步，本线会“以为仍有板”却出不了队，同时全局派发器的
+    /// “两线前端缓存都空才派发”闸门会被永久拦住，导致整条派发链停摆。
+    /// </para>
+    /// 只按值精确移除这一块；不触碰 _cacheQueue（避免与派发器并发入队时丢任务），
+    /// 也不清缓存中其它任务。
+    /// </summary>
+    private void EnsureFrontCacheListEntryRemoved(WorkpieceCache wp)
+    {
+        lock (_cacheLock) _cachedList.Remove(wp);
+    }
+
+    /// <summary>
     /// 独立刷新总上料架/中转架状态快照。
     /// 后端上料步骤⑤只看 DeviceStatus 中的 TransferRackXFree, 所以这个刷新不能被
     /// _currentWp 或 _manipulatorLock 限制；否则前端有在途工件时, 后端会一直看旧快照并认为中转架无版。
@@ -2224,6 +2241,9 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 // 身份不明的板。全局派发器另有 M800 复位门与"两线前端缓存都空才派发"两道闸门，
                 // 保证不会把新任务绑到这块旧板上。物理板仍在 ST007，需人工处理。
                 lock (_wpLock) { _currentWp = null; }
+                // 兜底清理本线缓存中该工件的残留条目：正常路径下它已在出队时移除，
+                // 这里只防 _cachedList 与 _cacheQueue 失配导致 CachedCount 虚高、派发被永久拦住。
+                EnsureFrontCacheListEntryRemoved(wp);
                 _paused = true;
                 Console.WriteLine(
                     $"[Line2Front] [机械手1] ⚠ 板长校验不一致，已丢弃本任务身份（不回退缓存）：{wp.IdentityText} " +
