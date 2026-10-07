@@ -1,7 +1,0 @@
-{
-  "Host": "localhost",
-  "Port": 3306,
-  "Database": "automatic_online_host",
-  "User": "root",
-  "Password": "123456"
-}
