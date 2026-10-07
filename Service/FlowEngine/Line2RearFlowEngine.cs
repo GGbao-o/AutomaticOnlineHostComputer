@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -2785,7 +2785,9 @@ public sealed class Line2RearFlowEngine : IDisposable
                     // 第二把等待异常/取消时也会释放第一把, 避免锁泄漏。
                     if (_lockM818 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M818)..."); await operation.AcquireAsync("M818", _lockM818, ct); action.RegisterLock("M818"); gotM818 = true; }
                     if (_lockM821 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M821路径保护)..."); await operation.AcquireAsync("M821", _lockM821, ct); action.RegisterLock("M821"); gotM821 = true; }
-                    await ConfirmM818CanPlaceBeforePlaceAsync(ct);
+                    // 二次确认: M818=未允许放料时不释放分流锁、不移动、不退磁、不暂停，保持持件与安全Z
+                    // 在锁内按轮询周期无限等待，直到 M818 恢复允许放料才允许进入分流区。
+                    await EnsureM818CanPlaceBeforePlaceAsync(wp, ct);
                     // 锁内、目的地确认后再确认机械手2/3已离开料架区，之后才允许后天车进入分流区。
                     await WaitManipulatorsClearOfRackAsync(ct);
                 }
@@ -2796,7 +2798,9 @@ public sealed class Line2RearFlowEngine : IDisposable
                     // 注意: 多把锁从获取前就进入finally保护, 第二把等待异常/取消时也会释放第一把, 避免死锁。
                     if (_lockM818 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M818)..."); await operation.AcquireAsync("M818", _lockM818, ct); action.RegisterLock("M818"); gotM818 = true; }
                     if (_lockM821 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M821路径保护)..."); await operation.AcquireAsync("M821", _lockM821, ct); action.RegisterLock("M821"); gotM821 = true; }
-                    await ConfirmM820CanPlaceBeforePlaceAsync(ct);
+                    // 二次确认: M820=未允许放料时不释放分流锁、不移动、不退磁、不暂停，保持持件与安全Z
+                    // 在锁内按轮询周期无限等待，直到 M820 恢复允许放料才允许进入分流区。
+                    await EnsureM820CanPlaceBeforePlaceAsync(wp, ct);
                     // 锁内、目的地确认后再确认机械手2/3已离开料架区，之后才允许后天车进入分流区。
                     await WaitManipulatorsClearOfRackAsync(ct);
                 }
@@ -3404,32 +3408,73 @@ public sealed class Line2RearFlowEngine : IDisposable
     }
 
     /// <summary>
-    /// 二次确认M818=1，即ST020允许后天车放料。
+    /// ST020 放料前的目的地二次确认。
     /// 主循环只做预检；拿到ST020/ST021区域双锁后必须重新读PLC，避免旧快照导致误放。
+    /// <para>
+    /// M818=未允许放料时不移动天车、不退磁、不暂停、也不释放分流锁，保持持件和安全 Z
+    /// 按轮询周期无限等待，直到 M818 恢复允许放料才允许进入分流区。
+    /// 现场确认 M818 的"未允许"属于残留/不稳定读数，实际不会出现 ST020 上真有一块
+    /// 等待机械手2取走的板，因此采用持锁等待，不引入额外的分流区进入窗口。
+    /// </para>
+    /// PLC 读取失败、报文异常或动作取消仍按既有安全异常路径抛出。
     /// </summary>
-    private async Task ConfirmM818CanPlaceBeforePlaceAsync(CancellationToken ct)
+    private async Task EnsureM818CanPlaceBeforePlaceAsync(WorkpieceCache wp, CancellationToken ct)
     {
-        using var t = new CancellationTokenSource(3000);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, t.Token);
-        var mc63 = await EnsureMc63Async(linked.Token);
-        var r = await mc63.ReadMAlignedWordAsync(800, 2, linked.Token);
-        int m816 = r.IntValues.Length > 1 ? r.IntValues[1] : throw new InvalidOperationException("MC63 M818二次确认返回字数不足");
-        bool canPlace = (m816 & (1 << RackAddr.Bit_ST020_CanPlace)) != 0;
-        Console.WriteLine($"│ [分流] 二次确认M818={(canPlace ? "允许放料" : "未允许放料")} rawM816=0x{m816:X4}");
-        if (!canPlace) throw new InvalidOperationException("M818=0, ST020未允许后天车放料");
+        int waitCount = 0;
+        while (!await ReadM818CanPlaceAsync(ct, log: waitCount == 0))
+        {
+            waitCount++;
+            if (waitCount == 1 || waitCount % 10 == 0)
+                Console.WriteLine($"│ [分流] ⚠ {wp.IdentityText} M818二次确认=未允许放料, 保持持件和安全Z持锁等待（{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1}秒）");
+            await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
+        }
+
+        if (waitCount > 0)
+            Console.WriteLine($"│ [分流] ✓ {wp.IdentityText} M818恢复允许放料, 结束持锁等待, 继续放料");
     }
 
-    /// <summary>二次确认M820=1，即ST021允许后天车放料。</summary>
-    private async Task ConfirmM820CanPlaceBeforePlaceAsync(CancellationToken ct)
+    /// <summary>
+    /// ST021 放料前的目的地二次确认。
+    /// M820=未允许放料时不移动天车、不退磁、不暂停、也不释放分流锁，保持持件和安全 Z
+    /// 按轮询周期无限等待，直到 M820 恢复允许放料才允许进入分流区。处理方式与 ST020 相同。
+    /// </summary>
+    private async Task EnsureM820CanPlaceBeforePlaceAsync(WorkpieceCache wp, CancellationToken ct)
+    {
+        int waitCount = 0;
+        while (!await ReadM820CanPlaceAsync(ct, log: waitCount == 0))
+        {
+            waitCount++;
+            if (waitCount == 1 || waitCount % 10 == 0)
+                Console.WriteLine($"│ [分流] ⚠ {wp.IdentityText} M820二次确认=未允许放料, 保持持件和安全Z持锁等待（{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1}秒）");
+            await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
+        }
+
+        if (waitCount > 0)
+            Console.WriteLine($"│ [分流] ✓ {wp.IdentityText} M820恢复允许放料, 结束持锁等待, 继续放料");
+    }
+
+    /// <summary>读取M818是否允许放料(=1)。读取失败和报文异常由调用方按安全异常处理。</summary>
+    private async Task<bool> ReadM818CanPlaceAsync(CancellationToken ct, bool log)
+        => await ReadRearHandshakeBitAsync(RackAddr.Bit_ST020_CanPlace, "M818", ct, log);
+
+    /// <summary>读取M820是否允许放料(=1)。读取失败和报文异常由调用方按安全异常处理。</summary>
+    private async Task<bool> ReadM820CanPlaceAsync(CancellationToken ct, bool log)
+        => await ReadRearHandshakeBitAsync(RackAddr.Bit_ST021_CanPlace, "M820", ct, log);
+
+    /// <summary>读取MC63后半握手字(M816~M831)的指定bit。报文变短视为错误，不按0继续。</summary>
+    private async Task<bool> ReadRearHandshakeBitAsync(int bitOffset, string signalName, CancellationToken ct, bool log)
     {
         using var t = new CancellationTokenSource(3000);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, t.Token);
         var mc63 = await EnsureMc63Async(linked.Token);
         var r = await mc63.ReadMAlignedWordAsync(800, 2, linked.Token);
-        int m816 = r.IntValues.Length > 1 ? r.IntValues[1] : throw new InvalidOperationException("MC63 M820二次确认返回字数不足");
-        bool canPlace = (m816 & (1 << RackAddr.Bit_ST021_CanPlace)) != 0;
-        Console.WriteLine($"│ [分流] 二次确认M820={(canPlace ? "允许放料" : "未允许放料")} rawM816=0x{m816:X4}");
-        if (!canPlace) throw new InvalidOperationException("M820=0, ST021未允许后天车放料");
+        int m816 = r.IntValues.Length > 1
+            ? r.IntValues[1]
+            : throw new InvalidOperationException($"MC63 {signalName}二次确认返回字数不足");
+        bool value = (m816 & (1 << bitOffset)) != 0;
+        if (log)
+            Console.WriteLine($"│ [分流] 二次确认{signalName}={(value ? "允许放料" : "未允许放料")} rawM816=0x{m816:X4}");
+        return value;
     }
 
     private async Task WriteMc63HandshakeBitAsync(int bitOffset, string signalName, CancellationToken ct)

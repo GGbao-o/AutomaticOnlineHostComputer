@@ -401,8 +401,8 @@
   },
   "balancing": {
     "rearCraneSafeX": -2000,
-    "m2ReleaseLocksBelowY": 3000,
-    "m3ReleaseLocksBelowY": 3000,
+    "m2ReleaseLocksBelowY": 4000,
+    "m3ReleaseLocksBelowY": 5000,
     "armCoords": {
       "M817": {
         "y": 15060,

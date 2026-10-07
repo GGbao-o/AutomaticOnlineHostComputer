@@ -1210,6 +1210,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                             {
                                 try
                                 {
+                                    //一次性读取全部状态：M800~M816 位信号 + D100 板长数值。
                                     rs = await _rackSvc.ReadAllStatusAsync(linked.Token);
                                 }
                                 // 5s 超时: MC TCP连通但帧被拒/无响应 → 释放锁重新尝试
@@ -1281,6 +1282,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                                     _skipBoringTriggered = false;
                                     Console.WriteLine($"[Line1Front] [DEBUG] _currentWp SET {wp.IdentityText} d={wp.Diameter} L={wp.Length} SkipBoring={wp.SkipBoring}");
                                     Console.WriteLine($"[Line1Front] M800=1 缓存有料 {wp.IdentityText} d={wp.Diameter} L={wp.Length}{(wp.SkipBoring ? " ⚡SkipBoring" : "")} → 启动机械手1 在途=1");
+                                    //机械手1开始执行流程
                                     _ = ProcessManipulatorPickupAsync(wp, ct);
                                     released = true;
                                 }
@@ -1862,7 +1864,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 plateLen = await _rackSvc.ReadPlateLengthAsync(ct);
                 Console.WriteLine($"[Line1Front] [机械手1] ① D100板长={plateLen}mm");
             }
-
+            
             // ② ST007 取料
             if (!TryGetStationCoords("ST007", out int rx, out int ry, out int rz))
                 throw new InvalidOperationException("数据库未找到 ST007 坐标");
@@ -2192,6 +2194,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     operationalTracker.BeginMagnetOff();
                     try
                     {
+                        //有放磁操作
                         await _manipulator1!.MagnetOffAsync(ct);
                         operationalTracker.CompleteMagnetOff();
                     }

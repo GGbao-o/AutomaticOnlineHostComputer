@@ -1,0 +1,132 @@
+<UserControl
+    x:Class="AutomaticOnlineHostComputer.Views.InProcessWorkpieces.InProcessWorkpieceOverviewView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="#E9EEF5">
+    <UserControl.Resources>
+        <Style x:Key="PanelStyle" TargetType="Border">
+            <Setter Property="Background" Value="#FFFFFF" />
+            <Setter Property="BorderBrush" Value="#CED8E6" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12" />
+        </Style>
+        <Style x:Key="KpiStyle" TargetType="Border" BasedOn="{StaticResource PanelStyle}">
+            <Setter Property="Width" Value="132" />
+            <Setter Property="Height" Value="74" />
+            <Setter Property="Margin" Value="0,0,8,8" />
+        </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="AutoGenerateColumns" Value="False" />
+            <Setter Property="CanUserAddRows" Value="False" />
+            <Setter Property="CanUserDeleteRows" Value="False" />
+            <Setter Property="CanUserResizeRows" Value="False" />
+            <Setter Property="EnableColumnVirtualization" Value="True" />
+            <Setter Property="EnableRowVirtualization" Value="True" />
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="RowHeaderWidth" Value="0" />
+            <Setter Property="GridLinesVisibility" Value="Horizontal" />
+            <Setter Property="HorizontalGridLinesBrush" Value="#E2E8F0" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style TargetType="DataGridRow">
+            <Setter Property="Background" Value="White" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusText}" Value="交接中">
+                    <Setter Property="Background" Value="#FEF3C7" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusText}" Value="证据不足">
+                    <Setter Property="Background" Value="#FFF7D6" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusText}" Value="信号不一致">
+                    <Setter Property="Background" Value="#FEE2E2" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusText}" Value="需人工确认">
+                    <Setter Property="Background" Value="#FECACA" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock FontSize="22" FontWeight="SemiBold" Foreground="#172033" Text="在制工件总览（当前内存）" />
+            <TextBlock Margin="0,5,0,0" Foreground="#627084"
+                       Text="汇总程序当前掌握的工件身份与软件位置；不读取设备、不写寄存器、不清缓存、不参与控制决策。" />
+        </StackPanel>
+
+        <WrapPanel Grid.Row="1" Margin="0,16,0,8">
+            <Border Style="{StaticResource KpiStyle}" BorderBrush="#86EFAC">
+                <StackPanel><TextBlock Foreground="#166534" Text="已知工件身份" /><TextBlock FontSize="24" FontWeight="Bold" Foreground="#16A34A" Text="{Binding KnownIdentityCount}" /></StackPanel>
+            </Border>
+            <Border Style="{StaticResource KpiStyle}">
+                <StackPanel><TextBlock Foreground="#475569" Text="全局待派发" /><TextBlock FontSize="24" FontWeight="Bold" Foreground="#334155" Text="{Binding GlobalQueueCount}" /></StackPanel>
+            </Border>
+            <Border Style="{StaticResource KpiStyle}">
+                <StackPanel><TextBlock Foreground="#475569" Text="前端在途" /><TextBlock FontSize="24" FontWeight="Bold" Foreground="#334155" Text="{Binding FrontInTransitCount}" /></StackPanel>
+            </Border>
+            <Border Style="{StaticResource KpiStyle}">
+                <StackPanel><TextBlock Foreground="#475569" Text="中转架缓存" /><TextBlock FontSize="24" FontWeight="Bold" Foreground="#334155" Text="{Binding TransferRackCount}" /></StackPanel>
+            </Border>
+            <Border Style="{StaticResource KpiStyle}">
+                <StackPanel><TextBlock Foreground="#475569" Text="加工设备持件" /><TextBlock FontSize="24" FontWeight="Bold" Foreground="#334155" Text="{Binding ProcessDeviceCount}" /></StackPanel>
+            </Border>
+            <Border Style="{StaticResource KpiStyle}" BorderBrush="#FCA5A5">
+                <StackPanel><TextBlock Foreground="#991B1B" Text="信号不一致" /><TextBlock FontSize="24" FontWeight="Bold" Foreground="#DC2626" Text="{Binding MismatchCount}" /></StackPanel>
+            </Border>
+            <Border Style="{StaticResource KpiStyle}" BorderBrush="#FCD34D">
+                <StackPanel><TextBlock Foreground="#92400E" Text="多处记录身份" /><TextBlock FontSize="24" FontWeight="Bold" Foreground="#D97706" Text="{Binding MultipleRecordCount}" /></StackPanel>
+            </Border>
+            <Border Style="{StaticResource KpiStyle}" Width="190">
+                <StackPanel><TextBlock Foreground="#475569" Text="最近刷新" /><TextBlock Margin="0,7,0,0" FontWeight="SemiBold" Foreground="#172033" Text="{Binding LastRefreshText}" /></StackPanel>
+            </Border>
+        </WrapPanel>
+
+        <Border Grid.Row="2" Style="{StaticResource PanelStyle}" Margin="0,0,0,12" Padding="10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="180" />
+                    <ColumnDefinition Width="18" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="18" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="260" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Foreground="#475569" Text="流程：" />
+                <ComboBox Grid.Column="1" ItemsSource="{Binding ScopeOptions}" SelectedItem="{Binding SelectedScope}" />
+                <TextBlock Grid.Column="3" VerticalAlignment="Center" Foreground="#475569" Text="状态：" />
+                <ComboBox Grid.Column="4" ItemsSource="{Binding StatusOptions}" SelectedItem="{Binding SelectedStatus}" />
+                <TextBlock Grid.Column="6" VerticalAlignment="Center" Foreground="#475569" Text="搜索：" />
+                <TextBox Grid.Column="7" Padding="7,4" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock Grid.Column="8" Margin="16,0,0,0" VerticalAlignment="Center" Foreground="#64748B"
+                           Text="黄色可能是正常交接；红色只提示人工核对，页面不会自动处理。" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="3" Style="{StaticResource PanelStyle}" Padding="0">
+            <DataGrid ItemsSource="{Binding FilteredItems}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="工件" Width="170" Binding="{Binding IdentityText}" />
+                    <DataGridTextColumn Header="所属流程" Width="110" Binding="{Binding FlowScope}" />
+                    <DataGridTextColumn Header="软件位置" Width="135" Binding="{Binding Location}" />
+                    <DataGridTextColumn Header="当前阶段" Width="190" Binding="{Binding Stage}" />
+                    <DataGridTextColumn Header="直径(mm)" Width="85" Binding="{Binding DiameterText}" />
+                    <DataGridTextColumn Header="长度(mm)" Width="85" Binding="{Binding LengthText}" />
+                    <DataGridTextColumn Header="状态" Width="95" Binding="{Binding StatusText}" />
+                    <DataGridTextColumn Header="证据来源" Width="190" Binding="{Binding Evidence}" />
+                    <DataGridTextColumn Header="说明" Width="*" Binding="{Binding Detail}" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+    </Grid>
+</UserControl>

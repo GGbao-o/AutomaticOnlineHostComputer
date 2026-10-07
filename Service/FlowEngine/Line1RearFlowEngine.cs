@@ -1870,6 +1870,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(bx + _ox, by + _oy, sz), "持件XY到斜床目标上方");
             action.MarkCommandSent();
             await cr.MoveAbsoluteAsync(bx + _ox, by + _oy, -1, ct: ct);
+            //读取斜床状态
             var posAfter = await cr.ReadStatusAsync(ct);
             if (posAfter == null) throw new InvalidOperationException("后天车状态读取为空, 无法确认XY到位");
             Console.WriteLine($"│ [移动] XY到位确认: X={posAfter.XPos}(目标{bx + _ox}) Y={posAfter.YPos}(目标{by + _oy})");
@@ -2843,8 +2844,9 @@ public sealed class Line1RearFlowEngine : IDisposable
                     // 第二把等待异常/取消时也会释放第一把, 避免锁泄漏。
                     if (_lockM817 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M817)..."); await operation.AcquireAsync("M817", _lockM817, ct); action.RegisterLock("M817"); gotM817 = true; }
                     if (_lockM720 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M720路径保护)..."); await operation.AcquireAsync("M720", _lockM720, ct); action.RegisterLock("M720"); gotM720 = true; }
-                    //二次确认
-                    await ConfirmM817EmptyBeforePlaceAsync(ct);
+                    // 二次确认: M817=有版时不释放分流锁、不移动、不退磁、不暂停，保持持件与安全Z
+                    // 在锁内按轮询周期无限等待，直到 M817 恢复空闲才允许进入分流区。
+                    await EnsureM817EmptyBeforePlaceAsync(wp, ct);
                     // 锁内、目的地确认后再确认机械手2/3已离开料架区，之后才允许后天车进入分流区。
                     await WaitManipulatorsClearOfRackAsync(ct);
                 }
@@ -3697,11 +3699,34 @@ public sealed class Line1RearFlowEngine : IDisposable
     }
 
     /// <summary>
-    /// 二次确认M817物理空闲。
+    /// ST019 放料前的目的地二次确认。
     /// 主循环的目的地检查只能算预检; 分流锁拿到后、XY去目标位前必须再读真实PLC信号,
     /// 防止人工放板/PLC状态变化/旧快照导致叠料。
+    /// <para>
+    /// M817=有版时不移动天车、不退磁、不暂停、也不释放分流锁，保持持件和安全 Z
+    /// 按轮询周期无限等待，直到 M817 恢复空闲才允许进入分流区。
+    /// 现场确认 M817 的"有版"属于残留/不稳定读数，实际不会出现 ST019 上真有一块
+    /// 等待机械手2取走的板，因此采用持锁等待，不引入额外的分流区进入窗口。
+    /// </para>
+    /// PLC 读取失败、报文异常或动作取消仍按既有安全异常路径抛出。
     /// </summary>
-    private async Task ConfirmM817EmptyBeforePlaceAsync(CancellationToken ct)
+    private async Task EnsureM817EmptyBeforePlaceAsync(WorkpieceCache wp, CancellationToken ct)
+    {
+        int waitCount = 0;
+        while (!await ReadM817EmptyAsync(ct, log: waitCount == 0))
+        {
+            waitCount++;
+            if (waitCount == 1 || waitCount % 10 == 0)
+                Console.WriteLine($"│ [分流] ⚠ {wp.IdentityText} M817二次确认=有版, 保持持件和安全Z持锁等待（{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1}秒）");
+            await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
+        }
+
+        if (waitCount > 0)
+            Console.WriteLine($"│ [分流] ✓ {wp.IdentityText} M817恢复空闲, 结束持锁等待, 继续放料");
+    }
+
+    /// <summary>读取M817是否物理空闲(=0)。读取失败和报文异常由调用方按安全异常处理。</summary>
+    private async Task<bool> ReadM817EmptyAsync(CancellationToken ct, bool log)
     {
         using var t = new CancellationTokenSource(3000);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, t.Token);
@@ -3709,8 +3734,9 @@ public sealed class Line1RearFlowEngine : IDisposable
         var r = await mc63.ReadMAlignedWordAsync(800, 2, linked.Token);
         int m816 = r.IntValues.Length > 1 ? r.IntValues[1] : throw new InvalidOperationException("MC63 M817二次确认返回字数不足");
         bool busy = (m816 & (1 << 1)) != 0;
-        Console.WriteLine($"│ [分流] 二次确认M817={(busy ? "有版" : "空闲")} rawM816=0x{m816:X4}");
-        if (busy) throw new InvalidOperationException("M817二次确认=有版, 禁止放料");
+        if (log)
+            Console.WriteLine($"│ [分流] 二次确认M817={(busy ? "有版" : "空闲")} rawM816=0x{m816:X4}");
+        return !busy;
     }
 
     /// <summary>
@@ -3747,7 +3773,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     /// <summary>Z下降公式: 台面Z - Round[(d/2/zFactor1)+(d/2/zFactor2)] — 用于取料/放料</summary>
     private int Pz(int z, double d) { return z - (int)Math.Round((d / 2.0 / _cfg.Grinding.ZFactor1) + (d / 2.0 / _cfg.Grinding.ZFactor2)); }
 
-    /// <summary>从数据库取工位XYZ坐标(含数据库偏移量)</summary>
+    /// <summary>读的是进程内内存字典，不是每次查库。(含数据库偏移量)</summary>   读的是进程内内存字典，不是每次查库。
     private bool TryCoords(string code, out int x, out int y, out int z) { x = y = z = 0; if (!_stationCoords.TryGetValue(code, out var r)) return false; x = (int)(r.X + r.XOffset); y = (int)(r.Y + r.YOffset); z = (int)(r.Z + r.ZOffset); return true; }
 
     /// <summary>从数据库取工位IP:端口</summary>
