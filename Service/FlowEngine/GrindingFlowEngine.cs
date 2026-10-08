@@ -1573,6 +1573,60 @@ public sealed class GrindingFlowEngine : IDisposable
     }
 
     /// <summary>
+    /// 异常自动作废：清该研磨机的 PLC 下发数据、清内存维护的工件数据并回空闲、清该设备相关的
+    /// 动作账本快照，只写日志。
+    /// <para>
+    /// 现场模型：异常了这块板会被人工<b>抽走</b>，设备侧随即变空，下一轮派发拿别的板。
+    /// 因此这里只清这台研磨机，<b>完全不碰中转架账本</b>。
+    /// </para>
+    /// 安全性：即使操作员还没来得及抽走板，下一轮取料前的 X11 残留检查
+    /// （上料 1773-1796 / 下料 2432-2456）会在第一步拒绝并暂停，不会叠料或碰撞。
+    /// <para>
+    /// 使用 <see cref="CancellationToken.None"/>：本方法在 finally 中执行，动作可能已被应急取消；
+    /// 若沿用流程 ct 会在此抛出 OperationCanceledException，掩盖真正的原始异常。
+    /// </para>
+    /// </summary>
+    private async Task ClearGrinderOnAbortAsync(GrinderContext grinder, bool isLoad)
+    {
+        string deviceLog;
+        try
+        {
+            if (grinder.Svc == null)
+            {
+                deviceLog = "研磨机服务未连接，未清PLC下发数据";
+            }
+            else
+            {
+                await grinder.Svc.ClearEmergencyRegistersAsync(CancellationToken.None);
+                deviceLog = "研磨机参数与上位机输出已清零";
+            }
+        }
+        catch (Exception ex)
+        {
+            deviceLog = $"设备侧清零失败: {ex.GetType().Name} - {ex.Message}；PLC下发数据可能部分残留，请人工核对";
+        }
+
+        grinder.State = GrinderState.Idle;
+        grinder.StateChangedAt = DateTime.UtcNow;
+        grinder.PendingWorkpiece = null;
+
+        // 清该设备相关的动作账本快照，避免异常监控继续挂"待人工确认"。
+        string scope = isLoad ? "研磨天车上料" : "研磨天车下料";
+        FlowActionSnapshot[] stale = FlowActionManualRegistry.Snapshot()
+            .Where(item => item.FlowScope == scope &&
+                           (item.Target == grinder.StationCode || item.Source == grinder.StationCode))
+            .ToArray();
+        foreach (FlowActionSnapshot snapshot in stale)
+            FlowActionManualRegistry.Remove(snapshot.OperationId);
+
+        _fastNextCycle = true;
+        Console.WriteLine(
+            $"│ [作废] {grinder.Name}{(isLoad ? "上料" : "下料")}异常：本轮已自动作废——" +
+            $"PLC下发数据已清、内存工件已清并回空闲、动作账本已清{stale.Length}条；{deviceLog}。" +
+            "请把本块板抽走后启动线路继续。");
+    }
+
+    /// <summary>
     /// 目标研磨机上料准备阶段（持件XY、加工参数/数据完成、目标微调）失败后的安全清理。
     /// 工件已经确认由研磨天车持有，故只清目标机参数/上位机输出；不得清Pending或回研磨FIFO。
     /// </summary>
@@ -2343,6 +2397,12 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         finally
         {
+            // 异常自动作废：这一轮没走到 action.Complete(Completed) 就清这台研磨机的
+            // PLC 下发数据与内存工件数据并回空闲。放在 finally 最前面，与两个流程的收尾保持一致。
+            // 中转架账本完全不碰。
+            if (action.Disposition != FlowActionDisposition.Completed)
+                await ClearGrinderOnAbortAsync(grinder, isLoad: true);
+
             ReleaseRecordedCraneLock($"{grinder.Name}上料finally", actionVersion); // ← 无论如何释放天车锁, 防止死锁
             FinishGrindingAction(actionVersion, completion);
         }
@@ -2835,7 +2895,7 @@ public sealed class GrindingFlowEngine : IDisposable
             grinder.PendingWorkpiece = placedOnUnloadRack && unloadRackNotified && unloadDoneNotified ? null : wp;
             OnSafetyAlarm?.Invoke($"研磨天车从{grinder.Name}下料时{timeout.Stage}运动超时。目标=({timeout.XTarget},{timeout.YTarget},{timeout.ZTarget})，" +
                 $"最后坐标={timeout.LastKnownStatus?.XPos}/{timeout.LastKnownStatus?.YPos}/{timeout.LastKnownStatus?.ZPos}，未到位轴={string.Join("/", timeout.UnreachedAxes)}。" +
-                "D4518停止指令已尝试发送；研磨引擎已暂停，工件状态未自动清除，禁止自动重试。请人工确认天车和工件位置。");
+                "D4518停止指令已尝试发送；研磨引擎已暂停。本方法的收尾会把本研磨机状态自动作废清空，请把本块板抽走后启动线路继续。");
         }
         catch (PressureStopException pEx)
         {
@@ -2866,7 +2926,8 @@ public sealed class GrindingFlowEngine : IDisposable
                 return;
             }
             _paused = true;
-            // 安全恢复: 不清PendingWorkpiece。根据物理位置保留等待人工确认, 避免成品在天车/下料架时软件放行新任务。
+            // 这里只按物理位置记录一个中间状态，供本 catch 内后续的证据上报与告警使用；
+            // 本方法的 finally 会统一把该研磨机状态自动作废清成空闲，所以这个记录不会长期保留。
             grinder.State = placedOnUnloadRack && unloadDoneNotified ? GrinderState.Idle
                 : (holdingWorkpiece || magnetOn || placedOnUnloadRack ? GrinderState.Unloading : GrinderState.WaitingForUnload);
             grinder.StateChangedAt = DateTime.UtcNow;
@@ -2921,6 +2982,11 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         finally
         {
+            // 异常自动作废：这一轮没走到 action.Complete(Completed) 就清这台研磨机的
+            // PLC 下发数据与内存工件数据并回空闲。中转架账本完全不碰。
+            if (action.Disposition != FlowActionDisposition.Completed)
+                await ClearGrinderOnAbortAsync(grinder, isLoad: false);
+
             ReleaseRecordedCraneLock($"{grinder.Name}下料finally", actionVersion);
             if (IsGrindingActionCurrent(actionVersion))
                 _fastNextCycle = true; // 下料完成, 通知主循环快速检查上料任务

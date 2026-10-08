@@ -2081,6 +2081,12 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         finally
         {
+            // 异常自动作废：只要这一轮没走到 action.Complete(Completed)，就清这台斜床的
+            // PLC 下发数据和内存工件数据并回空闲。放在 finally 最前面，让后面的告警文案
+            // 能反映"已自动作废"这个事实。中转架账本完全不碰。
+            if (action.Disposition != FlowActionDisposition.Completed)
+                await ClearSkewOnAbortAsync(bed, isLoad: true);
+
             if (operation.RequiresManualSafetyRecovery)
             {
                 // 超时已经暂停引擎；软件锁不承担长期现场安全隔离职责，动作退出即释放。
@@ -2091,7 +2097,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 bool m720Released = operation.TryRelease("M720", _lockM720);
                 string alarm = (pendingSafetyAlarm ?? operation.ManualSafetyHoldReason ?? "后天车运动超时") +
                     $" 本动作软件锁已释放(后天车={YN(rearReleased)} ZoneMT={YN(mtReleased)} ZoneTS={YN(tsReleased)} M817={YN(m817Released)} M720={YN(m720Released)})。" +
-                    "请先现场确认，再执行斜床应急恢复；恢复前不得直接启动引擎。";
+                    AbortClearInstruction;
                 Console.WriteLine($"│ [上料] ⚠ {alarm}");
                 OnRearCraneSafetyAlarm?.Invoke(alarm);
                 _fastNextCycle = true;
@@ -2197,7 +2203,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             bool safetyAlarmCallbackCompleted = false;
             if (pendingSafetyAlarm != null)
             {
-                pendingSafetyAlarm += $"。异常收尾：{lockAndRetreat}。禁止直接点击启动；请先人工处理现场，确认安全后执行斜床应急恢复。";
+                pendingSafetyAlarm += $"。异常收尾：{lockAndRetreat}。" + AbortClearInstruction;
                 Console.WriteLine($"│ [上料] ⚠ {pendingSafetyAlarm}");
                 Action<string>? safetyAlarmCallback = loadState.X11PickupFailed
                     ? OnRearCraneX11FinalSafetyAlarm
@@ -3372,6 +3378,12 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         finally
         {
+            // 异常自动作废：只要这一轮没走到 action.Complete(Completed)，就清这台斜床的
+            // PLC 下发数据和内存工件数据并回空闲。放在 finally 最前面，让后面的告警文案
+            // 能反映"已自动作废"这个事实。中转架账本完全不碰。
+            if (action.Disposition != FlowActionDisposition.Completed)
+                await ClearSkewOnAbortAsync(bed, isLoad: false);
+
             if (operation.RequiresManualSafetyRecovery)
             {
                 // 位置未知时禁止finally再移动，但软件锁随已暂停的动作退出而释放。
@@ -3382,7 +3394,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 bool m720Released = operation.TryRelease("M720", _lockM720);
                 string alarm = (pendingSafetyAlarm ?? operation.ManualSafetyHoldReason ?? "后天车运动超时") +
                     $" 本动作软件锁已释放(后天车={YN(rearReleased)} ZoneMT={YN(mtReleased)} ZoneTS={YN(tsReleased)} M817={YN(m817Released)} M720={YN(m720Released)})。" +
-                    "请先现场确认，再执行斜床应急恢复；恢复前不得直接启动引擎。";
+                    AbortClearInstruction;
                 Console.WriteLine($"│ [下料] ⚠ {alarm}");
                 OnRearCraneSafetyAlarm?.Invoke(alarm);
                 _fastNextCycle = true;
@@ -3450,7 +3462,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 string cleanupText = string.IsNullOrWhiteSpace(sharedCleanupText)
                     ? rearCleanupText
                     : $"{sharedCleanupText}；{rearCleanupText}";
-                pendingSafetyAlarm += $"。异常收尾：{cleanupText}。禁止直接点击启动；请先人工处理现场，确认安全后执行斜床应急恢复。";
+                pendingSafetyAlarm += $"。异常收尾：{cleanupText}。" + AbortClearInstruction;
                 Console.WriteLine($"│ [下料] ⚠ {pendingSafetyAlarm}");
                 OnRearCraneSafetyAlarm?.Invoke(pendingSafetyAlarm);
             }
@@ -3849,6 +3861,60 @@ public sealed class Line1RearFlowEngine : IDisposable
     /// 任一机械手未满足就一直轮询等待，无超时；状态读取失败或报警同样继续等待，
     /// 不暂停引擎、不移动后天车、保持持件和位置锁。
     /// </summary>
+    /// <summary>
+    /// 异常自动作废：清该斜床的 PLC 下发数据、清内存维护的工件数据并回空闲、清后天车任务牌、
+    /// 清该设备的动作账本快照，只写日志。
+    /// <para>
+    /// 现场模型：异常了这块板会被人工<b>抽走</b>，设备侧随即变空，下一轮派发拿别的板。
+    /// 因此这里只清这台斜床，<b>完全不碰中转架账本</b>——来源预约与来源冻结仍由既有入口处理。
+    /// </para>
+    /// 安全性：即使操作员还没来得及抽走板，下一轮取料前的 X11 残留检查
+    /// （DoLoad/DoUnload 开头的"取料前残留检查"）会在第一步拒绝并暂停，不会叠料或碰撞。
+    /// <para>
+    /// 使用 <see cref="CancellationToken.None"/>：本方法在 finally 中执行，而动作的 ct 可能已被
+    /// 应急取消；若沿用它会在此抛出 OperationCanceledException，掩盖真正的原始异常。
+    /// </para>
+    /// </summary>
+    private async Task ClearSkewOnAbortAsync(SkewCtx bed, bool isLoad)
+    {
+        string deviceLog;
+        try
+        {
+            deviceLog = await ClearSkewDeviceEmergencyRegistersAsync(bed, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            deviceLog = $"设备侧清零失败: {ex.GetType().Name} - {ex.Message}；PLC下发数据可能部分残留，请人工核对";
+        }
+
+        lock (_wpLock)
+        {
+            bed.Wp = null;
+            bed.St = SkewState.Idle;
+            bed.RqData = bed.RqLoad = bed.RqUnload = bed.Clamped = false;
+            bed.SignalFresh = false;
+            bed.CompletionExported = false;
+            bed.WpRecoveryNeeded = false;
+            bed.X11UnloadMissWarningShown = false;
+            Interlocked.Increment(ref bed.PollVersion);
+        }
+        ClearRearCraneTask();
+        string ledgerLog = isLoad
+            ? SettleManualRearLoadForEmergency(bed)
+            : SettleManualRearUnloadOnCarrierForEmergency(bed);
+        _fastNextCycle = true;
+
+        Console.WriteLine(
+            $"│ [作废] 1号线后天车{bed.Code}{(isLoad ? "上料" : "下料")}异常：本轮已自动作废——" +
+            $"PLC下发数据已清、内存工件已清并回空闲、任务牌已清；{ledgerLog}；{deviceLog}。" +
+            "请把本块板抽走后启动线路继续。");
+    }
+
+    /// <summary>异常自动作废时写给操作员的统一指引，替换原先要求人工走应急的口径。</summary>
+    private const string AbortClearInstruction =
+        "本轮已自动作废：斜床PLC下发数据与内存工件已清、斜床已回空闲、软件锁已释放。" +
+        "请把本块板抽走，确认斜床内无残留板后启动线路继续。";
+
     /// <summary>
     /// 后天车下料分流前确认本线已启动。判据是后端引擎自身的暂停位 <c>_paused</c>：
     /// 主页"暂停1号线"会同时暂停前端与后端引擎，因此它与页面按钮状态天然同步；
