@@ -24,7 +24,10 @@
 
 > **板在天车磁铁上时可以放心清零；板已经离开磁铁时不可以。**
 
-## 3. 三类必须保留的状态
+## 3. 必须保留的状态
+
+> **修正记录**：本规格初版列了"三类必须保留"，其中**来源冻结一类是错的**，已按第 3.2 节更正。
+> 现在只有一类必须保留。
 
 ### 3.1 已放到目标位、但通知未闭环 —— **保留**
 
@@ -43,13 +46,20 @@
 
 **因此：这一类不清。** 保留 `Unloading` + `PendingWorkpiece`，由人工确认架位后再处理。
 
-### 3.2 来源冻结（板可能仍在来源位）—— **保留**
+### 3.2 来源冻结 —— **解除冻结，但保留身份**（不是"保留状态"）
 
-`Line1RearFlowEngine.cs:1229` 原注释：
+**本节更正初版的错误结论。** 初版写"来源冻结快照必须保留"，依据是 `Line1RearFlowEngine.cs:1229` 的注释"X11未确认时工件仍可能在中转架"，并推断清掉会让新任务绑到旧板。**核实账本实现后确认这个推断是错的**：
 
-> 来源冻结快照必须保留：**X11未确认时工件仍可能在中转架**。
+- 工件身份存在 `_workpieces[rackCode]`，**不在预约里**；`TryReserve` 是从 `_workpieces` 取身份的（`TransferRackWorkpieceLedger.cs:59-78`）
+- `HoldForManualResolution` 只给预约打 `ManualResolution=true` 来阻挡 `TryReserve`（`:122-131`），**完全不动 `_workpieces`**
+- `TryResolveManualReservation(..., FlowActionManualResolution.StillAtSource, ...)` 移除预约后**在 `:186-187` 提前 return，保留 `_workpieces` 与到达顺序**；只有非 `StillAtSource` 的结论才在 `:189-190` 删身份
 
-**理由**：清掉来源预约会让下一趟任务绑到仍留在中转架上的旧板，**用错误的长度/直径参数加工实物**。这不是丢件，是把错误参数用到实物上。现有的斜床应急作废本身也不清它（`SettleManualRearLoadForEmergency` 只清持件/目标待交接，见 `Line1RearFlowEngine.cs:1225-1244`），由中转架自己的结案入口处理。
+**所以正确做法是：清零时用 `StillAtSource` 语义解除来源冻结** —— 预约解除、身份保留。下一轮 `TryReserve` 拿到的是**同一块板、同一个版号/长度/直径**，不会张冠李戴，也不需要人工结案。
+
+两条物理互锁同时兜底：
+
+- 中转架物理无板 → `RackHasPhysicalPlateSnapshot(rs)` 为假 → `DoLoad` 抛错走"等待人工/下轮确认"，不取料（`Line1RearFlowEngine.cs:1593-1594`）
+- 板其实已被吸走、只是读数未知 → 下一轮取料前的 X11 残留检查直接拒绝（`Line1RearFlowEngine.cs:1643-1665`）
 
 ### 3.3 自动重试路径 —— **保留**
 
@@ -57,8 +67,9 @@
 
 ## 4. 清零条件
 
-> **异常终止（非 `Completed`、非 `WaitRetry`）&& 工件已离开来源位 && 尚未交接到目标位**
-> 等价于：**板此刻只可能在天车/机械手磁铁上**
+> **异常终止（非 `Completed`、非 `WaitRetry`）&& 尚未交接到目标位**
+
+来源侧不再设条件：无论板还在中转架、已被吸到天车、还是状态未知，都用 `StillAtSource` 语义解除来源冻结并保留身份（第 3.2 节），两条物理互锁各自兜底。
 
 成功判据：每条流程都恰好只有一处 `action.Complete(...)`（`Line1RearFlowEngine.cs:1914`/`:3209`、`Line2RearFlowEngine.cs:1877`/`:3056`、`GrindingFlowEngine.cs:2213`/`:2821`、`BalancingFlowEngine.cs:1687`/`:2385`、前端 4 处），所以 `action.Disposition == Completed` 即成功。
 
@@ -83,7 +94,7 @@
 | 清内存工件数据 | `bed.Wp = null` | `grinder.PendingWorkpiece = null` |
 | 回空闲 | `bed.St = SkewState.Idle` + 复位 `RqData/RqLoad/RqUnload/Clamped/SignalFresh/CompletionExported/WpRecoveryNeeded/X11UnloadMissWarningShown` + `PollVersion++` | `grinder.State = GrinderState.Idle` + `StateChangedAt` |
 | 清任务牌 | `ClearRearCraneTask()` | —（研磨用 `grinder` 自身状态展示） |
-| 清动作账本快照 | `SettleManualRearLoadForEmergency(bed)` / `SettleManualRearUnloadOnCarrierForEmergency(bed)`（**保留来源冻结**） | 对应 scope 的持件/目标待交接快照 |
+| 清动作账本快照与来源冻结 | `SettleManualRearLoadForEmergency(bed)` / `SettleManualRearUnloadOnCarrierForEmergency(bed)` 清持件与目标待交接快照；来源预约另用 `TryResolveManualReservation(rs, actionId, FlowActionManualResolution.StillAtSource, ...)` 解除冻结并**保留身份** | 对应 scope 的持件/目标待交接快照 |
 | 告知 | `Console.WriteLine` + 既有 `OnSafetyAlarm` / `OnRearCraneSafetyAlarm` 弹窗，文案说明"本轮已自动作废" | 同 |
 
 ### 5.1 必须用 `CancellationToken.None`
@@ -92,7 +103,7 @@ helper 在 `finally` 中执行，而异常路径上 `ct` 可能已被 `CancelAnd
 
 ### 5.2 清零后不再要求人工结案
 
-按现场要求，清零同时移除该动作的账本快照，异常监控不再挂"待人工确认"，避免出现"按钮点了没反应"。**唯一例外是 3.2 的来源冻结**，它仍需要走中转架自己的结案入口。
+按现场要求，清零同时移除该动作的账本快照、并用 `StillAtSource` 语义解除来源冻结（身份保留），异常监控不再挂"待人工确认"，避免出现"按钮点了没反应"。**本流程不需要任何人工结案**；来源冻结也是如此——解除后下一轮重取的是同一块板。
 
 ## 6. 组件与改动清单
 
