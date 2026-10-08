@@ -3251,6 +3251,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 "引擎已暂停，本动作软件锁将在收尾后释放；请人工确认天车、磁铁和工件位置。异常：" + ex.Message;
             Console.WriteLine($"│ [下料] ⚠ {pendingSafetyAlarm}");
         }
+        //下料时候线路暂停异常
         catch (LineNotStartedTimeoutException ex)
         {
             // 线路未启动超时：本趟分流作废。
