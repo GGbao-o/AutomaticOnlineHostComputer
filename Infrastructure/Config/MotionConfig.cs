@@ -276,6 +276,12 @@ public sealed class MotionConfig
         public int PollIntervalMs { get; set; } = 500;
         /// <summary>研磨机握手超时(ms)，等待请求上料/锁紧/松开等信号</summary>
         public int HandshakeTimeoutMs { get; set; } = 300_000;
+        /// <summary>
+        /// 后天车下料分流前，等待本线启动（后端引擎退出暂停）的上限(ms)。
+        /// 等待点在拿两把分流锁之前、XY移动之前；期间保持持件与安全Z，不移动、不退磁、不占分流锁。
+        /// 超时则作废本趟分流：清该斜床 PLC 下发数据、内存回空闲、释放后天车锁并暂停本线告警。
+        /// </summary>
+        public int LineStartWaitTimeoutMs { get; set; } = 120_000;
         /// <summary>X11有版检测稳定延时(ms)，充磁后等待磁铁吸稳再读取</summary>
         public int X11StableDelayMs { get; set; } = 3000;
         /// <summary>ST709取料后：启动Z回安全高度后，延时多久写M731释放传送带（ms）。</summary>

@@ -2228,6 +2228,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     Console.WriteLine("[Line1Front] [机械手1] 工件已安全放在货叉且门闩已开，保持 _currentWp 让 ForkBoringPhase 接管");
                 }
             }
+            //板长差距过大
             else if (ex is PlateLengthMismatchException lengthMismatch)
             {
                 // 板长校验不通过：D100 实测板长与任务板长偏差超过容差。

@@ -2833,6 +2833,13 @@ public sealed class Line1RearFlowEngine : IDisposable
             bool crane2St010PlacementStarted = false;
             try
             {
+                // ── 分流前确认本线已启动 ──
+                // 必须放在拿 M817/M720 两把分流锁之前：等待期间只占着后天车锁，不会为了一件
+                // 与本线启动无关的事去阻塞共享这两把锁的机械手2/3 与研磨天车。
+                // 此时天车停在斜床上方安全Z并保持持件、未退磁、未进分流区，超时可安全作废本趟分流。
+                // 必须在 try 内：若抛出而逃出本 try，外层 finally 不执行，后天车锁将无法释放。
+                await EnsureLineRunningBeforeDivertAsync(bed, ct);
+
                 //需要动平衡
                 if (needsBalancing)
                 {
@@ -3243,6 +3250,58 @@ public sealed class Line1RearFlowEngine : IDisposable
             pendingSafetyAlarm = $"1号线后天车从{bed.Code}下料时触发下压保护，Z未确认到位。" +
                 "引擎已暂停，本动作软件锁将在收尾后释放；请人工确认天车、磁铁和工件位置。异常：" + ex.Message;
             Console.WriteLine($"│ [下料] ⚠ {pendingSafetyAlarm}");
+        }
+        catch (LineNotStartedTimeoutException ex)
+        {
+            // 线路未启动超时：本趟分流作废。
+            // 抛点固定在拿 M817/M720 之前、任何 XY 移动与退磁之前，所以天车仍停在斜床上方安全Z、
+            // 保持持件，两把分流锁根本没拿。因此这里只做三件事：
+            //   ① 清该斜床 PLC 下发数据；② 内存状态回空闲；③ 暂停本线并告警。
+            // 后天车锁由外层 finally 释放，本分支不需要任何手工释放（拿锁前的等待也不存在锁泄漏）。
+            // 不设置 pendingSafetyAlarm：外层 finally 会在其非空时追加一条要求先走斜床应急的口径，
+            // 而本场景斜床已回空闲，操作员应当直接启动线路继续，故由本分支自己发一条告警。
+            _paused = true;
+            action.MarkCommandResponseUnknown(ex.Message);
+            action.PauseForManualResolution(ex.Message);
+            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
+                operationalSite with { ActionStage = $"{action.Step}：分流前等待本线启动超时" }, operationalTracker, ex,
+                "后天车在分流区外等待本线启动超时；本轮分流已作废，动作账本已暂停等待人工确认。", true,
+                holdingWorkpiece: holdingWorkpiece, actionSnapshot: action.Snapshot());
+
+            // ① 清该斜床 PLC 下发数据（复用斜床应急作废的同一方法，保证清除范围一致）
+            string deviceClearLog;
+            try
+            {
+                deviceClearLog = await ClearSkewDeviceEmergencyRegistersAsync(bed, ct);
+            }
+            catch (Exception clearEx)
+            {
+                deviceClearLog = $"设备侧清零失败: {clearEx.GetType().Name} - {clearEx.Message}；PLC下发数据可能部分残留，请人工核对";
+            }
+
+            // ② 内存状态回空闲（与 EmergencyClearSkewBedAsync 的清除清单逐项一致）
+            lock (_wpLock)
+            {
+                bed.Wp = null;
+                bed.St = SkewState.Idle;
+                bed.RqData = bed.RqLoad = bed.RqUnload = bed.Clamped = false;
+                bed.SignalFresh = false;
+                bed.CompletionExported = false;
+                bed.WpRecoveryNeeded = false;
+                bed.X11UnloadMissWarningShown = false;
+                Interlocked.Increment(ref bed.PollVersion);
+            }
+            ClearRearCraneTask();
+
+            // ③ 告警：说清"本轮已作废、天车仍持件、下一步做什么"，不要误导操作员去走人工确认的应急路径
+            bool deviceCleared = !deviceClearLog.StartsWith("设备侧清零失败", StringComparison.Ordinal);
+            string abortAlarm =
+                $"1号线后天车在{bed.Code}下料分流前等待本线启动超时（{ex.TimeoutMs / 1000}秒），天车保持持件与安全Z，" +
+                $"未进入分流区、未退磁。本轮分流已作废：{bed.Code} PLC下发数据{(deviceCleared ? "已清除" : "清除失败")}、" +
+                "内存状态已回空闲、后天车锁由收尾释放。" +
+                "请人工放磁取下工件并把天车移回安全位置，然后启动线路继续。";
+            Console.WriteLine($"│ [下料] ⚠ {abortAlarm}（{deviceClearLog}）");
+            OnRearCraneSafetyAlarm?.Invoke(abortAlarm);
         }
         catch (Exception ex)
         {
@@ -3789,6 +3848,33 @@ public sealed class Line1RearFlowEngine : IDisposable
     /// 任一机械手未满足就一直轮询等待，无超时；状态读取失败或报警同样继续等待，
     /// 不暂停引擎、不移动后天车、保持持件和位置锁。
     /// </summary>
+    /// <summary>
+    /// 后天车下料分流前确认本线已启动。判据是后端引擎自身的暂停位 <c>_paused</c>：
+    /// 主页"暂停1号线"会同时暂停前端与后端引擎，因此它与页面按钮状态天然同步；
+    /// 引擎因自身异常自动暂停时同样会拦住。
+    /// <para>
+    /// 等待期间不移动天车、不退磁、不释放任何锁，保持持件与安全 Z。
+    /// 超过 <c>grinding.lineStartWaitTimeoutMs</c> 仍未启动则抛
+    /// <see cref="LineNotStartedTimeoutException"/>，由专用 catch 分支作废本趟分流。
+    /// </para>
+    /// </summary>
+    private async Task EnsureLineRunningBeforeDivertAsync(SkewCtx bed, CancellationToken ct)
+    {
+        if (!_paused) return;
+
+        int timeoutMs = _cfg.Grinding.LineStartWaitTimeoutMs;
+        Console.WriteLine($"│ [分流] ⏸ 本线未启动，{bed.Wp?.IdentityText ?? "当前工件"} 保持持件与安全Z在分流区外等待" +
+            $"（上限{timeoutMs / 1000}秒）...");
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (_paused)
+        {
+            if (waited.ElapsedMilliseconds >= timeoutMs)
+                throw new LineNotStartedTimeoutException("1号线", bed.Code, timeoutMs);
+            await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
+        }
+        Console.WriteLine($"│ [分流] ▶ 本线已启动（等待{waited.ElapsedMilliseconds}ms），继续进入分流区");
+    }
+
     private async Task WaitManipulatorsClearOfRackAsync(CancellationToken ct)
     {
         int m2Below = _cfg.Balancing.M2ReleaseLocksBelowY;

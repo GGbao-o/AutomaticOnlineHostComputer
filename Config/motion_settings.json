@@ -381,6 +381,7 @@
     "workpieceDisplayIp": "192.168.2.111",
     "pollIntervalMs": 500,
     "handshakeTimeoutMs": 120000,
+    "lineStartWaitTimeoutMs": 120000,
     "x11StableDelayMs": 500,
     "m731NotifyDelayMs": 2000,
     "m721NotifyDelayMs": 2000,
