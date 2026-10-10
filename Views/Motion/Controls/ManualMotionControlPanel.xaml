@@ -94,6 +94,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Border
@@ -110,13 +111,72 @@
                         <TextBlock
                             Margin="0,3,0,0"
                             Foreground="#B8C4D1"
-                            Text="手动运动控制共用主页面 ManualControl，不新建设备连接，避免两套状态互相抢占。" />
+                            Text="选择设备后手动发送指令，动作结果以设备反馈为准。" />
                     </StackPanel>
                 </Border>
 
+                <GroupBox
+                    x:Name="ForkManualGroup"
+                    Grid.Row="1"
+                    Header="货叉手动操作">
+                    <StackPanel Margin="8">
+                        <WrapPanel IsEnabled="{Binding ForkManualControl.CanOperate}">
+                            <TextBlock Margin="0,0,8,0" VerticalAlignment="Center" Text="选择货叉" />
+                            <ComboBox
+                                x:Name="ForkLineSelector"
+                                Width="210"
+                                Margin="0,0,8,0"
+                                VerticalAlignment="Center"
+                                DisplayMemberPath="DisplayName"
+                                ItemsSource="{Binding ForkManualControl.LineItems}"
+                                SelectedItem="{Binding ForkManualControl.SelectedLine, Mode=TwoWay}" />
+                            <Button Command="{Binding ForkManualControl.RefreshStatusCommand}" Content="刷新状态" />
+                            <TextBlock
+                                Margin="10,0,0,0"
+                                VerticalAlignment="Center"
+                                FontWeight="Normal"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text="{Binding ForkManualControl.ConnectionStatus}" />
+                        </WrapPanel>
+                        <WrapPanel Margin="-3,8,0,0" IsEnabled="{Binding ForkManualControl.CanOperate}">
+                            <Button
+                                Command="{Binding ForkManualControl.GoStandbyCommand}"
+                                Content="回待机位"
+                                ToolTip="M911：回机械手放料待机位" />
+                            <Button
+                                Command="{Binding ForkManualControl.FeedToBoringCommand}"
+                                Content="双头镗送料并回待机"
+                                ToolTip="M912：送料后由PLC自动回待机位" />
+                            <Button
+                                Command="{Binding ForkManualControl.PickFromBoringCommand}"
+                                Content="双头镗取料并到 Pos3"
+                                ToolTip="M913：取料后到天车取料位" />
+                            <Button
+                                Command="{Binding ForkManualControl.StandbyToPos3Command}"
+                                Content="待机位直接到 Pos3"
+                                ToolTip="M914：从待机位直接到Pos3" />
+                        </WrapPanel>
+                        <WrapPanel Margin="0,10,0,0" TextElement.FontWeight="Normal">
+                            <TextBlock Margin="0,0,5,0" Text="货叉有板：" />
+                            <TextBlock Margin="0,0,24,0" Text="{Binding ForkManualControl.HasPlateText}" />
+                            <TextBlock Margin="0,0,5,0" Text="待机位：" />
+                            <TextBlock Margin="0,0,24,0" Text="{Binding ForkManualControl.AtStandbyPosText}" />
+                            <TextBlock Margin="0,0,5,0" Text="Pos3：" />
+                            <TextBlock Margin="0,0,24,0" Text="{Binding ForkManualControl.AtPos3Text}" />
+                            <TextBlock Foreground="{StaticResource TextMutedBrush}" Text="{Binding ForkManualControl.RefreshTimeText}" />
+                        </WrapPanel>
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            FontWeight="Normal"
+                            Foreground="{StaticResource TextMutedBrush}"
+                            Text="{Binding ForkManualControl.LastOperationResult}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </GroupBox>
+
                 <!--  设备选择：只切换当前手动控制对象，不创建新的连接实例。  -->
                 <GroupBox
-                    Grid.Row="1"
+                    Grid.Row="2"
                     Header="设备选择">
                     <Grid Margin="8">
                         <Grid.ColumnDefinitions>
@@ -311,7 +371,7 @@
                     </Grid>
                 </GroupBox>
 
-                <Grid Grid.Row="2" Margin="0,0,0,10">
+                <Grid Grid.Row="3" Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="12" />
@@ -413,7 +473,7 @@
 
                 <!--  绝对运动参数：只应用到当前选中设备，不写 motion_settings.json。  -->
                 <GroupBox
-                    Grid.Row="3"
+                    Grid.Row="4"
                     Header="绝对运动参数">
                     <Grid Margin="8">
                         <Grid.ColumnDefinitions>
@@ -520,7 +580,7 @@
 
                 <!--  设备级对刀开关：只影响该斜床下一次写入加工参数时的模式码=6, 不修改任务工艺。  -->
                 <GroupBox
-                    Grid.Row="4"
+                    Grid.Row="5"
                     Header="斜床对刀模式">
                     <StackPanel Margin="8">
                         <TextBlock
@@ -546,7 +606,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox Grid.Row="5" Header="设备操作">
+                <GroupBox Grid.Row="6" Header="设备操作">
                     <UniformGrid
                         Margin="8"
                         Columns="4"

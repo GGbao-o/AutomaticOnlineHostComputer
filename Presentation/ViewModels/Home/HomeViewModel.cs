@@ -232,6 +232,9 @@ public sealed class HomeViewModel : ObservableObject
         CraneGL = new CraneCardViewModel(5, _craneCache);
 
         ManualControl = new CraneManualControlViewModel(_craneCache, _manipulatorCache);
+        ForkManualControl = new ForkManualControlViewModel();
+        if (Application.Current != null)
+            Application.Current.Exit += (_, _) => ForkManualControl.Dispose();
 
         Manipulator1 = new ManipulatorCardViewModel(1, _manipulatorCache);
         Manipulator2 = new ManipulatorCardViewModel(2, _manipulatorCache);
@@ -285,6 +288,7 @@ public sealed class HomeViewModel : ObservableObject
     public CraneCardViewModel CraneGL { get; }
 
     public CraneManualControlViewModel ManualControl { get; }
+    public ForkManualControlViewModel ForkManualControl { get; }
 
     /// <summary>10台斜床的设备级对刀开关, 勾选后只覆盖该斜床后续写入的加工模式。</summary>
     public ObservableCollection<SkewBedToolSettingRow> SkewBedToolSettingRows { get; }
@@ -2595,6 +2599,7 @@ public sealed class HomeViewModel : ObservableObject
         _manipulatorCache.LoadFromMachineRows(machineRows);
         LogDuplicateMotionDeviceMappings(machineRows);
         ManualControl.NotifyMappingsUpdated();
+        ForkManualControl.LoadMappings(machineRows);
 
         // ── 装载工位坐标到引擎 ──────────────────────────────────────
         _flowEngine.LoadStationCoords(machineRows);
