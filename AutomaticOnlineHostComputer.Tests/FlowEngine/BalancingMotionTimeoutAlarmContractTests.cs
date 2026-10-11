@@ -2,6 +2,10 @@
 
 namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
+/// <remarks>
+/// 核对M2/M3运动失败进入严重暂停/告警路径，及后端接口保持一致。
+/// 动平衡没有机床Idle枚举；本趟Busy、显示和在途按动作版本结束，实际机械手位置另行确认。
+/// </remarks>
 public sealed class BalancingMotionTimeoutAlarmContractTests
 {
     [Fact]

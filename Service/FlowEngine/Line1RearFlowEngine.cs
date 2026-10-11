@@ -1415,6 +1415,8 @@ public sealed class Line1RearFlowEngine : IDisposable
 
     private static EmergencyActionLease BeginSkewOperation(SkewCtx bed, string name, CancellationToken parent, bool holdsTransferRack)
     {
+        // 每轮新建有效租约并递增床的动作版本；上轮异常暂停不会使新租约失效。
+        // IsValid只由应急取消使其失效，_paused是另一层派发门，不能混为同一个判断。
         var operation = new EmergencyActionLease(Interlocked.Increment(ref bed.NextOperationVersion), name, parent);
         operation.MarkHeld("RearCrane");
         if (holdsTransferRack) operation.MarkHeld("TransferRack");
@@ -1694,6 +1696,9 @@ public sealed class Line1RearFlowEngine : IDisposable
             Console.WriteLine($"│ [取料] step3: Z下降到{pz + _oz}");
             action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, 0), "来源位XY微调完成");
             loadState.ZMayBeDown = true;
+            // 来源中转架此时只是预约，尚未消费。共用组件先读放磁反馈再下降，
+            // 在实际Z0/+5/+10探测，充磁后X11=1才算持件；原台面/直径/Z偏移只用于首次目标。
+            // 每次取板IO前复核本动作租约，应急失效后不得继续运动或充磁。
             var pickup = await PickupProbeHelper.PickAsync(cr, pz + _oz, pickupStableDelayMs,
                 action, operationalTracker, ct, validateAction: operation.ThrowIfInvalid);
             int currentZ = pickup.ActualZ;
@@ -1775,6 +1780,8 @@ public sealed class Line1RearFlowEngine : IDisposable
         {
             Console.WriteLine($"│ [上料] ⚠ {bed.Code} 当前动作已被应急取消, 不再继续写CNC/天车动作");
         }
+        // 应急可能先取消，SDK稍后仍返回运动超时而非取消异常；必须先拒绝失效旧动作。
+        // 普通故障只置_paused，不使operation失效，所以有效主动作仍正常进入作废收尾。
         catch (CraneMotionTimeoutException ex)
         {
             if (!operation.IsValid) return;
@@ -1824,6 +1831,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             // 普通取消、失效动作和已完成任务不套用这次作废。
             if (discardOnFailure && operation.IsValid && ReferenceEquals(bed.ActiveOperation, operation))
             {
+                // 同时校验本架位预约动作、到达代次和完整身份，只删本次未消费的来源。
+                // 已取走或架位已有新板则不删；仅当前ActiveOperation有权清本床PLC/内存。
                 bool sourceDiscarded = _rackLedger.DiscardReservedWorkpiece(rs, actionId, rackArrivalSeq, wp);
                 await ClearSkewOnAbortAsync(bed, isLoad: true);
                 FlowAlarmPresentationContext.RecordCacheState(sourceDiscarded
@@ -1903,6 +1912,9 @@ public sealed class Line1RearFlowEngine : IDisposable
                     sharedLocked = false;
                     sharedCleanupText += "；ZoneTS已释放";
 
+                    // 此分支位于主要作废检查之后：若主动作已Completed而空载退出失败，
+                    // 这里只暂停及报警，不能认为它重新清了Machining/Wp。
+                    // 下方现有统一提示仍可能声称已作废，现场须以实际收尾字段和机床工件为准。
                     if (!retreatSucceeded && pendingSafetyAlarm == null)
                     {
                         _paused = true;
@@ -2293,6 +2305,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             // 从发送Z下降命令起，异常finally不能再假定Z位于安全高度。
             // 即使运动调用报错，也可能是PLC已执行下降而上位机没有收到响应。
             zMayBeDown = true;
+            // 斜床下料同样先确认已放磁，按原zDown下降并探测，再充磁后独立确认持件。
+            // 未确认持件不开始原下料交接；严重失败由本动作catch作废本床，已移交下游的数据不回滚。
             var pickup = await PickupProbeHelper.PickAsync(cr, zDown, pickupStableDelayMs,
                 action, operationalTracker, ct, validateAction: operation.ThrowIfInvalid);
             int unlz = pickup.ActualZ;
@@ -2770,6 +2784,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         {
             Console.WriteLine($"│ [下料] ⚠ {bed.Code} 当前动作已被应急取消, 不再继续写CNC/天车动作");
         }
+        // 先拦住应急失效后的迟到超时，避免旧任务重新登记人工记录或写回本床工件。
         catch (CraneMotionTimeoutException ex)
         {
             if (!operation.IsValid) return;
@@ -2794,6 +2809,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 "引擎已暂停；本板软件任务将在收尾作废，现场位置须人工确认，本动作软件锁将在收尾后释放，禁止自动重试。";
             Console.WriteLine($"│ [下料] ⚠ {pendingSafetyAlarm}");
         }
+        // 下压保护也可能晚于应急取消返回；当前有效动作暂停作废，失效动作交给应急流程收尾。
         catch (PressureStopException ex)
         {
             if (!operation.IsValid) return;
@@ -2817,6 +2833,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             Console.WriteLine($"│ [下料] ⚠ {pendingSafetyAlarm}");
         }
         //下料时候线路暂停异常
+        // 仅处理仍有效的本轮分流等待超时，不对已应急失效的旧床执行清零或状态写回。
         catch (LineNotStartedTimeoutException ex)
         {
             if (!operation.IsValid) return;
@@ -2896,6 +2913,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             // 能反映"已自动作废"这个事实。中转架账本完全不碰。
             if (discardOnFailure && operation.IsValid && ReferenceEquals(bed.ActiveOperation, operation))
             {
+                // 下料不清中转架来源或成功交付的动平衡/研磨缓存，只作废本床与本趟动作身份。
                 await ClearSkewOnAbortAsync(bed, isLoad: false);
                 action.Discard("异常本板已作废，设备内存Idle，旧人工续搬入口删除");
             }
@@ -3392,6 +3410,9 @@ public sealed class Line1RearFlowEngine : IDisposable
     /// </summary>
     private async Task ClearSkewOnAbortAsync(SkewCtx bed, bool isLoad)
     {
+        // 调用者已经验证严重失败、本轮租约及床归属；此方法不接管取消判断或其他床的任务。
+        // 即使PLC清理失败，仍清本床软件工件和请求快照并回Idle，失败原因显示为可能残留。
+        // 不写机床“请求数据=1”，不自动移板/退磁/回安全位；软件Idle不能作为现场空床证明。
         string deviceLog;
         try
         {

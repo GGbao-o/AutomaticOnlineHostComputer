@@ -1,6 +1,10 @@
 ﻿namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
 /// <summary>前天车目标待交接只能补中转架缓存，绝不能清前端当前板或队列。</summary>
+/// <remarks>
+/// 前天车失败只结束本趟队列/任务牌；下一板可能已在货叉或双头镗，不能清整个前端周期。
+/// 已成功放中转架并交付下游后，空载回位异常仍要保护下游工件，不能回队重复制造。
+/// </remarks>
 public sealed class FrontCraneTargetSettlementContractTests
 {
     [Theory]

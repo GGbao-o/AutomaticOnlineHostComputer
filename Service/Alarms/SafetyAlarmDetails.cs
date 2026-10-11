@@ -2,6 +2,11 @@ namespace AutomaticOnlineHostComputer.Service.Alarms;
 
 internal sealed record AlarmWorkpiece(string PlateNo, string Sequence, double Length, double Diameter, int BoreType);
 
+/// <summary>
+/// 单次故障的展示快照：FailureAction/Workpiece是失败时证据，Cleanup字段是随后实际收尾结果。
+/// ManipulatorNo有值时表示机械手连接，不能按同号天车采样；为空时保持原天车路径。
+/// 这个记录只供弹窗读取，不是生产续搬任务，也不通过修改它恢复引擎或清设备。
+/// </summary>
 internal sealed record SafetyAlarmDetails(
     string ActionId, string Scope, int CraneNo, string Operation, DateTime OccurredAtUtc,
     AlarmWorkpiece? Workpiece, FlowActionSnapshot? FailureAction, string Reason,

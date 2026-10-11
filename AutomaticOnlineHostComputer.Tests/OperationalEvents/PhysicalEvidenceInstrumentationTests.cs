@@ -4,6 +4,10 @@ using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Tests.OperationalEvents;
 
+/// <remarks>
+/// 验证X11有效性、充磁、放料等物理证据的独立语义，尤其充磁前X11=1不能自动标成已持件。
+/// 监控失败不能改变业务决策；测试中的证据确认只反映已记录的调用事实，不替代现场传感器。
+/// </remarks>
 public sealed class PhysicalEvidenceInstrumentationTests
 {
     private static readonly IReadOnlyDictionary<string, (int MagnetOn, int X11, int MagnetOff)> Baseline =

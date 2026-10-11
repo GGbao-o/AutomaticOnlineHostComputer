@@ -183,6 +183,8 @@ public sealed class GrindingFlowEngine : IDisposable
     private int BeginGrindingAction(CancellationTokenSource cts, TaskCompletionSource<bool> completion,
         string action, string stationCode)
     {
+        // 每次成功派发才递增动作版本；当前catch/finally仅能操作这个版本的机床和天车锁。
+        // 普通Pause/Resume只改_paused，不递增版本；应急取消旧动作才额外使旧版本失效。
         lock (_emergencyLock)
         {
             _craneLockHeldByFlow = true;
@@ -432,7 +434,11 @@ public sealed class GrindingFlowEngine : IDisposable
         Console.WriteLine($"[GrindingEngine] ↩ 工件放回缓存 {wp.IdentityText} d={wp.Diameter}  队列长度={CachedCount}");
     }
 
-    /// <summary>异常暂停作废本板时，仅删其完整身份的FIFO残留，不删除下一块队头。</summary>
+    /// <summary>
+    /// 上料严重异常暂停时，仅按完整板号/序号删除本板FIFO及显示列表残留，不重新入队。
+    /// 当前板通常已在派发时出队，清理残留是防止旧身份还在等待重试，不是直接删除现有队头。
+    /// 后续任务、同板号不同序号以及已交接下游的数据保留；身份不完整时不匹配删除。
+    /// </summary>
     private void DiscardGrindingSourceWorkpiece(WorkpieceCache wp)
     {
         int removed = 0;
@@ -918,6 +924,8 @@ public sealed class GrindingFlowEngine : IDisposable
                 foreach (var g in _grinders)
                 {
                     TimeSpan stateTimeout = GetStateTimeout(g.State);
+                    // 这是后台状态观察，不是已分配动作的严重catch；暂停仅防止新派发。
+                    // 不清Pending/PLC、不强制Idle，不能将这个弹窗套用为“本板已经自动作废”。
                     if (stateTimeout > TimeSpan.Zero && DateTime.UtcNow - g.StateChangedAt > stateTimeout)
                     {
                         Console.WriteLine($"[GrindingEngine] ⚠ [{g.Name}] 状态={g.State} 超过安全观察时间 {stateTimeout.TotalMinutes:F0}分钟，暂停等待人工确认");
@@ -1134,6 +1142,8 @@ public sealed class GrindingFlowEngine : IDisposable
             int maxFifoCount = Math.Max(1, _cfg.Grinding.MaxFifoCount);
             int cachedCount = CachedCount;
             //判断缓存数量是否>配置文件设置的数量最大值 现在目前是2 如果大于2说明有问题
+            // 超限发生在出队前，没有本次目标机/取板动作；保留所有FIFO身份供人工核对实物。
+            // 此弹窗不会自动丢弃某个队头，恢复前仍须按实际来源处理，避免错配下一块实体板。
             if (cachedCount > maxFifoCount)
             {
                 _paused = true;
@@ -1596,14 +1606,13 @@ public sealed class GrindingFlowEngine : IDisposable
     }
 
     /// <summary>
-    /// 异常自动作废：清该研磨机的 PLC 下发数据、清内存维护的工件数据并回空闲、清该设备相关的
-    /// 动作账本快照，只写日志。
+    /// 严重动作失败的设备收尾：尝试清本机PLC下发参数和输出，清PendingWorkpiece并回Idle。
+    /// 调用方先核对本次动作版本，并负责本板来源作废、动作结案和锁释放；本方法不删除其他机台任务。
     /// <para>
-    /// 现场模型：异常了这块板会被人工<b>抽走</b>，设备侧随即变空，下一轮派发拿别的板。
-    /// 因此这里只清这台研磨机，<b>完全不碰中转架账本</b>。
+    /// 现场恢复前须由人工移走失败板、确认天车安全及实际放磁，并核对机床请求状态。
+    /// 软件清理不是实体设备复位；PLC写失败时仍清内存，但记录可能残留，不能当作清零已确认。
     /// </para>
-    /// 安全性：即使操作员还没来得及抽走板，下一轮取料前的 X11 残留检查
-    /// （上料 1773-1796 / 下料 2432-2456）会在第一步拒绝并暂停，不会叠料或碰撞。
+    /// X11只能反映当前传感器检测，不能证明研磨机或料架等承载面已空；不能用残留检查代替人工移板。
     /// <para>
     /// 使用独立10秒清理令牌：本方法在 finally 中执行，动作可能已被应急取消；
     /// 若沿用流程 ct 会在此抛出 OperationCanceledException，掩盖真正的原始异常。
@@ -1611,6 +1620,8 @@ public sealed class GrindingFlowEngine : IDisposable
     /// </summary>
     private async Task ClearGrinderOnAbortAsync(GrinderContext grinder, bool isLoad)
     {
+        // 独立10秒清理令牌与原动作令牌分离；实际等待写任务退出再继续锁释放。
+        // 不写请求数据=1，不回滚MC65 M731或MC64 M721等已经成功交接的通知。
         string deviceLog;
         try
         {
@@ -1927,6 +1938,9 @@ public sealed class GrindingFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), 0), "ST709取料前微调成功返回");
             int pickupTargetZ = ApplyOffsetZ(pickupZ);
+            // pickupTargetZ只在这里应用台面/直径/Z偏移；组件先只读X6/X7确认放磁，再首次下降。
+            // 来源X11探测仍属ST709；直到充磁后独立X11=1才返回持件成功，随后执行安全回升和M731规则。
+            // 未充磁的探测/通信/微调失败同样属于本次动作严重失败，不能因magnetOn=false回FIFO。
             var pickup = await PickupProbeHelper.PickAsync(crane, pickupTargetZ, pickupStableDelayMs,
                 action, operationalTracker, ct,
                 validateAction: () => { if (!IsGrindingActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
@@ -2191,6 +2205,8 @@ public sealed class GrindingFlowEngine : IDisposable
         {
             // 普通取消保留来源；应急失效动作由应急流程结案。
         }
+        // 入口先检查动作版本，避免应急取消后SDK迟到报错又登记旧人工任务或重新冻结故障。
+        // 单纯异常暂停不改版本，当前有效动作继续按严重失败清本机、作废本板。
         catch (CraneMotionTimeoutException timeout)
         {
             if (!IsGrindingActionCurrent(actionVersion)) return;
@@ -2211,6 +2227,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 $"最后坐标={timeout.LastKnownStatus?.XPos}/{timeout.LastKnownStatus?.YPos}/{timeout.LastKnownStatus?.ZPos}，未到位轴={string.Join("/", timeout.UnreachedAxes)}。" +
                 "D4518停止指令已尝试发送；研磨引擎已暂停，工件未回FIFO，禁止自动重试。请人工确认天车和工件位置。");
         }
+        // 下压保护也先排除失效旧动作，再留下现场证据并由有效版本finally作废。
         catch (PressureStopException pEx)
         {
             if (!IsGrindingActionCurrent(actionVersion)) return;
@@ -2263,6 +2280,8 @@ public sealed class GrindingFlowEngine : IDisposable
         catch (Exception ex)
         {
             if (!IsGrindingActionCurrent(actionVersion)) return;
+            // 不区分是否已充磁来决定重试：本动作普通通信、微调或探测失败也暂停并作废。
+            // 明确的TypeA准入退回已在前置分支处理，不进入这里；普通取消另有专用catch。
             FlowAlarmPresentationContext.RecordFailure(ex);
             // ═══ 通用异常: 网络断/PLC超时/Modbus异常等 ═══
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ✘ 上料流程异常: {ex.Message}");
@@ -2335,6 +2354,8 @@ public sealed class GrindingFlowEngine : IDisposable
                 try { await activeZSafeTask; } catch { /* 原catch已暂停，先等运动真正退出。 */ }
             if (discardWorkpieceOnAbort && IsGrindingActionCurrent(actionVersion))
             {
+                // 先等activeZSafeTask实际退出，再清本板来源及本机，避免旧并行任务在清理后继续交接。
+                // FIFO按身份删残留；机床回Idle不是恢复线路，现场移板和设备请求仍须人工确认。
                 DiscardGrindingSourceWorkpiece(wp);
                 await ClearGrinderOnAbortAsync(grinder, isLoad: true);
                 action.Discard("异常本板作废，研磨机内存Idle，旧续搬入口删除");
@@ -2514,6 +2535,8 @@ public sealed class GrindingFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), 0), "研磨机来源位XY微调完成");
             int grinderPickupTargetZ = ApplyOffsetZ(pickupZ);
+            // 研磨机取成品与ST709上料使用相同的放磁检查/三位置探测/充磁后确认。
+            // 首次高度保留本机原公式与偏移，后续补偿只用实际Z0；成功后才按原下料握手继续。
             var pickup = await PickupProbeHelper.PickAsync(crane, grinderPickupTargetZ, pickupStableDelayMs,
                 action, operationalTracker, ct,
                 validateAction: () => { if (!IsGrindingActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
@@ -2682,6 +2705,7 @@ public sealed class GrindingFlowEngine : IDisposable
         {
             // 普通取消保留来源；应急失效动作由应急流程结案。
         }
+        // 应急失效后的迟到运动超时直接退出，不重新写本机Pending或登记旧人工任务。
         catch (CraneMotionTimeoutException timeout)
         {
             if (!IsGrindingActionCurrent(actionVersion)) return;
@@ -2701,6 +2725,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 $"最后坐标={timeout.LastKnownStatus?.XPos}/{timeout.LastKnownStatus?.YPos}/{timeout.LastKnownStatus?.ZPos}，未到位轴={string.Join("/", timeout.UnreachedAxes)}。" +
                 "D4518停止指令已尝试发送；研磨引擎已暂停。本方法的收尾会把本研磨机状态自动作废清空，请把本块板抽走后启动线路继续。");
         }
+        // 只有当前动作版本有权处理这次下压保护；失效版本的清理归应急流程。
         catch (PressureStopException pEx)
         {
             if (!IsGrindingActionCurrent(actionVersion)) return;
@@ -2745,6 +2770,8 @@ public sealed class GrindingFlowEngine : IDisposable
         catch (Exception ex)
         {
             if (!IsGrindingActionCurrent(actionVersion)) return;
+            // 这里暂存的Unloading/WaitingForUnload及Pending只是冻结事故证据，
+            // 当前严重异常finally仍会清本机并回Idle，不作为下一轮自动重试的旧板任务。
             FlowAlarmPresentationContext.RecordFailure(ex);
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ✘ 下料流程异常：{ex.Message}");
             if (!action.IsFinalized && action.CommandState != FlowCommandState.NotSent)
@@ -2792,8 +2819,8 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         finally
         {
-            // 异常自动作废：这一轮没走到 action.Complete(Completed) 就清这台研磨机的
-            // PLC 下发数据与内存工件数据并回空闲。中转架账本完全不碰。
+            // 仅严重失败且版本仍属本动作时清本机；普通取消及失效旧动作不套用本次作废。
+            // 下料不删除后续ST709 FIFO，也不回滚ST710成功放料或已成功发送的通知。
             if (discardWorkpieceOnAbort && IsGrindingActionCurrent(actionVersion))
             {
                 await ClearGrinderOnAbortAsync(grinder, isLoad: false);

@@ -3,6 +3,11 @@ using AutomaticOnlineHostComputer.Service.Alarms;
 
 namespace AutomaticOnlineHostComputer.Tests.Presentation;
 
+/// <summary>
+/// 验证冻结故障与实时采样分区、清理结果动态更新，以及机械手1/2/3独立标题和采样编号。
+/// 防止同号机械手误读天车连接，或刷新后用当前X11覆盖原始事故步骤/板身份。
+/// 展示测试不连接设备，不代表现场已清零、已放磁或允许恢复线路。
+/// </summary>
 public sealed class SafetyAlarmPresentationTests
 {
     [Theory]

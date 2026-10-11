@@ -11,6 +11,10 @@ internal sealed record SafetyAlarmSections(string Title, string Failure, string 
         "【完整异常】\n" + ExceptionDetail);
 }
 
+/// <summary>
+/// 把冻结故障、异常后的只读采样及最终收尾分区域展示；格式化过程没有设备或调度副作用。
+/// 实时X11不能覆盖原探测历史，未知反馈不能显示为0；软件作废也不能格式化成现场已经放磁。
+/// </summary>
 internal static class SafetyAlarmFormatter
 {
     public static string Format(SafetyAlarmDetails details, CraneAlarmSnapshot? sample) => Sections(details, sample).FullText;
@@ -19,6 +23,7 @@ internal static class SafetyAlarmFormatter
     {
         var a = d.FailureAction;
         var wp = d.Workpiece;
+        // 机械手与天车编号可能相同，标题根据载具类型区分，来源线号未知时保持未知而不猜测。
         string carrier = d.ManipulatorNo.HasValue ? $"机械手{d.ManipulatorNo}" : $"{d.CraneNo}号天车";
         string title = $"{d.Scope} · {carrier} · {d.Operation}异常";
         string failure = $"发生时间：{Time(d.OccurredAtUtc)}\n动作编号：{d.ActionId}\n" +

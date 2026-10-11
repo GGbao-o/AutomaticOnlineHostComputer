@@ -105,11 +105,17 @@ internal sealed class TransferRackWorkpieceLedger
         }
     }
 
-    /// <summary>严重动作失败作废来源板；同时保护预约归属及新到达代次，不伪造取走。</summary>
+    /// <summary>
+    /// 严重上料失败时只作废本次预约对应的来源板，语义是删除软件身份，不是确认天车已取走。
+    /// 必须同时匹配架位、预约动作号、到达代次以及完整板号/序号；任一变化就保留现有来源。
+    /// 即使同一架位后来再次放入同板号同序号，代次变化也阻止旧catch删除新到达的任务。
+    /// 已CommitPickup的来源没有预约，返回false；冻结的本次预约仍可在严重收尾中按归属删除。
+    /// </summary>
     public bool DiscardReservedWorkpiece(string rackCode, string operationId, long arrivalSequence, WorkpieceCache workpiece)
     {
         lock (_sync)
         {
+            // 检查与删除共享同一把锁，防止检查归属后、删除前被另一次Enqueue替换来源。
             if (!_reservations.TryGetValue(rackCode, out var reservation) ||
                 reservation.OperationId != operationId ||
                 !_arrivalSequences.TryGetValue(rackCode, out var currentArrival) || currentArrival != arrivalSequence ||

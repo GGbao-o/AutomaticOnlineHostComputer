@@ -3,6 +3,11 @@ using AutomaticOnlineHostComputer.Presentation.ViewModels.Config;
 
 namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
+/// <remarks>
+/// 核对研磨ST709确认持件后的Z回升与M731延时通知重叠，保留原ST010放板标志的跳写规则。
+/// 统一取板只替换探测/充磁环节，不能把取走通知提前到充磁前X11=1。
+/// 配置文件的延时期望是已有契约，本轮不修改用户配置或断言。
+/// </remarks>
 public sealed class GrindingM731OverlapContractTests
 {
     [Fact]

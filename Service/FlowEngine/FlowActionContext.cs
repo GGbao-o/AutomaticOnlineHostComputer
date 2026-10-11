@@ -156,7 +156,11 @@ internal sealed class FlowActionContext
 
     public bool TryReleaseLock(string lockName) => _heldLocks.Remove(lockName);
 
-    /// <summary>同板第二次取回是独立探测阶段，不沿用上次持件反馈。</summary>
+    /// <summary>
+    /// 同板从打号机等位置再次取回时，开启新的取板反馈阶段，清除上一次X11/充磁记录。
+    /// 清为null表示本轮还未读取，不表示X11=0或已经放磁；真实反馈由取板组件重新读取。
+    /// 这里只改动作账本显示，不发送退磁命令，也不修改来源队列或设备状态。
+    /// </summary>
     public void ResetPickupFeedback()
     {
         ThrowIfFinalized();
@@ -277,7 +281,12 @@ internal sealed class FlowActionContext
         FlowActionManualRegistry.MarkCompleted(OperationId);
     }
 
-    /// <summary>严重异常的软件作废结案；实体位置及磁铁状态仍由人工确认。</summary>
+    /// <summary>
+    /// 严重异常完成软件作废结案：本动作不再进入物理步骤，也不再通过旧人工续搬入口继续。
+    /// 故障步骤/工件已由弹窗上下文事先冻结，故这里改为Discarded不会丢失事故证据。
+    /// 删除的只是当前OperationId人工记录；来源身份、设备参数和锁必须由拥有它们的引擎另行收尾。
+    /// 软件结案不等于现场退磁、移板或回安全位；也不会让EmergencyActionLease失效或改变新动作版本。
+    /// </summary>
     public void Discard(string detail)
     {
         Disposition = FlowActionDisposition.Discarded;

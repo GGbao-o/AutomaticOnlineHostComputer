@@ -5,6 +5,11 @@ using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
+/// <summary>
+/// 验证机械手1及研磨严重异常的软件作废：清匹配当前板、来源残留，保护同板号不同序号及后续FIFO。
+/// 包含普通Pause保留身份、补长后的完整身份匹配及删除幂等，防止把手动暂停升级成丢板。
+/// 通过内存集合与引擎私有清理方法验证，不发送设备命令，也不把软件清理当成现场安全证明。
+/// </summary>
 public sealed class PausedWorkpieceDiscardTests
 {
     private const BindingFlags PrivateInstance = BindingFlags.NonPublic | BindingFlags.Instance;

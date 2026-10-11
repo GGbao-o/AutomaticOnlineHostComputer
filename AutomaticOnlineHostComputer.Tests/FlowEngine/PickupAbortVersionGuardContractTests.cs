@@ -4,6 +4,11 @@ namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 /// 应急取消可能先于SDK返回普通异常。失效动作必须在冻结告警、登记人工任务、
 /// 写设备或修改内存之前退出，不能仅靠finally中的清理守卫。
 /// </summary>
+/// <remarks>
+/// 覆盖两线后天车8个专用catch和研磨上下料6个主catch，检查版本守卫先于登记人工任务等副作用。
+/// 属于源码控制流顺序契约；不模拟SDK迟到报错、应急按钮或真实并发设备行为。
+/// 不检查_paused作为失效条件，因为正常异常暂停仍须允许当前有效动作清理。
+/// </remarks>
 public sealed class PickupAbortVersionGuardContractTests
 {
     [Theory]

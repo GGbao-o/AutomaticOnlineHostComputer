@@ -5,6 +5,10 @@
 /// 两条前端引擎必须同构：判定早于任何物理命令；不一致时丢弃任务身份而**不回退本线缓存**；
 /// 弹窗必须带齐人工处置所需的信息。
 /// </summary>
+/// <remarks>
+/// 两线机械手1在物理取料前核对ST007实测板长，拒板身份应清匹配当前/来源而不回缓存。
+/// 验证长度校验仍早于物理取料指令，不修改当前15mm等用户容差，也不把后续板当作旧身份。
+/// </remarks>
 public sealed class St007PlateLengthVerificationContractTests
 {
     private const string Line1File = "Line1FrontFlowEngine.cs";

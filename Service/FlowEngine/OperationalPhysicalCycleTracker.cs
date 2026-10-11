@@ -87,6 +87,11 @@ internal sealed class OperationalPhysicalCycleTracker
         _currentX11Valid = false;
     });
 
+    /// <summary>
+    /// 保存成功读取的X11值、时间和有效性。充磁前来源探测必须传confirmsHolding=false：
+    /// 有板检测与磁铁吸住是两个阶段；只有充磁后的持件确认才能产生新的“已持件”证据。
+    /// 默认true保留既有持件检查调用的语义；X11=0只更新传感器事实，不自动推断板的去向。
+    /// </summary>
     public void CompleteX11(bool value, DateTime readAtUtc, bool confirmsHolding = true) => Try(() =>
     {
         _x11LastValue = value ? 1 : 0;

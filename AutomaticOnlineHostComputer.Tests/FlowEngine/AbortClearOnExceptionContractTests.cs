@@ -7,6 +7,10 @@
 /// 所以引擎只清<b>这台斜床 / 这台研磨机</b>的 PLC 下发数据与内存工件数据并回空闲，<b>来源作废由调用方核对预约及到达代次</b>。
 /// </para>
 /// </summary>
+/// <remarks>
+/// 严重主动作失败应按归属触发本机清理并软件Idle，普通取消及失效版本不能套用同一作废。
+/// 源码契约核对清理调用、参数范围及内存结案位置；不保证PLC多寄存器写原子成功。
+/// </remarks>
 public sealed class AbortClearOnExceptionContractTests
 {
     private const string Line1 = "Line1RearFlowEngine.cs";

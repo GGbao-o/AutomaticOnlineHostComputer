@@ -3,6 +3,11 @@ using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
+/// <summary>
+/// 用可注入IO验证取板物理时序：1/2/3位置成功、三处无板、反馈未知、充磁后确认失败、
+/// 实际Z0及补偿上界、下压阻止和取消路径。断言充磁前仍属于来源，不能提前产生持件证据。
+/// 假设备不连接PLC；这些测试不能证明现场检测距离、真实运动超调或磁铁吸附可靠性。
+/// </summary>
 public class PickupProbeHelperTests
 {
     [Theory]
@@ -162,6 +167,8 @@ public class PickupProbeHelperTests
         Assert.Contains("X11=0", alarm.Snapshot().AlarmMessages);
     }
 
+    // 假设备保存运动目标、X11读取及充磁时的归属，模拟有效0、有效1或通信失败。
+    // 三种结果分开，避免测试把“读不到”伪装成0；位置滞后/越界用来核对实际到位验证。
     private sealed class PickupFake
     {
         private readonly int _initial;

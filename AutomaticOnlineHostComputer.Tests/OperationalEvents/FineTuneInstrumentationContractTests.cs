@@ -6,6 +6,10 @@ using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
 namespace AutomaticOnlineHostComputer.Tests.OperationalEvents;
 
+/// <remarks>
+/// 核对各取板/放料前的原编码器微调监控点仍存在，统一探测不能绕过坐标与物理阶段证据。
+/// 这里只验证调用和上报结构，不改变微调算法、偏移公式或实际轴运动。
+/// </remarks>
 public sealed class FineTuneInstrumentationContractTests
 {
     private static readonly IReadOnlyDictionary<string, int> ExpectedCallCounts =

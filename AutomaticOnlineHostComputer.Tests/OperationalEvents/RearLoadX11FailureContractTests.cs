@@ -1,5 +1,9 @@
 ﻿namespace AutomaticOnlineHostComputer.Tests.OperationalEvents;
 
+/// <remarks>
+/// 两线后天车统一使用共用取板组件；失败必须有最后异常上报和本次归属清理，不能重做旧充磁循环。
+/// 历史X11最终报告接口仍存在，但现行三位置探测失败走主严重catch，不能据旧恢复字段推断回队。
+/// </remarks>
 public sealed class RearLoadX11FailureContractTests
 {
     [Theory]

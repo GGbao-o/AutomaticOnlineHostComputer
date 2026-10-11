@@ -1,5 +1,10 @@
 namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
+/// <remarks>
+/// 目标XY与参数链均成功后才可微调和下放；失败清理要等待真正退出，不能留后台写继续握手。
+/// 普通取消与应急失效版本跳过目标严重清理，避免用旧动作清掉新机床数据。
+/// 这些测试检查生产源码顺序，实际PLC反馈时序仍需现场验证。
+/// </remarks>
 public sealed class GrindingTargetParameterParallelContractTests
 {
     [Fact]

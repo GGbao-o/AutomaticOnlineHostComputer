@@ -6,6 +6,10 @@ namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 /// 状态机暂停不是只写日志：最终异常必须带同一动作快照，且目标待交接结论必须先于上报。
 /// 这是源码契约，防止以后把 Report 又放回 catch 分支开头而让页面显示过期归属。
 /// </summary>
+/// <remarks>
+/// 故障上报使用本次动作快照，严重作废不能删除已经冻结的板身份和失败步骤。
+/// 核对最终报告与Discarded结案并存，不让旧人工续搬入口保留可执行的失败任务。
+/// </remarks>
 public sealed class FlowActionFinalReportContractTests
 {
     [Theory]

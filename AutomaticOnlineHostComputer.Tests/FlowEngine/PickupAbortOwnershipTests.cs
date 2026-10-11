@@ -5,6 +5,11 @@ using AutomaticOnlineHostComputer.Service;
 
 namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
+/// <summary>
+/// 验证异常删除/清零的归属边界：真实中转架预约、动作版本、来源到达代次及队列顺序。
+/// 包含同身份新到达、提前放锁后新来源、匿名M700以及成功通知不回滚的情况。
+/// 使用未初始化引擎注入必要内存字段，只验证清理方法，不执行生产运动或PLC握手。
+/// </summary>
 public sealed class PickupAbortOwnershipTests
 {
     [Theory]

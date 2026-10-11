@@ -87,6 +87,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
     /// 只用于全局分线选择更空闲的线路；不参与锁控制，也不改变前天车动作。
     /// </summary>
     private int _frontCraneActive;
+    // 前天车任务牌、入出队及异常残留删除共用这把锁，重建队列时保留其他板的相对顺序。
+    // 它只保护软件集合，不替代货叉/天车物理区域锁，也不授权删除下一块_currentWp。
     private readonly object _frontCraneTaskLock = new();
     private CraneTaskSnapshot _frontCraneTask = CraneTaskSnapshot.Idle(3, "2号线前天车");
     private WorkpieceCache? _frontCraneManualWorkpiece;
@@ -847,7 +849,11 @@ public sealed class Line2FrontFlowEngine : IDisposable
     private bool TryDequeueCache(out WorkpieceCache wp)
     { lock (_cacheLock) { if (_cacheQueue.TryDequeue(out wp)) { _cachedList.Remove(wp); return true; } wp = default; return false; } }
 
-    /// <summary>本次取板/送叉异常暂停时作废本板，不回来源缓存，不发送设备命令。</summary>
+    /// <summary>
+    /// 机械手1取板/送叉严重失败时，清匹配的_currentWp及前端缓存中的完整身份残留，不再回队重试。
+    /// 只按本板号和序号删项，保护下一板和另一条线；队列重建与并发入队共用_cacheLock。
+    /// 本方法不发PLC命令、不自动退磁或回位；设备输出和前端阶段由调用方检查周期归属后处理。
+    /// </summary>
     private void PauseAndDiscardManipulatorWorkpiece(WorkpieceCache wp)
     {
         _paused = true;
@@ -1040,6 +1046,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
 
     private void PauseForkBoringHandshake(string reason, Exception ex)
     {
+        // 这是货叉独立推进双头镗时的异常入口，不是机械手1取板动作的作废catch。
+        // 现行策略保留本板及中间阶段，不能仅凭这里的暂停弹窗认定_currentWp或PLC已清零。
         // 双头镗握手异常不能回Idle: CNC/货叉/工件可能已经处于中间状态。
         // 保持当前_forkPhase并暂停, 让人工按现场确认后再恢复, 避免下一块板进入同一区域。
         _paused = true;
@@ -1926,6 +1934,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 m1Spd.Z.Accel, m1Spd.Z.Decel, ct);
             action.Confirm();
             // 放磁状态三个位置探测；充磁后再次确认，成功前不得提交来源。
+            // formulaZ已包含ST007台面/直径计算；首次仍用原XYZ复合动作，补偿只按实际Z0+5/+10。
+            // 放磁确认是读X6/X7，不自动退磁。三处无板或反馈未知抛严重异常，进入本方法统一作废。
             var pickup = await PickupProbeHelper.PickAsync(_manipulator1!, formulaZ, pickupStableDelayMs,
                 action, operationalTracker, ct,
                 moveInitial: async token =>
@@ -2091,6 +2101,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
             OnSafetyAlarm?.Invoke($"2号线机械手1异常：{ex.Message}。线路已暂停，正在作废本趟任务并清理设备；请勿恢复或删除下一板。");
             if (placedOnFork && _manipulatorClearedFork)
             {
+                // “交接完成”包含退磁放板、Z=0、安全Y退出及M801成功，不能只看板已落到货叉。
+                // 放行后货叉可能已经独立推进；仅结束空载动作，不能回滚已交付板或清下游参数。
                 FlowAlarmPresentationContext.RecordCleanup("工件已完整交接，跳过下游参数清理", "清空载回位动作，货叉/下游继续保留本板", "已交付任务不回滚");
             }
             else
@@ -2098,6 +2110,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 bool ownsCycle;
                 lock (_wpLock) ownsCycle = _currentWp.HasValue && WorkpieceCacheIdentity.Matches(_currentWp.Value, wp);
                 string deviceResult = "归属已变化，跳过前端设备输出清理";
+                // 当前周期仍是本板且没有独立货叉握手在执行时，才允许清本轮前端输出/阶段。
+                // 归属变化或握手并发时跳过设备清理，避免写0破坏另一个已开始的周期。
                 if (ownsCycle && !_forkHandshakeInProgress)
                 {
                     var results = new List<string>();
@@ -2113,6 +2127,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     _m912Sent = false;
                     _skipBoringTriggered = false;
                 }
+                // 物理板可能仍在ST007、机械手或尚未放行的货叉；这里只作废软件身份，现场人工处理。
                 PauseAndDiscardManipulatorWorkpiece(wp);
                 FlowAlarmPresentationContext.RecordCleanup(deviceResult, "本板_currentWp已清；本趟机械手动作退出", "仅删除本板完整身份残留，不回前端缓存");
             }
@@ -2228,6 +2243,10 @@ public sealed class Line2FrontFlowEngine : IDisposable
         lock (_frontCraneTaskLock) return _craneQueue.TryDequeue(out wp);
     }
 
+    /// <summary>
+    /// 前天车严重失败后只删除本趟完整身份的队列残留，并保留其他板的顺序。
+    /// 不清整条前端缓存，不清下一板货叉周期；已成功交接下游时调用方不执行此删除。
+    /// </summary>
     private int DiscardFrontCraneQueueResidues(WorkpieceCache wp)
     {
         lock (_frontCraneTaskLock)
@@ -2275,6 +2294,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
         pos3OperationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST502打号机放料与文件握手");
         bool magnetOn = false;
         bool holdingWorkpiece = false;
+        // 只在中转架放料和下游软件交接成功返回后置true；末尾空载失败不能删除已交付的板。
         bool downstreamHandoffClosed = false;
         try
         {
@@ -2361,6 +2381,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(physicalTracker, true, "XY已到ST714上方", "ST714")),
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             action.Confirm(new FlowActionPosition(f2xOff, f2yOff, 0), "ST714取料前XY微调完成");
+            // Pos3首次Z已由本入口算好偏移。先只读放磁反馈，再下降/探测/充磁/后确认；
+            // helper成功以后才能按原顺序回升并通知货叉回待机，不能因充磁前X11=1提前交接。
             var pos3Pickup = await PickupProbeHelper.PickAsync(crane, f2zOff, pickupStableDelayMs,
                 action, pos3OperationalTracker, ct);
             int f2PickZ = pos3Pickup.ActualZ;
@@ -2487,6 +2509,7 @@ public sealed class Line2FrontFlowEngine : IDisposable
             _paused = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
             // 本趟已经出队；禁止回队。下一板可能正在货叉/双头镗，不能清整条前端周期。
+            // 严重失败结束当前天车身份及旧人工续搬入口；已成功交付下游的板保留，锁在原持锁层收尾。
             int removed = downstreamHandoffClosed ? 0 : DiscardFrontCraneQueueResidues(wp);
             ClearFrontCraneTask();
             FlowAlarmPresentationContext.RecordCleanup("前天车本趟退出；未改可能属于下一板的货叉/双头镗输出，也未强制退磁或回位",
@@ -2688,6 +2711,8 @@ public sealed class Line2FrontFlowEngine : IDisposable
                 physicalPhase: OperationalEventContextFactory.PickupBeforeZDown(physicalTracker, false, "打号机B文件已生成", "ST502")),
             actionId: actionId, physicalTracker: physicalTracker, ct: ct);
         FlowAlarmPresentationContext.RecordTransferPhase("ST502", "中转架（尚未选择）", "打号机取回");
+        // 打号机取回是同板的第二次独立取板，重新检查放磁及X11，不沿用Pos3那次持件反馈。
+        // markerZPickup保留原打号机台面/直径/偏移公式，补偿以这次实际停稳Z重新计算。
         var markerPickup = await PickupProbeHelper.PickAsync(crane, markerZPickup, pickupStableDelayMs,
             action, markerOperationalTracker, ct);
         int mPickZ = markerPickup.ActualZ;

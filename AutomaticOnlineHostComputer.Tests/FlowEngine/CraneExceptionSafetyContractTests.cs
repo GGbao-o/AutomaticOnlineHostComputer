@@ -1,6 +1,10 @@
 ﻿namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
 /// <summary>防止物理命令异常以后，账本、引擎暂停和页面告警又被拆成相互矛盾的分支。</summary>
+/// <remarks>
+/// 核对后天车运动/下压严重失败的暂停、告警及锁收尾，不把未知位置当成自动续搬许可。
+/// 主页旧人工账本门禁断言仍保留原基线；本轮注释不改变生产门禁或为通过测试修改业务。
+/// </remarks>
 public sealed class CraneExceptionSafetyContractTests
 {
     [Theory]

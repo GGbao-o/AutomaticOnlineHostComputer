@@ -136,6 +136,8 @@ public sealed class BalancingFlowEngine : IDisposable
     //   M700无缓存: 动平衡后工件顺序乱了, 直径从D100(MC65)读
     private readonly Dictionary<string, WorkpieceCache> _balWps = new();
     private readonly object _balWpsLock = new();
+    // 每次来源入站记录新代次；完整身份相同也不能说明还是原来那一次实体到达。
+    // 来源提前放锁后可能立即放入下一板，旧异常必须同时检查动作版本和到达代次才能删缓存。
     private readonly Dictionary<string, long> _balWpArrivals = new();
     private long _nextBalWpArrival;
     public int CachedCount { get { lock (_balWpsLock) return _balWps.Count; } }
@@ -212,7 +214,11 @@ public sealed class BalancingFlowEngine : IDisposable
         Console.WriteLine($"[平衡引擎#{EngineId}] [{(isM2 ? "M2" : "M3")}] 来源缓存已转在途: {source} → {target} {expected.IdentityText}");
     }
 
-    /// <summary>原子清本趟来源残留；提前放锁后同键的新到达板不得被旧动作删除。</summary>
+    /// <summary>
+    /// 仅清本动作已开始写但未成功返回、且当前仍拥有的输出位，不回滚成功通知。
+    /// 未发送或归属变化直接跳过；调用方使用按位写保留同字其他位，并使用独立5秒清理令牌。
+    /// 等待实际写任务退出，清理失败以未知记录，不能把尝试清零等同于PLC已确认。
+    /// </summary>
     private static async Task<string> ClearFailedBalancingOutputAsync(string signal, bool responseUnknown,
         Func<bool> stillOwned, Func<CancellationToken, Task> clear)
     {
@@ -223,6 +229,11 @@ public sealed class BalancingFlowEngine : IDisposable
         catch (Exception ex) { return $"{signal}清理失败/未知：{ex.Message}"; }
     }
 
+    /// <summary>
+    /// 严重异常删除本轮尚未消费的来源残留。动作版本、来源到达代次、完整板身份都要匹配。
+    /// 同键新板、失效旧版本以及M700匿名来源都跳过；不删除已交接研磨FIFO的任务。
+    /// 两层锁按版本锁→来源锁顺序检查和删除，避免检查完成后新来源插入被旧动作误删。
+    /// </summary>
     private bool DiscardBalancingSource(bool isM2, int version, string source, long arrival, WorkpieceCache? wp)
     {
         lock (_emergencyLock)
@@ -1443,6 +1454,8 @@ public sealed class BalancingFlowEngine : IDisposable
             action.MarkCommandSent();
             await _m2.MoveAbsoluteAsync(-1, pickY, -1, ct: ct);
             action.Confirm(new FlowActionPosition(null, pickY, 0), "来源Y到位");
+            // M2来源已确定为M817/M818，但此时不消费缓存。先放磁检查，再实际Z0/+5/+10探测，
+            // 充磁后独立X11=1才允许来源转在途；首次pzDown保留原台面/直径/偏移计算。
             var pickup = await PickupProbeHelper.PickAsync(_m2!, pzDown, pickupStableDelayMs,
                 action, operationalTracker, ct,
                 validateAction: () => { if (!IsM2ActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
@@ -1605,6 +1618,8 @@ public sealed class BalancingFlowEngine : IDisposable
         catch (Exception ex)
         {
             if (!IsM2ActionCurrent(actionVersion)) return;
+            // 当前严重异常暂停本引擎，清本趟身份和未闭环输出；旧应急版本不改新动作状态。
+            // 来源已经提前放锁或出现新代次时不删新板，成功通知及成功交付下游的缓存不回滚。
             _paused = true;
             discardOnFailure = true;
             keepDisplayForManualConfirmation = false;
@@ -1902,6 +1917,8 @@ public sealed class BalancingFlowEngine : IDisposable
             action.MarkCommandSent();
             await _m3.MoveAbsoluteAsync(-1, pickY, -1, ct: ct);
             action.Confirm(new FlowActionPosition(null, pickY, 0), "来源Y到位");
+            // M3在M821/M700来源选择及目标准入后统一取板。M700只有已读直径，不能伪造完整来源身份。
+            // 先探测再充磁、后确认成功才登记持件；探测位置由这次实际停稳Z0决定，不重复叠加偏移。
             var pickup = await PickupProbeHelper.PickAsync(_m3!, pzDown, pickupStableDelayMs,
                 action, operationalTracker, ct,
                 validateAction: () => { if (!IsM3ActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
@@ -2137,6 +2154,8 @@ public sealed class BalancingFlowEngine : IDisposable
         catch (Exception ex)
         {
             if (!IsM3ActionCurrent(actionVersion)) return;
+            // 异常时只结束本版本M3任务；已交付研磨FIFO的板与提前放锁后的新M821任务保留。
+            // M826/M701/M721仅在“写已开始、未成功返回、归属成立”时尝试清零。
             _paused = true;
             discardOnFailure = true;
             keepDisplayForManualConfirmation = false;
@@ -2189,6 +2208,7 @@ public sealed class BalancingFlowEngine : IDisposable
                 ClearM3Display(actionVersion);
                 ClearInFlightWorkpiece(false, actionVersion);
             }
+            // Busy、显示和在途按版本清理；软件空闲不表示机械手已放磁或已退回安全Y。
             if (discardOnFailure && IsM3ActionCurrent(actionVersion))
                 FlowAlarmPresentationContext.RecordMemoryCleanup("本趟显示及在途工件已清，Busy已按版本退出");
             alarmPresentation?.Dispose();

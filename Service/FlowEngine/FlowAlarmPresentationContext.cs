@@ -51,6 +51,8 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
 
     public static FlowAlarmPresentationContext? Current => Ambient.Value;
     public string ActionId => _action.OperationId;
+    // 天车1与机械手1是不同连接，不能只用数字1决定采样设备。
+    // 机械手动作由其明确DeviceName识别；非机械手仍使用原CraneNo，避免读到同号天车的数据。
     public int? ManipulatorNo => _action.DeviceName switch
     {
         "机械手1" => 1, "机械手2" => 2, "机械手3" => 3, _ => null
@@ -136,6 +138,11 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
         catch { }
     }
 
+    /// <summary>
+    /// 按动作保存放磁检查、每处实际Z/X11、充磁及后确认的历史证据。
+    /// AsyncLocal隔离并发动作，_gate保护弹窗快照与后台追加；通知只刷新显示，不驱动业务。
+    /// 这组记录与异常后实时采样独立，关闭或刷新弹窗不会清理任务或重做取板。
+    /// </summary>
     public static void RecordPickupProbe(string result)
     {
         var context = Current;
@@ -258,6 +265,9 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
 
     public void Dispose()
     {
+        // 动作退出后补最终锁/缓存/内存观察，保留此前记录的实际设备清理结果。
+        // 观察到“软件Idle/无持锁”不能反推现场已安全，失败阶段和板身份仍使用冻结快照。
+        // 前天车还要等待调度层释放外层锁，不能仅凭动作方法Dispose就标记所有收尾已经结束。
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
         try
         {
@@ -275,6 +285,7 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
                 _actionLockResult = _lockCleanup;
                 if (_waitForFrontDispatch)
                     _lockCleanup += "；" + (_frontDispatchResult ?? "前天车调度锁：等待调度层释放");
+                // 追加观察结果而不覆盖本次删除/保留的记录，防止丢失“只删本板”的清理依据。
                 if (cacheResult != null) _cacheCleanup += "\n" + cacheResult;
                 if (memoryResult != null) _memoryCleanup += "\n退出时观察：" + memoryResult;
                 _actionBodyFinished = true;

@@ -3,6 +3,11 @@ using AutomaticOnlineHostComputer.Service.Alarms;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
+/// <summary>
+/// 只管理异常弹窗的展示与独立只读刷新，不暂停/恢复引擎，不写PLC，不改变动作结案。
+/// _read由主页按天车或机械手连接创建；相同设备数字不代表相同IP/服务。
+/// 弹窗关闭取消采样并解绑事件，业务异常收尾仍由引擎继续完成，不依赖窗口是否保留。
+/// </summary>
 internal sealed class SafetyAlarmDialogViewModel : ObservableObject, IDisposable
 {
     private readonly FlowAlarmPresentationContext _context;
@@ -50,6 +55,8 @@ internal sealed class SafetyAlarmDialogViewModel : ObservableObject, IDisposable
         try
         {
             var details = _context.Snapshot();
+            // 连接类型已由主页选择；这里传机械手编号或天车编号，仅读当前反馈和坐标。
+            // 新采样只更新现场区域，不能覆盖故障时X11/运动步骤或让旧任务重新生效。
             var sample = await _read(details.ManipulatorNo ?? details.CraneNo, _closed.Token);
             if (_disposed) return;
             _sample = sample;

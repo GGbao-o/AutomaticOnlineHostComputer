@@ -2094,6 +2094,9 @@ public sealed class HomeViewModel : ObservableObject
             if (_shownSafetyAlarmActions.Contains(context.ActionId)) return true;
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher == null) return false;
+            // 详情现在同时覆盖五台天车和机械手1/2/3，必须先按载具类型选择连接信息。
+            // 相同编号的机械手与天车并非同一设备；独立只读短连接不会复用生产运动服务发送命令。
+            // 此处只扩展弹窗采样来源，原暂停入口、启动条件和业务故障收尾仍由各引擎执行。
             var reader = new CraneAlarmSnapshotReader(context.ManipulatorNo.HasValue
                 ? _manipulatorCache.GetManipulatorInfo : _craneCache.GetCraneInfo);
             model = new SafetyAlarmDialogViewModel(context, reader.ReadAsync, update =>

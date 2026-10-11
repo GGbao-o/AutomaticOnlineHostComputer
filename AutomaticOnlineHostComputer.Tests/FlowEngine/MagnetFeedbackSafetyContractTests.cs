@@ -1,5 +1,9 @@
 ﻿namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
+/// <remarks>
+/// 核对磁铁反馈异常不会被当作成功持件或自动回来源重试，组件必须保留失败原因给引擎收尾。
+/// 放磁检查只读反馈，严重未知不通过强制退磁/重新充磁猜测实物位置。
+/// </remarks>
 public sealed class MagnetFeedbackSafetyContractTests
 {
     [Fact]
