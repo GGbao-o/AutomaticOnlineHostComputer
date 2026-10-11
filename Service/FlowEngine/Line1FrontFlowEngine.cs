@@ -64,9 +64,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
     // ═══════════════════════════════════════════════════════════════
     //  工件缓存 (FIFO 队列 + 线程安全列表)
     // ═══════════════════════════════════════════════════════════════
-    private readonly ConcurrentQueue<WorkpieceCache> _cacheQueue = new();   // 无锁FIFO
+    private readonly ConcurrentQueue<WorkpieceCache> _cacheQueue = new();   // FIFO，修改与显示列表共用_cacheLock
     private readonly List<WorkpieceCache> _cachedList = new();              // UI显示用
-    private readonly object _cacheLock = new();                              // 保护 _cachedList
+    private readonly object _cacheLock = new();                              // 保护来源队列与_cachedList
     public int CachedCount { get { lock (_cacheLock) return _cachedList.Count; } }
 
     /// <summary>供状态页显示的只读缓存快照；不读取或修改FIFO队列。</summary>
@@ -374,17 +374,17 @@ public sealed class Line1FrontFlowEngine : IDisposable
             return "机械手1仍被自动动作占用，未清缓存或快照；请等待旧动作完全退出后重试。";
         try
         {
-            var retained = new List<WorkpieceCache>();
             bool removed = false;
-            while (_cacheQueue.TryDequeue(out WorkpieceCache queued))
+            lock (_cacheLock)
             {
-                if (!removed && queued.IdentityText == action.WorkpieceIdentity) removed = true;
-                else retained.Add(queued);
-            }
-            foreach (WorkpieceCache queued in retained) _cacheQueue.Enqueue(queued);
-            if (removed)
-            {
-                lock (_cacheLock)
+                var retained = new List<WorkpieceCache>();
+                while (_cacheQueue.TryDequeue(out WorkpieceCache queued))
+                {
+                    if (!removed && queued.IdentityText == action.WorkpieceIdentity) removed = true;
+                    else retained.Add(queued);
+                }
+                foreach (WorkpieceCache queued in retained) _cacheQueue.Enqueue(queued);
+                if (removed)
                 {
                     int index = _cachedList.FindIndex(x => x.IdentityText == action.WorkpieceIdentity);
                     if (index >= 0) _cachedList.RemoveAt(index);
@@ -841,41 +841,40 @@ public sealed class Line1FrontFlowEngine : IDisposable
 
     /// <summary>工件入队 — 加入 FIFO 队列末尾，主循环出队时按顺序处理。</summary>
     public void EnqueueWorkpiece(WorkpieceCache wp)
-    { _cacheQueue.Enqueue(wp); lock (_cacheLock) _cachedList.Add(wp); Console.WriteLine($"[Line1Front] 📥 入缓存 {wp.IdentityText} d={wp.Diameter} L={wp.Length} 队列={CachedCount}"); }
+    { lock (_cacheLock) { _cacheQueue.Enqueue(wp); _cachedList.Add(wp); } Console.WriteLine($"[Line1Front] 📥 入缓存 {wp.IdentityText} d={wp.Diameter} L={wp.Length} 队列={CachedCount}"); }
 
     /// <summary>清空缓存 — 丢弃所有未处理工件。</summary>
-    public void ClearCache() { while (_cacheQueue.TryDequeue(out _)) { } lock (_cacheLock) _cachedList.Clear(); }
+    public void ClearCache() { lock (_cacheLock) { while (_cacheQueue.TryDequeue(out _)) { } _cachedList.Clear(); } }
 
     /// <summary>出队 — 从 FIFO 队列头部取出一个工件。成功返回true，队列空返回false。</summary>
     private bool TryDequeueCache(out WorkpieceCache wp)
-    { if (_cacheQueue.TryDequeue(out wp)) { lock (_cacheLock) _cachedList.Remove(wp); return true; } wp = default; return false; }
+    { lock (_cacheLock) { if (_cacheQueue.TryDequeue(out wp)) { _cachedList.Remove(wp); return true; } wp = default; return false; } }
 
-    /// <summary>
-    /// 机械手取料尚未确认吸住前发生异常时, 把刚出队的数据退回缓存。
-    /// 这里追加到队尾, 牺牲极少见异常场景下的顺序, 换取不丢工件数据和不盲动。
-    /// </summary>
-    private void RequeueFrontCache(WorkpieceCache wp)
+    /// <summary>本次取板/送叉异常暂停时作废本板，不回来源缓存，不发送设备命令。</summary>
+    private void PauseAndDiscardManipulatorWorkpiece(WorkpieceCache wp)
     {
-        _cacheQueue.Enqueue(wp);
-        lock (_cacheLock) _cachedList.Add(wp);
+        _paused = true;
+        lock (_wpLock)
+        {
+            if (_currentWp is WorkpieceCache current &&
+                (WorkpieceCacheIdentity.Matches(current, wp) || current.Equals(wp)))
+                _currentWp = null;
+        }
+        lock (_cacheLock)
+        {
+            var retained = new List<WorkpieceCache>();
+            while (_cacheQueue.TryDequeue(out WorkpieceCache queued))
+            {
+                if (!WorkpieceCacheIdentity.Matches(queued, wp)) retained.Add(queued);
+            }
+            foreach (WorkpieceCache queued in retained) _cacheQueue.Enqueue(queued);
+            _cachedList.RemoveAll(queued => WorkpieceCacheIdentity.Matches(queued, wp));
+        }
+        Console.WriteLine($"[Line1Front] [作废] 机械手1 {wp.IdentityText}：本块软件任务已作废，当前工件及匹配来源缓存已清，不回缓存；引擎保持暂停。请人工移走本板并确认机械手/货叉安全后再恢复。");
     }
 
-    /// <summary>
-    /// 兜底：确保指定工件不在本线显示缓存 _cachedList 中残留。
-    /// <para>
-    /// 正常路径下该工件在 TryDequeueCache 出队时就已同时从 _cacheQueue 与 _cachedList 移除，
-    /// 本方法因此通常什么也不做。加它是为了自愈一种会放大后果的失配：TryDequeueCache 里
-    /// <c>_cachedList.Remove(wp)</c> 的返回值被忽略，而 <see cref="CachedCount"/> 读的正是
-    /// _cachedList.Count；一旦两者不同步，本线会"以为仍有板"却出不了队，同时全局派发器的
-    /// "两线前端缓存都空才派发"闸门会被永久拦住，导致整条派发链停摆。
-    /// </para>
-    /// 只按值精确移除这一块；不触碰 _cacheQueue（避免与派发器并发入队时丢任务），
-    /// 也不清缓存中其它任务。
-    /// </summary>
-    private void EnsureFrontCacheListEntryRemoved(WorkpieceCache wp)
-    {
-        lock (_cacheLock) _cachedList.Remove(wp);
-    }
+    private const string ManipulatorAbortInstruction =
+        "本块软件任务已作废，不回缓存。请人工移走本板，确认机械手/货叉安全后再恢复；软件清理不代表已退磁或已回安全位置。";
 
     /// <summary>
     /// 独立刷新总上料架/中转架状态快照。
@@ -2196,18 +2195,17 @@ public sealed class Line1FrontFlowEngine : IDisposable
             Console.WriteLine($"[Line1Front] [机械手1] ✘ 异常：{ex.Message}");
             if (ex is MagnetFeedbackTimeoutException magnetFeedback)
             {
-                // X6/X7三次未确认时不能按“尚未取到”把工件回缓存：磁铁真实状态未知，保留本趟身份等待人工确认。
-                _paused = true;
-                Console.WriteLine("[Line1Front] ⚠ 机械手1磁铁反馈未确认，保留当前工件并暂停，禁止自动回缓存");
-                OnSafetyAlarm?.Invoke($"1号线机械手1{magnetFeedback.Operation}反馈连续{magnetFeedback.Attempts}次未确认。引擎已暂停，请人工确认磁铁、机械手和工件位置。异常：{magnetFeedback.Message}");
+                // X6/X7三次未确认时不能按“尚未取到”把工件回缓存：磁铁真实状态未知，作废本趟软件任务，实物等待人工处理。
+                PauseAndDiscardManipulatorWorkpiece(wp);
+                Console.WriteLine("[Line1Front] ⚠ 机械手1磁铁反馈未确认，本块任务已作废并暂停，禁止自动回缓存");
+                OnSafetyAlarm?.Invoke($"1号线机械手1{magnetFeedback.Operation}反馈连续{magnetFeedback.Attempts}次未确认。引擎已暂停，请人工确认磁铁、机械手和工件位置。异常：{magnetFeedback.Message}" + "\n" + ManipulatorAbortInstruction);
             }
             else if (holdingWorkpiece && !placedOnFork)
             {
                 // X11已确认吸住, 但还没有安全放到货叉; 此时最危险, 必须停住等人工确认。
-                lock (_wpLock) { _currentWp = null; }
-                _paused = true;
+                PauseAndDiscardManipulatorWorkpiece(wp);
                 Console.WriteLine("[Line1Front] ⚠ 机械手1已吸住工件但未放到货叉！引擎已暂停, 需人工确认机械手/工件位置！");
-                OnSafetyAlarm?.Invoke($"1号线机械手1处理{wp.IdentityText}时发生异常：已吸住工件但未放到货叉。引擎已暂停，请人工确认机械手和工件位置。异常：{ex.Message}");
+                OnSafetyAlarm?.Invoke($"1号线机械手1处理{wp.IdentityText}时发生异常：已吸住工件但未放到货叉。引擎已暂停，请人工确认机械手和工件位置。异常：{ex.Message}" + "\n" + ManipulatorAbortInstruction);
             }
             else if (placedOnFork)
             {
@@ -2220,9 +2218,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         "退磁成功返回并推定工件已放到货叉，但Z回0、机械手安全Y或M801通知未完整成功", true,
                         holdingWorkpiece: false, placed: true,
                         handoffClosed: false);
-                    _paused = true;
+                    PauseAndDiscardManipulatorWorkpiece(wp);
                     Console.WriteLine("[Line1Front] ⚠ 工件已放在货叉，但机械手安全退出/M801未完整完成；货叉门闩保持关闭");
-                    OnSafetyAlarm?.Invoke($"1号线机械手1已将{wp.IdentityText}放到货叉，但Z回0、Y到货叉释放安全点或M801通知未完整完成。货叉未启动，引擎已暂停，请人工确认。异常：{ex.Message}");
+                    OnSafetyAlarm?.Invoke($"1号线机械手1已将{wp.IdentityText}放到货叉，但Z回0、Y到货叉释放安全点或M801通知未完整完成。货叉未启动，引擎已暂停，请人工确认。异常：{ex.Message}" + "\n" + ManipulatorAbortInstruction);
                 }
                 else
                 {
@@ -2240,11 +2238,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 // 另一条线的取料闸门同样要求"它自己的缓存非空"，所以两条线都不会去取 ST007 上这块
                 // 身份不明的板。全局派发器另有 M800 复位门与"两线前端缓存都空才派发"两道闸门，
                 // 保证不会把新任务绑到这块旧板上。物理板仍在 ST007，需人工处理。
-                lock (_wpLock) { _currentWp = null; }
-                // 兜底清理本线缓存中该工件的残留条目：正常路径下它已在出队时移除，
-                // 这里只防 _cachedList 与 _cacheQueue 失配导致 CachedCount 虚高、派发被永久拦住。
-                EnsureFrontCacheListEntryRemoved(wp);
-                _paused = true;
+                PauseAndDiscardManipulatorWorkpiece(wp);
                 Console.WriteLine(
                     $"[Line1Front] [机械手1] ⚠ 板长校验不一致，已丢弃本任务身份（不回退缓存）：{wp.IdentityText} " +
                     $"D100实测={lengthMismatch.MeasuredMm}mm 任务={lengthMismatch.ExpectedMm}mm " +
@@ -2280,11 +2274,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
                             holdingWorkpiece: holdingWorkpiece);
                     }
                 }
-                lock (_wpLock) { _currentWp = null; }
-                RequeueFrontCache(wp);
-                _paused = true;
-                Console.WriteLine("[Line1Front] ⚠ 机械手1未确认吸住工件, 已退回工件缓存并暂停, 请人工确认总上料架/机械手状态");
-                OnSafetyAlarm?.Invoke($"1号线机械手1处理{wp.IdentityText}时发生异常：未确认吸住工件，任务已退回缓存。引擎已暂停，请确认总上料架和机械手状态。异常：{ex.Message}");
+                PauseAndDiscardManipulatorWorkpiece(wp);
+                Console.WriteLine("[Line1Front] ⚠ 机械手1未确认吸住工件, 本块任务已作废、不回缓存并暂停, 请人工确认总上料架/机械手状态");
+                OnSafetyAlarm?.Invoke($"1号线机械手1处理{wp.IdentityText}时发生异常：未确认吸住工件，本块任务已作废，不回缓存。引擎已暂停，请确认总上料架和机械手状态。异常：{ex.Message}" + "\n" + ManipulatorAbortInstruction);
             }
         }
         finally

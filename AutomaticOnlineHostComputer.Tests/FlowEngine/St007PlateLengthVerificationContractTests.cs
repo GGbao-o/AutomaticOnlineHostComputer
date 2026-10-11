@@ -48,16 +48,15 @@ public sealed class St007PlateLengthVerificationContractTests
         string source = ReadFront(fileName);
         string mismatchBranch = ExtractMismatchBranch(source, fileName);
 
-        // 丢弃任务身份：清 _currentWp …
-        Assert.Contains("lock (_wpLock) { _currentWp = null; }", mismatchBranch, StringComparison.Ordinal);
-        // … 并兜底清掉本线缓存中该工件的残留条目（按值精确移除，不触碰 _cacheQueue）…
-        Assert.Contains("EnsureFrontCacheListEntryRemoved(wp);", mismatchBranch, StringComparison.Ordinal);
+        // 共用身份限定的暂停作废入口：清匹配current及来源残留，保留其他任务。
+        // helper的真实状态转换由PausedWorkpieceDiscardTests覆盖。
+        Assert.Contains("PauseAndDiscardManipulatorWorkpiece(wp);", mismatchBranch, StringComparison.Ordinal);
         // … 但绝不整条清空缓存（会丢掉缓存里其它任务）…
         Assert.DoesNotContain("ClearCache()", mismatchBranch, StringComparison.Ordinal);
         // … 也绝不回退本线缓存。若回退，本线缓存长期非空会让"两线前端缓存都空才派发"闸门
         // 永久拦住全局派发，整条派发链停摆。
         Assert.DoesNotContain("RequeueFrontCache", mismatchBranch, StringComparison.Ordinal);
-        Assert.Contains("_paused = true;", mismatchBranch, StringComparison.Ordinal);
+        Assert.Contains("_paused = true;", source[source.IndexOf("private void PauseAndDiscardManipulatorWorkpiece", StringComparison.Ordinal)..], StringComparison.Ordinal);
     }
 
     [Theory]

@@ -432,6 +432,29 @@ public sealed class GrindingFlowEngine : IDisposable
         Console.WriteLine($"[GrindingEngine] ↩ 工件放回缓存 {wp.IdentityText} d={wp.Diameter}  队列长度={CachedCount}");
     }
 
+    /// <summary>异常暂停作废本板时，仅删其完整身份的FIFO残留，不删除下一块队头。</summary>
+    private void DiscardGrindingSourceWorkpiece(WorkpieceCache wp)
+    {
+        int removed = 0;
+        lock (_cacheLock)
+        {
+            for (var node = _cacheQueue.First; node != null;)
+            {
+                var next = node.Next;
+                if (WorkpieceCacheIdentity.Matches(node.Value, wp))
+                {
+                    _cacheQueue.Remove(node);
+                    removed++;
+                }
+                node = next;
+            }
+            _cachedList.RemoveAll(queued => WorkpieceCacheIdentity.Matches(queued, wp));
+        }
+        FlowAlarmPresentationContext.RecordCleanup("研磨机PLC清理等待收尾", "研磨机内存清理等待收尾",
+            $"异常暂停本板任务已作废，不回FIFO；仅清匹配身份残留{removed}项，保留后续任务及已交接下游缓存");
+        Console.WriteLine($"[GrindingEngine] [作废] {wp.IdentityText}：异常暂停，本块任务不回FIFO，已清匹配来源残留{removed}项。请把本块板抽走并确认天车安全后再恢复。");
+    }
+
     /// <summary>清空缓存</summary>
     public void ClearCache()
     {
@@ -1621,7 +1644,7 @@ public sealed class GrindingFlowEngine : IDisposable
 
         _fastNextCycle = true;
         FlowAlarmPresentationContext.RecordCleanup(deviceLog, "研磨机已回Idle，PendingWorkpiece已清",
-            "研磨FIFO未由此清理删除；未取料异常可能已回队，已移交下游的缓存不回滚；请核对实物与队列");
+            "本机清理不删除其他FIFO任务；上料异常暂停已按身份作废本板，非暂停退回保留；已交接下游缓存不回滚");
         Console.WriteLine(
             $"│ [作废] {grinder.Name}{(isLoad ? "上料" : "下料")}异常：本轮已自动作废——" +
             $"PLC下发数据已清、内存工件已清并回空闲、动作账本已清{stale.Length}条；{deviceLog}。" +
@@ -1717,7 +1740,7 @@ public sealed class GrindingFlowEngine : IDisposable
         using var alarmPresentation = FlowAlarmPresentationContext.Begin(action, wp, "研磨", _cfg.Grinding.CraneNo, "研磨机上料");
         alarmPresentation.ObserveFinalState(
             () => { lock (_emergencyLock) return actionVersion != _grindingActionVersion ? "本动作版本已失效，未释放当前新动作的锁；旧动作锁结果需结合应急记录核对" : _craneLockHeldByFlow ? "研磨天车软件锁仍登记持有" : "研磨天车软件锁已释放（不代表现场位置安全）"; },
-            () => { lock (_cacheLock) return _cacheQueue.Any(item => item.PlateNo == wp.PlateNo && item.Sequence == wp.Sequence) ? "研磨FIFO当前仍含本块板身份；处置实物时同时核对队列，自动作废未删除FIFO。" : "研磨FIFO当前未找到本块板身份；已移交下游的缓存不回滚。"; });
+            () => { lock (_cacheLock) return _cacheQueue.Any(item => item.PlateNo == wp.PlateNo && item.Sequence == wp.Sequence) ? "研磨FIFO当前仍含本块板身份；非暂停退回可能保留，请核对实物与队列。" : "研磨FIFO当前未找到本块板身份；已移交下游的缓存不回滚。"; });
         OperationalLog.Info("搬运动作开始", "已创建研磨上料任务", ("板号与序号", wp.IdentityText));
         action.RegisterLock("GrindingCrane");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
@@ -1731,6 +1754,7 @@ public sealed class GrindingFlowEngine : IDisposable
         bool holdingWorkpiece = false;  // X11确认吸住后才认为工件真实在天车上, 不能只看“发过充磁命令”
         bool placedInGrinder = false;   // 退磁放入研磨机后, 工件已离开ST709缓存队列, 异常时绝不能回缓存
         bool operationalPlacementCommitted = false; // 仅供旁路证据，不参与业务判断
+        bool discardWorkpieceOnAbort = false; // 仅本动作异常暂停触发；普通Pause/非暂停退回不删FIFO。
         bool loadDoneNotified = false;  // SetLoadDone成功后, 研磨机PLC已收到上料完成, 状态可进入Machining
         var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled(actionId);
         var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
@@ -2283,6 +2307,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 actionSnapshot: action.Snapshot());
             // 位置未知不能按“尚未充磁”回写FIFO；保留工件身份并暂停，等待人工确认。
             if (!IsGrindingActionCurrent(actionVersion)) return;
+            discardWorkpieceOnAbort = true;
             _paused = true;
             grinder.State = placedInGrinder ? (loadDoneNotified ? GrinderState.Machining : GrinderState.Loading) : GrinderState.Loading;
             grinder.StateChangedAt = DateTime.UtcNow;
@@ -2328,10 +2353,10 @@ public sealed class GrindingFlowEngine : IDisposable
             }
             else
             {
-                RequeueWorkpiece(wp); // 未充磁→工件还在架上→放回缓存
-                Console.WriteLine($"[GrindingEngine] ↩ 工件 d={wp.Diameter} 放回缓存(未充磁)");
+                Console.WriteLine($"[GrindingEngine] 工件 {wp.IdentityText} 尚未确认取走；本次下压异常暂停，任务作废，不回FIFO");
             }
             Console.WriteLine($"══════════════════════════════════════════════");
+            discardWorkpieceOnAbort = true;
             _paused = true;                             // 暂停引擎, 等人工清除急停
             grinder.State = placedInGrinder ? (loadDoneNotified ? GrinderState.Machining : GrinderState.Loading)
                 : (holdingWorkpiece || magnetOn ? GrinderState.Loading : GrinderState.Idle);
@@ -2370,6 +2395,7 @@ public sealed class GrindingFlowEngine : IDisposable
             if (ex is MagnetFeedbackTimeoutException magnetFeedback)
             {
                 // 反馈三次未确认时，不能把工件当作仍在ST709而回缓存；先暂停保留本轮身份供人工核实。
+                discardWorkpieceOnAbort = true;
                 _paused = true;
                 grinder.State = GrinderState.Loading;
                 grinder.PendingWorkpiece = wp;
@@ -2379,6 +2405,7 @@ public sealed class GrindingFlowEngine : IDisposable
             else if (placedInGrinder)
             {
                 // 已放进研磨机后, 即使磁铁已退磁也不能回缓存, 否则同一块板会被再次分配。
+                discardWorkpieceOnAbort = true;
                 _paused = true;
                 grinder.State = loadDoneNotified ? GrinderState.Machining : GrinderState.Loading;
                 grinder.PendingWorkpiece = wp;
@@ -2388,6 +2415,7 @@ public sealed class GrindingFlowEngine : IDisposable
             else if (holdingWorkpiece || magnetOn)
             {
                 // X11确认吸住后, 异常必须保留在途数据, 由人工确认天车上工件去向。
+                discardWorkpieceOnAbort = true;
                 _paused = true; // 暂停引擎防止天车带着工件继续动
                 grinder.State = GrinderState.Loading;
                 grinder.PendingWorkpiece = wp;
@@ -2409,6 +2437,8 @@ public sealed class GrindingFlowEngine : IDisposable
             // 异常自动作废：这一轮没走到 action.Complete(Completed) 就清这台研磨机的
             // PLC 下发数据与内存工件数据并回空闲。放在 finally 最前面，与两个流程的收尾保持一致。
             // 中转架账本完全不碰。
+            if (discardWorkpieceOnAbort && IsGrindingActionCurrent(actionVersion))
+                DiscardGrindingSourceWorkpiece(wp);
             if (action.Disposition != FlowActionDisposition.Completed)
                 await ClearGrinderOnAbortAsync(grinder, isLoad: true);
 
