@@ -31,14 +31,32 @@ public sealed class GrindingTargetParameterParallelContractTests
     }
 
     [Fact]
-    public void Preparation_or_fine_tune_failure_clears_target_parameters_and_outputs_but_keeps_pending()
+    public void Preparation_failure_clears_outputs_with_bounded_token_and_final_abort_clears_pending()
     {
         string source = ReadFlowSource();
 
         Assert.Contains("ClearTargetGrinderPreparationAsync", source, StringComparison.Ordinal);
-        Assert.Contains("await grinder.Svc!.ClearEmergencyRegistersAsync(CancellationToken.None)", source, StringComparison.Ordinal);
+        Assert.Contains("await grinder.Svc!.ClearEmergencyRegistersAsync(cleanupCts.Token)", source, StringComparison.Ordinal);
+        Assert.Contains("new CancellationTokenSource(10_000)", source, StringComparison.Ordinal);
+        Assert.Contains("if (discardWorkpieceOnAbort && IsGrindingActionCurrent(actionVersion))", source);
+        Assert.Contains("await ClearGrinderOnAbortAsync(grinder, isLoad: true);", source);
+        Assert.Contains("grinder.PendingWorkpiece = null;", source);
         Assert.Contains("自动清理研磨机目标位准备参数", source, StringComparison.Ordinal);
         Assert.Contains("Pending保留", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Target_preparation_cleanup_skips_cancelled_and_superseded_actions()
+    {
+        string block = ReadTargetPreparationBlock();
+        int firstClear = block.IndexOf("await ClearTargetGrinderPreparationAsync", StringComparison.Ordinal);
+        int firstGuard = block.LastIndexOf("if (!IsGrindingActionCurrent(actionVersion)) throw;", firstClear, StringComparison.Ordinal);
+        int firstCancel = block.LastIndexOf("catch (OperationCanceledException) when (ct.IsCancellationRequested)", firstClear, StringComparison.Ordinal);
+        int secondClear = block.IndexOf("await ClearTargetGrinderPreparationAsync", firstClear + 1, StringComparison.Ordinal);
+        int secondGuard = block.LastIndexOf("if (!IsGrindingActionCurrent(actionVersion)) throw;", secondClear, StringComparison.Ordinal);
+        int secondCancel = block.LastIndexOf("catch (OperationCanceledException) when (ct.IsCancellationRequested)", secondClear, StringComparison.Ordinal);
+        Assert.True(firstCancel >= 0 && firstGuard > firstCancel && firstClear > firstGuard);
+        Assert.True(secondCancel > firstClear && secondGuard > secondCancel && secondClear > secondGuard);
     }
 
     private static string ReadTargetPreparationBlock()

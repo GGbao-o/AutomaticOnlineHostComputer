@@ -1,4 +1,4 @@
-namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
+﻿namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
 public sealed class MagnetFeedbackSafetyContractTests
 {
@@ -13,10 +13,14 @@ public sealed class MagnetFeedbackSafetyContractTests
 
         Assert.Contains("exception is MagnetFeedbackTimeoutException", resolver, StringComparison.Ordinal);
         Assert.Contains("PauseLineManual", resolver, StringComparison.Ordinal);
-        Assert.Contains("ex is MagnetFeedbackTimeoutException", balancing, StringComparison.Ordinal);
+        Assert.Contains("PickupProbeHelper.PickAsync", balancing);
+        Assert.Contains("_paused = true;", balancing);
+        Assert.Contains("action.Discard(", balancing);
         Assert.Contains("ex is MagnetFeedbackTimeoutException", grinding, StringComparison.Ordinal);
-        Assert.Contains("ex is MagnetFeedbackTimeoutException", line1Front, StringComparison.Ordinal);
-        Assert.Contains("ex is MagnetFeedbackTimeoutException", line2Front, StringComparison.Ordinal);
+        Assert.Contains("PickupProbeHelper.PickAsync", line1Front);
+        Assert.Contains("PauseAndDiscardManipulatorWorkpiece(wp);", line1Front);
+        Assert.Contains("PickupProbeHelper.PickAsync", line2Front);
+        Assert.Contains("PauseAndDiscardManipulatorWorkpiece(wp);", line2Front);
         Assert.Contains("OnSafetyAlarm?.Invoke", balancing, StringComparison.Ordinal);
         Assert.Contains("OnSafetyAlarm?.Invoke", grinding, StringComparison.Ordinal);
     }

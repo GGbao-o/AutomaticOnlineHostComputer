@@ -1,4 +1,4 @@
-using AutomaticOnlineHostComputer.Infrastructure.Config;
+﻿using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Config;
 
 namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
@@ -39,7 +39,7 @@ public sealed class GrindingM731OverlapContractTests
         string source = Read("Service", "FlowEngine", "GrindingFlowEngine.cs");
         string method = ExtractMethod(source, "private async Task ProcessWorkpieceAsync");
 
-        int zStart = method.IndexOf("Task zSafeTask = crane.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);", StringComparison.Ordinal);
+        int zStart = method.IndexOf("Task zSafeTask = activeZSafeTask = crane.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);", StringComparison.Ordinal);
         int delay = method.IndexOf("await Task.Delay(_cfg.Grinding.M731NotifyDelayMs, ct);", StringComparison.Ordinal);
         int m731Start = method.IndexOf("Task m731Task = _mc65.WriteMBitInWordAsync(720, 11, true, ct);", StringComparison.Ordinal);
         int join = method.IndexOf("await Task.WhenAll(zSafeTask, m731Task);", StringComparison.Ordinal);

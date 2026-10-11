@@ -5,6 +5,28 @@ namespace AutomaticOnlineHostComputer.Tests.Presentation;
 
 public sealed class SafetyAlarmPresentationTests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Manipulator_alarm_uses_manipulator_identity_and_preserves_probe_evidence(int number)
+    {
+        var action = new FlowActionContext(Guid.NewGuid().ToString(), "取板", $"机械手{number}", "A/1", "来源", "目标", "缓存");
+        using var context = FlowAlarmPresentationContext.Begin(action, null, "动平衡", 0, "取板");
+        action.BeginStep(FlowActionStep.ProbeSourcePresence);
+        FlowAlarmPresentationContext.RecordPickupProbe("第2位置：实际Z=105，X11=0，尚未持件");
+        FlowAlarmPresentationContext.RecordFailure(new IOException("输入读取失败"));
+        action.Discard("本趟已作废");
+        var detail = context.Snapshot();
+        Assert.Equal(number, detail.ManipulatorNo);
+        string text = SafetyAlarmFormatter.Format(detail, null);
+        Assert.Contains($"机械手{number}", text);
+        Assert.DoesNotContain("0号天车", text);
+        Assert.Contains("第2位置：实际Z=105", text);
+        Assert.Contains("尚未持件", text);
+        Assert.Equal(FlowActionStep.ProbeSourcePresence, detail.FailureAction!.Step);
+    }
+
     [Fact]
     public void Failure_keeps_workpiece_and_step_when_business_memory_is_cleared()
     {

@@ -12,6 +12,7 @@ internal enum FlowActionStep
     MoveXYToSource,
     FineTuneSource,
     MoveZDownToPick,
+    ProbeSourcePresence,
     MagnetOnSent,
     ConfirmPickup,
     HoldingWorkpiece,
@@ -24,7 +25,8 @@ internal enum FlowActionStep
     TargetPendingHandoff,
     NotifyDownstream,
     ReturnSafe,
-    Completed
+    Completed,
+    Discarded
 }
 
 /// <summary>当前步骤最后一次会改变现场的命令的确定性。</summary>
@@ -43,7 +45,8 @@ internal enum FlowWorkpieceOwnership
     OnCarrier,
     AtTargetPendingHandoff,
     Completed,
-    ManualConfirmation
+    ManualConfirmation,
+    Discarded
 }
 
 /// <summary>动作的最终业务结论。WaitRetry 仅允许尚未发送物理命令的前置等待使用。</summary>
@@ -54,7 +57,8 @@ internal enum FlowActionDisposition
     PauseSourceReserved,
     PauseOnCarrier,
     PauseAtTargetPendingHandoff,
-    Completed
+    Completed,
+    Discarded
 }
 
 /// <summary>
@@ -137,7 +141,7 @@ internal sealed class FlowActionContext
     public bool IsFinalized => Disposition is FlowActionDisposition.PauseSourceReserved
         or FlowActionDisposition.PauseOnCarrier
         or FlowActionDisposition.PauseAtTargetPendingHandoff
-        or FlowActionDisposition.Completed;
+        or FlowActionDisposition.Completed or FlowActionDisposition.Discarded;
     public string PauseReason { get; private set; } = string.Empty;
     public string Detail { get; private set; } = string.Empty;
     /// <summary>仅用于异常说明，保存最近一次成功返回的步骤描述。</summary>
@@ -151,6 +155,14 @@ internal sealed class FlowActionContext
     }
 
     public bool TryReleaseLock(string lockName) => _heldLocks.Remove(lockName);
+
+    /// <summary>同板第二次取回是独立探测阶段，不沿用上次持件反馈。</summary>
+    public void ResetPickupFeedback()
+    {
+        ThrowIfFinalized();
+        X11 = null;
+        MagnetOn = null;
+    }
 
     /// <summary>写入已从设备读取/已确认的事实；null 表示本次没有该类反馈而非 false。</summary>
     public void RecordFeedback(FlowActionPosition lastKnownPosition, bool? x11, bool? magnetOn, string detail)
@@ -263,6 +275,17 @@ internal sealed class FlowActionContext
         Step = FlowActionStep.Completed;
         Detail = detail;
         FlowActionManualRegistry.MarkCompleted(OperationId);
+    }
+
+    /// <summary>严重异常的软件作废结案；实体位置及磁铁状态仍由人工确认。</summary>
+    public void Discard(string detail)
+    {
+        Disposition = FlowActionDisposition.Discarded;
+        Ownership = FlowWorkpieceOwnership.Discarded;
+        Step = FlowActionStep.Discarded;
+        ManualConfirmationRequired = false;
+        Detail = detail;
+        FlowActionManualRegistry.Remove(OperationId);
     }
 
     private void ThrowIfFinalized()

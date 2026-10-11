@@ -100,3 +100,9 @@ ComputeYOffset以BoreType==100选LargeBoreOffset，其它值选SmallBoreOffset�
 5. 偏差满足容差只记录通过；需要调整时先核对修正方向、幅度和稳定反馈。程序能发修正不证明标定本身正确，现场应先完成对应工位标定。
 
 源码：Infrastructure/Config/MotionConfig.cs；Presentation/ViewModels/Config/ConfigPageViewModel.cs；HomeViewModel.CreateConfigPageViewModel；XAbsFineTuneHelper.ResolveActiveAxes/VerifyAndFineTuneAsync；两条后端DoHandshake/DoUnload；GrindingFlowEngine四处VerifyAndFineTuneAsync。
+
+## 新取板动作的配置快照
+
+新统一取板在每次动作开始时快照grinding.x11StableDelayMs（当前仓库500ms），同一趟各探测位置与充磁后确认使用同一个值，动作期间改共享内存不会中途改变它。前天车打号取回也使用本趟快照。外部JSON仍不自动热加载。
+
+首次Z仍由原直径/数据库/偏移公式计算，补偿改以实际停稳Z0为基准，+5/+10不重复套Z偏移；局部探测到位容差1mm/超时10秒为组件常量，不更改正常运动/XY绝对微调容差。斜床动态绝对Y及研磨Y标定原公式保持。见[统一取板说明](X11充磁前探测与异常作废.md)。

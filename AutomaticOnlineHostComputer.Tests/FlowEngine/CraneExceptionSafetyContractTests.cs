@@ -1,4 +1,4 @@
-namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
+﻿namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
 /// <summary>防止物理命令异常以后，账本、引擎暂停和页面告警又被拆成相互矛盾的分支。</summary>
 public sealed class CraneExceptionSafetyContractTests
@@ -9,17 +9,19 @@ public sealed class CraneExceptionSafetyContractTests
     public void Front_crane_sent_command_exception_pauses_before_any_retry_queue(string file)
     {
         string source = Read("Service", "FlowEngine", file);
+        int start = source.IndexOf("private async Task ProcessCraneFrontAsync(");
+        int end = source.IndexOf("private async Task MarkingHandshakeAsync", start);
+        string method = source[start..end];
+        int catchAt = method.LastIndexOf("\n        catch (Exception ex)");
+        string severe = method[catchAt..];
+        Assert.Contains("_paused = true;", severe);
+        Assert.Contains("DiscardFrontCraneQueueResidues(wp)", severe);
+        Assert.Contains("ClearFrontCraneTask();", severe);
+        Assert.Contains("action.Discard(", severe);
+        Assert.DoesNotContain("EnqueueFrontCrane(", severe);
+        Assert.DoesNotContain("_forkPhase =", severe);
+        Assert.Contains("OnSafetyAlarm?.Invoke", severe);
 
-        int resolver = source.IndexOf("FlowActionExceptionResolver.Resolve(action, ex)", StringComparison.Ordinal);
-        int manualPause = source.IndexOf("else if (exceptionConclusion == FlowActionExceptionConclusion.PauseLineManual)", resolver, StringComparison.Ordinal);
-        int safetyCallback = source.IndexOf("OnSafetyAlarm?.Invoke", manualPause, StringComparison.Ordinal);
-        int retryQueue = source.IndexOf("_craneQueue.Enqueue(wp);", manualPause, StringComparison.Ordinal);
-
-        Assert.True(resolver >= 0, $"{file}必须使用统一异常裁决器");
-        Assert.True(manualPause > resolver, $"{file}必须存在命令已发后的人工暂停分支");
-        Assert.True(safetyCallback > manualPause && safetyCallback < retryQueue,
-            $"{file}物理命令响应未知必须先走主页安全回调，不能直接回队");
-        Assert.Contains("唯一允许自动重试的结论", source, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -28,11 +30,15 @@ public sealed class CraneExceptionSafetyContractTests
     public void Rear_unload_unknown_x11_uses_pending_safety_alarm_callback(string file)
     {
         string source = Read("Service", "FlowEngine", file);
+        int start = source.IndexOf("private async Task DoUnload(");
+        string method = source[start..];
+        Assert.Contains("PickupProbeHelper.PickAsync", method);
+        Assert.Contains("operation.HoldForManualSafetyRecovery(ex.Message);", method);
+        Assert.Contains("pendingSafetyAlarm =", method);
+        Assert.Contains("OnRearCraneSafetyAlarm?.Invoke", method);
+        Assert.Contains("await ClearSkewOnAbortAsync(bed, isLoad: false);", method);
+        Assert.DoesNotContain("引擎未暂停，将继续自动重试", method);
 
-        Assert.Contains("FlowActionExceptionResolver.Resolve(action, ex)", source, StringComparison.Ordinal);
-        Assert.Contains("物理命令响应未知", source, StringComparison.Ordinal);
-        Assert.Contains("物理命令已发送但X11、工件位置或目标交接未确认", source, StringComparison.Ordinal);
-        Assert.Contains("OnRearCraneSafetyAlarm?.Invoke(pendingSafetyAlarm)", source, StringComparison.Ordinal);
     }
 
     [Fact]

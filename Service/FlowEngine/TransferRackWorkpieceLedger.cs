@@ -105,6 +105,23 @@ internal sealed class TransferRackWorkpieceLedger
         }
     }
 
+    /// <summary>严重动作失败作废来源板；同时保护预约归属及新到达代次，不伪造取走。</summary>
+    public bool DiscardReservedWorkpiece(string rackCode, string operationId, long arrivalSequence, WorkpieceCache workpiece)
+    {
+        lock (_sync)
+        {
+            if (!_reservations.TryGetValue(rackCode, out var reservation) ||
+                reservation.OperationId != operationId ||
+                !_arrivalSequences.TryGetValue(rackCode, out var currentArrival) || currentArrival != arrivalSequence ||
+                !_workpieces.TryGetValue(rackCode, out var current) || !WorkpieceCacheIdentity.Matches(current, workpiece))
+                return false;
+            _reservations.Remove(rackCode);
+            _arrivalSequences.Remove(rackCode);
+            _workpieces.Remove(rackCode);
+            return true;
+        }
+    }
+
     public bool ReleaseReservation(string rackCode, string operationId)
     {
         lock (_sync)

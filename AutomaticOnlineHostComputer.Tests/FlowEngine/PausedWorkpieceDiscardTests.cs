@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using AutomaticOnlineHostComputer.Service;
@@ -150,7 +150,7 @@ public sealed class PausedWorkpieceDiscardTests
         string source = Read(file);
         string pickup = Slice(source, "private async Task ProcessManipulatorPickupAsync", "private async Task<bool> MoveManipulator1ToPickupStandbyAfterForkReleaseAsync");
         Assert.DoesNotContain("RequeueFrontCache(wp)", pickup);
-        Assert.Equal(5, pickup.Split("PauseAndDiscardManipulatorWorkpiece(wp);").Length - 1);
+        Assert.Equal(1, pickup.Split("PauseAndDiscardManipulatorWorkpiece(wp);").Length - 1);
         Assert.Contains("_manipulatorLock.Release();", pickup);
     }
 
@@ -162,7 +162,7 @@ public sealed class PausedWorkpieceDiscardTests
         string pressure = Slice(pickup, "catch (PressureStopException pEx)", "catch (Exception ex)");
         Assert.DoesNotContain("RequeueWorkpiece(wp)", pressure);
         Assert.Contains("discardWorkpieceOnAbort = true;", pressure);
-        Assert.Contains("RequeueWorkpiece(wp);", pickup); // TypeA准入退回及普通未充磁异常保留。
+        Assert.Contains("RequeueWorkpiece(wp);", pickup); // TypeA准入退回保留；严重未充磁异常已禁止回队。
         string cleanup = pickup[pickup.LastIndexOf("\n        finally", StringComparison.Ordinal)..];
         Assert.Contains("discardWorkpieceOnAbort && IsGrindingActionCurrent(actionVersion)", cleanup);
         Assert.True(cleanup.IndexOf("DiscardGrindingSourceWorkpiece(wp)", StringComparison.Ordinal) <

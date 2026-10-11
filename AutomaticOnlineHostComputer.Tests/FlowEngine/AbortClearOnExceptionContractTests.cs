@@ -1,10 +1,10 @@
-namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
+﻿namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
 /// <summary>
 /// 异常自动作废清零的源码契约。
 /// <para>
 /// 现场模型：异常了这块板会被人工抽走，设备侧随即变空，下一轮派发拿别的板。
-/// 所以引擎只清<b>这台斜床 / 这台研磨机</b>的 PLC 下发数据与内存工件数据并回空闲，<b>完全不碰中转架账本</b>。
+/// 所以引擎只清<b>这台斜床 / 这台研磨机</b>的 PLC 下发数据与内存工件数据并回空闲，<b>来源作废由调用方核对预约及到达代次</b>。
 /// </para>
 /// </summary>
 public sealed class AbortClearOnExceptionContractTests
@@ -17,7 +17,7 @@ public sealed class AbortClearOnExceptionContractTests
     [InlineData(Line1, "await ClearSkewOnAbortAsync(bed, isLoad: true);", "await ClearSkewOnAbortAsync(bed, isLoad: false);")]
     [InlineData(Line2, "await ClearSkewOnAbortAsync(bed, isLoad: true);", "await ClearSkewOnAbortAsync(bed, isLoad: false);")]
     [InlineData(Grinding, "await ClearGrinderOnAbortAsync(grinder, isLoad: true);", "await ClearGrinderOnAbortAsync(grinder, isLoad: false);")]
-    public void Abort_clear_runs_in_finally_guarded_by_not_completed(
+    public void Abort_clear_runs_in_finally_only_for_current_serious_failed_action(
         string file, string loadCall, string unloadCall)
     {
         string source = Read(file);
@@ -27,18 +27,18 @@ public sealed class AbortClearOnExceptionContractTests
             int at = source.IndexOf(call, StringComparison.Ordinal);
             Assert.True(at >= 0, $"{file} 缺少调用 {call}");
 
-            // 判据必须是 Completed 排除。不得用 IsFinalized —— 它对自己"成功"与"人工暂停"都为真。
-            const string guard = "if (action.Disposition != FlowActionDisposition.Completed)";
+            string guard = file == Grinding
+                ? "if (discardWorkpieceOnAbort && IsGrindingActionCurrent(actionVersion))"
+                : "if (discardOnFailure && operation.IsValid && ReferenceEquals(bed.ActiveOperation, operation))";
             int guardAt = source.LastIndexOf(guard, at, StringComparison.Ordinal);
-            Assert.True(guardAt >= 0 && at - guardAt < 200,
-                $"{file} 的 {call} 未被 Completed 排除条件守卫");
+            Assert.True(guardAt >= 0 && at - guardAt < 1000, $"{file}清理须由本动作严重异常及版本共同守卫");
 
-            // 必须在 finally 内，且 finally 与调用之间不得出现 catch。
+            // 必须在当前动作finally内，允许其中等待并收束已经启动的Z任务。
             // 注意：helper 的说明注释里也写了"finally"这个词，所以必须匹配行首缩进的 finally 关键字，
             // 不能用裸的 "finally" 去 LastIndexOf —— 否则会命中注释、把断言判错。
             int finallyAt = source.LastIndexOf("\n        finally", guardAt, StringComparison.Ordinal);
             Assert.True(finallyAt >= 0, $"{file} 的 {call} 前方未找到行首 finally 关键字");
-            Assert.DoesNotContain("catch", source[finallyAt..at], StringComparison.Ordinal);
+            Assert.DoesNotContain("\n        catch", source[finallyAt..at], StringComparison.Ordinal);
         }
 
         // 上料与下料必须分别传 true / false，配反会让日志与账本快照清错方向。
@@ -68,7 +68,8 @@ public sealed class AbortClearOnExceptionContractTests
 
         // ④ 清设备下发数据必须传 CancellationToken.None：本方法在 finally 执行，
         //    动作的 ct 可能已被应急取消，沿用它会抛出并掩盖真正的原始异常。
-        Assert.Contains("CancellationToken.None", helper, StringComparison.Ordinal);
+        Assert.Contains("new CancellationTokenSource(10_000)", helper);
+        Assert.Contains("cleanupCts.Token", helper);
         Assert.DoesNotContain("ClearSkewDeviceEmergencyRegistersAsync(bed, ct)", helper, StringComparison.Ordinal);
         Assert.DoesNotContain("ClearEmergencyRegistersAsync(ct)", helper, StringComparison.Ordinal);
 
@@ -87,12 +88,9 @@ public sealed class AbortClearOnExceptionContractTests
         if (clearsCraneTask)
             Assert.Contains("ClearRearCraneTask();", helper, StringComparison.Ordinal);
 
-        // ⑥ 清该设备的动作账本快照，避免异常监控继续挂"待人工确认"。
-        //    斜床走 SettleManualRear*ForEmergency 间接清，研磨直接操作注册表，两者都算数。
-        bool clearsLedger = helper.Contains("FlowActionManualRegistry", StringComparison.Ordinal)
-            || helper.Contains("SettleManualRearLoadForEmergency", StringComparison.Ordinal)
-            || helper.Contains("SettleManualRearUnloadOnCarrierForEmergency", StringComparison.Ordinal);
-        Assert.True(clearsLedger, $"{file} 的作废 helper 未清该设备的动作账本快照");
+        // 本次活动快照由调用方按actionId结案，不能清同机台其他动作。
+        Assert.DoesNotContain("FlowActionManualRegistry.Snapshot()", helper);
+        Assert.Contains("action.Discard(", Read(file));
 
         // ⑦ 日志/告警必须同时说清"已自动作废"和下一步动作。
         Assert.Contains("本轮已自动作废", helper, StringComparison.Ordinal);

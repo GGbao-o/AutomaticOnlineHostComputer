@@ -2094,7 +2094,8 @@ public sealed class HomeViewModel : ObservableObject
             if (_shownSafetyAlarmActions.Contains(context.ActionId)) return true;
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher == null) return false;
-            var reader = new CraneAlarmSnapshotReader(_craneCache.GetCraneInfo);
+            var reader = new CraneAlarmSnapshotReader(context.ManipulatorNo.HasValue
+                ? _manipulatorCache.GetManipulatorInfo : _craneCache.GetCraneInfo);
             model = new SafetyAlarmDialogViewModel(context, reader.ReadAsync, update =>
             {
                 if (dispatcher.CheckAccess()) update();

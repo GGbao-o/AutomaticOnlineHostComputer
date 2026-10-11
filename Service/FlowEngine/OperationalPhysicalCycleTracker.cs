@@ -87,14 +87,15 @@ internal sealed class OperationalPhysicalCycleTracker
         _currentX11Valid = false;
     });
 
-    public void CompleteX11(bool value, DateTime readAtUtc) => Try(() =>
+    public void CompleteX11(bool value, DateTime readAtUtc, bool confirmsHolding = true) => Try(() =>
     {
         _x11LastValue = value ? 1 : 0;
         _hasSuccessfulX11 = true;
         _currentX11Valid = true;
         _lastSuccessfulX11AtUtc = readAtUtc;
         _lastSuccessfulCheckpoint = $"X11成功读取为{_x11LastValue}（UTC {readAtUtc:O}）";
-        if (value)
+        // 放磁状态的来源板探测不是持件证据。
+        if (value && confirmsHolding)
             _holdingWorkpiece = EvidenceValue<bool>.Confirmed(true, $"{_x11StageName}成功读取X11=1");
     });
 

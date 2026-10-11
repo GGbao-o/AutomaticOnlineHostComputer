@@ -1511,6 +1511,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     // ═══════════════════════════════════════════════════════════════════
     private async Task DoLoad(SkewCtx bed, string rs, CancellationToken ct)
     {
+        int pickupStableDelayMs = _cfg.Grinding.X11StableDelayMs;
         string actionId = OperationalEventContextFactory.NewActionId("L1-REAR-LOAD");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         bool transferLocked = false; // 新Zone模型下不再使用_transferRackLock作为中转架业务互斥
@@ -1539,21 +1540,9 @@ public sealed class Line1RearFlowEngine : IDisposable
             Console.WriteLine($"[上料] ❌ 失败: {wp.IdentityText} L={wp.Length}mm 超出 {bed.Code} 最大加工长度 {_cfg.SkewBed.GetMaxWorkpieceLengthMm(bed.Code)}mm, 已退回中转架缓存");
             return;
         }
-        try
-        {
-            Console.WriteLine($"[上料] {bed.Code} 已选中，天车取板前清理上位机命令输出...");
-            await ClearSkewLoadCommandOutputsAsync(bed, ct);
-        }
-        catch (Exception ex)
-        {
-            _rackLedger.ReleaseReservation(rs, actionId);
-            _craneRearLock.Release();
-            bed.St = SkewState.Idle;
-            Console.WriteLine($"[上料] ❌ {bed.Code} 上料前命令清理失败，未取中转架{rs}工件，缓存已恢复：{ex.Message}");
-            return;
-        }
         wp.ReportStage($"1号线 后端上斜床 {bed.Code}");
         bool mag = false;
+        bool discardOnFailure = false;
         bool holdingWorkpiece = false; // 只有X11确认后才算工件已经离开中转架并由后天车持有
         // 物理命令一旦开始，后续通信异常的结果必须视为未知，不能自动重试或自动退避。
         bool physicalCommandStarted = false;
@@ -1579,6 +1568,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         //此时已经获得工件的信息
         try
         {
+            await ClearSkewLoadCommandOutputsAsync(bed, ct);
             // 中转架位于打号机和斜床1中间，进入中转架取料必须同时持有ZoneMT+ZoneTS。
             // 取料完成且Z轴升到安全高度后：
             //   - 普通斜床：释放ZoneMT+ZoneTS；
@@ -1703,157 +1693,21 @@ public sealed class Line1RearFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             Console.WriteLine($"│ [取料] step3: Z下降到{pz + _oz}");
             action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, 0), "来源位XY微调完成");
-            action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(rx + _ox, ry + _oy, pz + _oz), "Z下降取料");
-            operationalTracker.BeginZDown(pz + _oz);
-            try
-            {
-                action.MarkCommandSent();
-                await cr.MoveAbsoluteAsync(-1, -1, pz + _oz, ct: ct);
-                action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, pz + _oz), "来源位取料Z到位");
-                operationalTracker.CompleteZDown();
-            }
-            catch (PressureStopException)
-            {
-                operationalTracker.MarkZUnknown("Z下降触发下压保护，恢复后实际位置需由后续安全高度命令确认");
-                await cr.RecoverFromPressureStopAsync(ct);
-                throw;
-            }
-
-            // step4: Z↓到位→充磁→等3s→查X11(63497)→有版就Z↑, 没版就退磁→Z↓5mm→充磁→等3s→再查, 最多2次
-            Console.WriteLine("│ [取料] step4: 充磁→等3s→X11检测");
-            int currentZ = pz + _oz;
-            operationalTracker.BeginX11Stage("充磁后持件确认");
-            for (int retry = 0; retry <= 2; retry++)
-            {
-                if (retry == 0)
-                {
-                    Console.WriteLine("│ [取料] 充磁");
-                    action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "来源位首次充磁");
-                    action.MarkCommandSent();
-                    operationalTracker.BeginMagnetOn();
-                    try
-                    {
-                        await cr.MagnetOnAsync(ct);
-                        operationalTracker.CompleteMagnetOn();
-                    }
-                    catch (Exception ex)
-                    {
-                        operationalTracker.FailMagnetOn();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
-                            operationalSite with { ActionStage = $"{rs}首次充磁" }, operationalTracker, ex,
-                            "充磁方法异常，不能证明命令是否发送或磁铁实际状态", true);
-                        throw;
-                    }
-                    mag = true;
-                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "首次充磁调用成功返回");
-                    action.RecordFeedback(FlowActionPosition.Unknown, null, true, "首次充磁调用成功返回");
-                }
-                else
-                {
-                    Console.WriteLine($"│ [取料] 退磁→Z↓到{currentZ}→充磁");
-                    action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试前退磁");
-                    action.MarkCommandSent();
-                    operationalTracker.BeginMagnetOff();
-                    try
-                    {
-                        await cr.MagnetOffAsync(ct);
-                        operationalTracker.CompleteMagnetOff();
-                    }
-                    catch (Exception ex)
-                    {
-                        operationalTracker.FailMagnetOff();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
-                            operationalSite with { ActionStage = $"{rs}X11重试前退磁" }, operationalTracker, ex,
-                            "退磁方法异常，实际退磁结果未知", true, holdingWorkpiece: holdingWorkpiece);
-                        throw;
-                    }
-                    mag = false;
-                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试前退磁成功返回");
-                    action.RecordFeedback(FlowActionPosition.Unknown, null, false, "X11重试前退磁成功返回");
-                    try
-                    {
-                        operationalTracker.BeginZDown(currentZ);
-                        action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试下探Z");
-                        action.MarkCommandSent();
-                        await cr.MoveAbsoluteAsync(-1, -1, currentZ, ct: ct);
-                        action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试下探Z到位");
-                    }
-                    catch (PressureStopException)
-                    {
-                        await cr.RecoverFromPressureStopAsync(ct);
-                        throw;
-                    }
-
-                    operationalTracker.BeginMagnetOn();
-                    action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试后充磁");
-                    action.MarkCommandSent();
-                    try
-                    {
-                        await cr.MagnetOnAsync(ct);
-                        operationalTracker.CompleteMagnetOn();
-                    }
-                    catch (Exception ex)
-                    {
-                        operationalTracker.FailMagnetOn();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
-                            operationalSite with { ActionStage = $"{rs}下探后再次充磁" }, operationalTracker, ex,
-                            "重试充磁方法异常，不能证明命令是否发送或磁铁实际状态", true);
-                        throw;
-                    }
-                    mag = true;
-                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11重试后充磁调用成功返回");
-                    action.RecordFeedback(FlowActionPosition.Unknown, null, true, "X11重试后充磁调用成功返回");
-                }
-
-                Console.WriteLine("│ [取料] 等3s让X11稳定...");
-                await Task.Delay(_cfg.Grinding.X11StableDelayMs, ct); // X11稳定延时(配置文件)
-                operationalTracker.BeginX11Attempt();
-                bool x11;
-                try
-                {
-                    x11 = await cr.ReadXBitAsync(63497, ct);
-                    operationalTracker.CompleteX11(x11, DateTime.UtcNow);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    operationalTracker.FailX11();
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_X11_READ_FAILED",
-                        operationalSite with { ActionStage = $"{rs}充磁后X11第{retry + 1}次读取" }, operationalTracker, ex,
-                        "充磁后X11读取失败；本次值无效并保留最后一次成功值（如有）", true);
-                    throw;
-                }
-                physicalTracker?.TryObserveX11(x11);
-                action.BeginStep(FlowActionStep.ConfirmPickup, new FlowActionPosition(rx + _ox, ry + _oy, currentZ), $"充磁后X11第{retry + 1}次读取");
-                action.RecordFeedback(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), x11, mag, $"X11={x11}");
-                Console.WriteLine($"│ [取料] X11={(x11 ? "1(有版)" : "0(无版)")} (第{retry + 1}次)");
-                if (x11)
-                {
-                    holdingWorkpiece = true;
-                    // X11是来源所有权转移的唯一证据；只有此刻才允许从中转架账本删除。
-                    if (!_rackLedger.CommitPickup(rs, actionId, out _, out _))
-                        throw new InvalidOperationException($"中转架{rs}工件预约提交失败，不能确认软件身份已随天车转移");
-                    action.SetOwnership(FlowWorkpieceOwnership.OnCarrier);
-                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, currentZ), "X11=1确认工件已由后天车持有");
-                    action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece);
-                    Console.WriteLine($"│ [取料] ✓ X11=1 吸到! Z↑到安全高度{sz}");
-                    //x11=1 z回安全位置
-                    action.MarkCommandSent();
-                    await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
-                    action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, sz), "取料后Z已升安全高度");
-                    physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "中转架取料后Z升安全命令成功返回");
-                    break;
-                }
-
-                if (retry > 1)
-                {
-                    loadState.X11PickupFailed = true;
-                    // 最终结构化事件延后到finally：一次记录退磁、Z、退避、锁和暂停的最终结果。
-                    throw new Exception("取料失败: 3次充磁后X11仍=0");
-                }
-                currentZ += 5;
-                loadState.ZMayBeDown = true; // Z已降到低位，即使后续异常也不能横移X
-                Console.WriteLine($"│ [取料] ⚠ X11=0 未吸到, 准备下探5mm重试");
-            }
+            loadState.ZMayBeDown = true;
+            var pickup = await PickupProbeHelper.PickAsync(cr, pz + _oz, pickupStableDelayMs,
+                action, operationalTracker, ct, validateAction: operation.ThrowIfInvalid);
+            int currentZ = pickup.ActualZ;
+            mag = true;
+            holdingWorkpiece = true;
+            physicalTracker?.TryObserveX11(true);
+            // 只有充磁成功且充磁后X11=1才提交中转架取走。
+            if (!_rackLedger.CommitPickup(rs, actionId, out _, out _))
+                throw new InvalidOperationException($"中转架{rs}工件预约提交失败");
+            action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece);
+            action.MarkCommandSent();
+            await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
+            action.Confirm(new FlowActionPosition(rx + _ox, ry + _oy, sz), "取料后Z已升安全高度");
+            physicalTracker?.TryConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "中转架取料后Z升安全命令成功返回");
             //天车这时候在安全位置
             Console.WriteLine("│ [上料] 工件已取走且Z已安全, 按现场策略释放中转架侧Zone锁");
             if (!TryCoords(bed.Code, out int bx, out int by, out int bz)) throw new Exception($"缺少斜床{bed.Code}坐标");
@@ -1923,7 +1777,9 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException ex)
         {
+            discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
+            OnRearCraneSafetyAlarm?.Invoke($"1号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
             // 运动超时意味着位置未知：暂停且禁止自动恢复动作；软件锁在finally释放，
             // 工件身份保留在账本/斜床任务牌中，等待人工确认真实现场状态。
             _paused = true;
@@ -1947,150 +1803,34 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            if (!operation.IsValid) return;
+            _paused = true;
+            discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
-            Console.WriteLine($"│ [上料] ❌ 异常: {wp.IdentityText} {ex.Message}");
-            if (loadState.X11PickupFailed) loadState.X11FailureException = ex;
-            // 已开始物理命令后的普通异常也可能是命令响应未知，不能落入旧的自动恢复分支。
-            if (physicalCommandStarted && !loadState.X11PickupFailed)
-            {
-                _paused = true;
-                requiresManualConfirmation = true;
-                action.MarkCommandResponseUnknown(ex.Message);
-                action.PauseForManualResolution(ex.Message);
-                if (action.Ownership == FlowWorkpieceOwnership.ReservedAtSource)
-                    _rackLedger.HoldForManualResolution(rs, actionId, ex.Message);
-                OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
-                    operationalSite with { ActionStage = $"{action.Step}：命令响应未知" }, operationalTracker, ex,
-                    "物理命令已开始且响应未知，动作账本已暂停并保留来源预约，等待人工确认。", true,
-                    holdingWorkpiece: holdingWorkpiece, actionSnapshot: action.Snapshot());
-                bed.St = SkewState.Loading;
-                bed.Wp = wp;
-                SetRearCraneTask(wp, holdingWorkpiece ? "持件状态待确认" : "来源位/动作结果待确认", rs, bed.Code, true,
-                    "物理命令已开始，异常响应未知；已暂停等待人工确认");
-                pendingSafetyAlarm = $"1号线后天车给{bed.Code}上料时发生命令响应未知异常。" +
-                    "引擎已暂停，未执行自动退避或缓存恢复；软件锁将在收尾后释放，工件状态等待人工确认。异常：" + ex.Message;
-            }
-            else if (loadState.PlacedOnBed && !loadState.LoadDoneNotified)
-            {
-                OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PHYSICAL_HANDOFF_NOT_CLOSED",
-                    operationalSite with { Station = bed.Code, ActionStage = $"{bed.Code}已退磁放料但CNC上料完成未确认" },
-                    operationalTracker, ex,
-                    "退磁成功返回并推定工件已放入斜床，但CNC上料完成通知未确认", true,
-                    holdingWorkpiece: false, placed: true, cacheNotified: null,
-                    downstreamNotified: null, handoffClosed: false);
-            }
-            if (!requiresManualConfirmation && loadState.PlacedOnBed)
-            {
-                _paused = true;
-                bed.St = loadState.LoadDoneNotified ? SkewState.Machining : SkewState.Loading;
-                Console.WriteLine(loadState.LoadDoneNotified
-                    ? "│ [上料] ⚠ 工件已放入斜床且CNC已收到上料完成, 但后续动作异常; 引擎已暂停, 请确认后天车安全位置"
-                    : "│ [上料] ⚠ 工件已物理放到斜床但CNC上料完成未确认; 引擎已暂停, 禁止把斜床改Idle");
-                pendingSafetyAlarm = $"1号线后天车给{bed.Code}上料时发生异常。工件{wp.IdentityText}已放入斜床，" +
-                    (loadState.LoadDoneNotified ? "CNC已收到上料完成" : "CNC上料完成尚未确认") +
-                    $"。引擎已暂停，请确认后天车、斜床和工件状态。异常：{ex.Message}";
-            }
-            else if (!requiresManualConfirmation && holdingWorkpiece)
-            {
-                _paused = true;
-                bed.St = SkewState.Loading;
-                SetRearCraneTask(wp, "已持件，尚未放入斜床", rs, bed.Code, true, "X11已确认持件，请人工确认天车和工件位置");
-                Console.WriteLine("│ [上料] ⚠ X11已确认工件在后天车上但未放到斜床; 引擎已暂停, 需人工确认后天车和工件位置");
-                pendingSafetyAlarm = $"1号线后天车给{bed.Code}上料时发生异常，X11已确认工件{wp.IdentityText}在天车上但尚未放入斜床。引擎已暂停，请人工确认位置。异常：{ex.Message}";
-            }
-            else if (!requiresManualConfirmation)
-            {
-                if (mag && cr != null)
-                {
-                    operationalTracker.BeginMagnetOff();
-                    try
-                    {
-                        await cr.MagnetOffAsync(ct);
-                        operationalTracker.CompleteMagnetOff();
-                        mag = false;
-                        if (loadState.X11PickupFailed)
-                        {
-                            loadState.X11MagnetOffState = RecoveryStepState.Succeeded;
-                            loadState.X11MagnetOffDetail = "退磁方法成功返回；不等于现场已确认释放";
-                            loadState.X11RecoverySummary = "退磁成功";
-                        }
-                    }
-                    catch (Exception offEx)
-                    {
-                        operationalTracker.FailMagnetOff();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
-                            operationalSite with { ActionStage = $"{rs}异常收尾尽量退磁" }, operationalTracker, offEx,
-                            "原业务在异常收尾中吞掉退磁异常；实际退磁结果未知", true,
-                            holdingWorkpiece: holdingWorkpiece);
-                        if (loadState.X11PickupFailed)
-                        {
-                            loadState.X11MagnetOffState = RecoveryStepState.Failed;
-                            loadState.X11MagnetOffDetail = $"退磁方法异常，实际退磁结果未知({offEx.Message})";
-                            loadState.X11RecoverySummary = $"退磁失败，结果未知({offEx.Message})";
-                        }
-                        Console.WriteLine($"│ [上料] ⚠ X11未确认有版,退磁失败: {offEx.Message}");
-                    }
-                }
-                // X11未确认吸住时Z还在取料低位。退磁后先将Z拉回原点，
-                // 防止finally做X+1000退避时低位横移。
-                if (cr != null)
-                {
-                    try
-                    {
-                        operationalTracker.BeginSafeZReturn(0, "X11三次失败异常收尾开始Z回原点");
-                        await cr.MoveAbsoluteAsync(-1, -1, 0, ct: CancellationToken.None);
-                        operationalTracker.ConfirmSafeZ(0, _cfg.AbsMove.Tolerance, "X11三次失败异常收尾Z回原点命令成功返回");
-                        physicalTracker?.TryConfirmSafeZ(0, _cfg.AbsMove.Tolerance, "X11三次失败异常收尾Z回原点命令成功返回");
-                        loadState.ZMayBeDown = false; // Z已安全，finally可以退避
-                        if (loadState.X11PickupFailed)
-                        {
-                            loadState.X11SafeZState = RecoveryStepState.Succeeded;
-                            loadState.X11SafeZDetail = "Z回原点命令成功返回";
-                            loadState.X11RecoverySummary += "；Z已回原点";
-                        }
-                        Console.WriteLine("│ [上料] X11=0恢复: Z已回原点");
-                    }
-                    catch (Exception zEx)
-                    {
-                        operationalTracker.MarkZUnknown($"X11三次失败异常收尾Z回原点失败({zEx.Message})");
-                        physicalTracker?.TryMarkZUnknown($"X11三次失败异常收尾Z回原点失败({zEx.Message})");
-                        loadState.ZMayBeDown = true; // Z回升失败，禁止退避
-                        if (loadState.X11PickupFailed)
-                        {
-                            loadState.X11SafeZState = RecoveryStepState.Failed;
-                            loadState.X11SafeZDetail = $"Z回原点失败({zEx.Message})";
-                            loadState.X11RecoverySummary += $"；Z回原点失败({zEx.Message})";
-                        }
-                        Console.WriteLine($"│ [上料] X11=0恢复: Z→0失败({zEx.Message}), 禁止X退避, 已直接释放锁");
-                    }
-                }
-                bed.St = SkewState.Idle;
-                ClearRearCraneTask();
-                bed.Wp = null;
-                // X11未确认吸住时来源缓存从未删除；只解除预约，不能通过“恢复”伪造交接。
-                _rackLedger.HoldForManualResolution(rs, actionId, "X11连续三次为0，已完成局部安全恢复，等待人工确认来源位");
-                if (loadState.X11PickupFailed) loadState.X11CacheRestored = true;
-                Console.WriteLine(loadState.X11PickupFailed
-                    ? $"│ [上料] X11连续三次为0 → 来源缓存[{rs}]未删除，预约已解除(原顺序{rackArrivalSeq})，等待人工确认后恢复运行"
-                    : $"│ [上料] X11未确认工件离开中转架 → 来源缓存[{rs}]未删除，预约已解除(原顺序{rackArrivalSeq})，下轮可重试");
-            }
-
-            try
-            {
-                if (transferLocked)
-                {
-                    // 兼容旧变量；新Zone模型下不再持有_transferRackLock。
-                    transferLocked = false;
-                }
-            } catch (SemaphoreFullException) { }
+            OnRearCraneSafetyAlarm?.Invoke($"1号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
+            // 停止后禁止finally追加横移、下探或退磁；保留实际现场供人工处理。
+            operation.HoldForManualSafetyRecovery(ex.Message);
+            requiresManualConfirmation = true;
+            if (!action.IsFinalized) action.PauseForManualResolution(ex.Message);
+            pendingSafetyAlarm = $"1号线后天车{bed.Code}上料严重异常：{ex.Message}。本次板任务作废，来源仅按预约和到达代次清理，设备内存将回Idle；请人工移走本板，确认天车安全及实际放磁后恢复。";
+            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, ex is PickupFailedException pickupFailure ? pickupFailure.EventCode : "ENGINE_FINAL_FAILURE",
+                operationalSite with { ActionStage = "严重异常作废" }, operationalTracker, ex,
+                pendingSafetyAlarm, true, actionSnapshot: action.Snapshot());
         }
         finally
         {
             // 异常自动作废：只要这一轮没走到 action.Complete(Completed)，就清这台斜床的
             // PLC 下发数据和内存工件数据并回空闲。放在 finally 最前面，让后面的告警文案
             // 能反映"已自动作废"这个事实。中转架账本完全不碰。
-            if (action.Disposition != FlowActionDisposition.Completed)
+            if (discardOnFailure && operation.IsValid && ReferenceEquals(bed.ActiveOperation, operation))
+            {
+                bool sourceDiscarded = _rackLedger.DiscardReservedWorkpiece(rs, actionId, rackArrivalSeq, wp);
                 await ClearSkewOnAbortAsync(bed, isLoad: true);
+                FlowAlarmPresentationContext.RecordCacheState(sourceDiscarded
+                    ? $"{rs}本次来源身份及预约已作废（到达代次{rackArrivalSeq}）"
+                    : $"{rs}本次来源已消费/不存在或归属已变化，未删除新到达工件");
+                action.Discard("异常本板已作废，设备内存Idle，旧人工续搬入口删除");
+            }
 
             if (operation.RequiresManualSafetyRecovery)
             {
@@ -2400,6 +2140,7 @@ public sealed class Line1RearFlowEngine : IDisposable
     // ═══════════════════════════════════════════════════════════════════
     private async Task DoUnload(SkewCtx bed, CancellationToken ct)
     {
+        int pickupStableDelayMs = _cfg.Grinding.X11StableDelayMs;
         string actionId = OperationalEventContextFactory.NewActionId("L1-REAR-UNLOAD");
         WorkpieceCache initialWorkpiece = bed.Wp ?? throw new InvalidOperationException($"{bed.Code}下料缺少工件账本");
         var action = new FlowActionContext(actionId, "1号线后天车下料", "2号天车",
@@ -2411,6 +2152,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "斜床下料前检查");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         bool magnetOn = false;
+        bool discardOnFailure = false;
         bool holdingWorkpiece = false;       // X11确认有版后才算工件已经在后天车上, 不能只看是否发过充磁命令
         bool placedToDestination = false;    // 退磁放到目标位 + Z升安全 + 必要通知完成后, 才允许斜床Idle并清Wp
         bool operationalPlaced = false;      // 仅供旁路证据，不参与任何业务判断
@@ -2551,212 +2293,13 @@ public sealed class Line1RearFlowEngine : IDisposable
             // 从发送Z下降命令起，异常finally不能再假定Z位于安全高度。
             // 即使运动调用报错，也可能是PLC已执行下降而上位机没有收到响应。
             zMayBeDown = true;
-            operationalTracker.BeginZDown(zDown);
-            action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(bx + _ox, yPick, zDown), "Z下降到斜床取料高度");
-            try
-            {
-                action.MarkCommandSent();
-                await cr.MoveAbsoluteAsync(-1, -1, zDown, ct: ct);
-                action.Confirm(new FlowActionPosition(bx + _ox, yPick, zDown), "斜床取料Z已到位");
-                operationalTracker.CompleteZDown();
-            }
-            catch (PressureStopException)
-            {
-                operationalTracker.MarkZUnknown("Z下降触发下压保护，恢复后位置等待后续安全高度确认");
-                await cr.RecoverFromPressureStopAsync(ct);
-                throw;
-            }
-
-            // Z↓到位后最多读取3次X11；后两次各下探5mm重试。
-            Console.WriteLine("│ [下料] 充磁→等3s→X11检测");
-            int unlz = zDown;
-            operationalTracker.BeginX11Stage("充磁后持件确认");
-            for (int retry = 0; retry <= 2; retry++)
-            {
-                if (retry == 0)
-                {
-                    Console.WriteLine("│ [下料] 充磁");
-                    operationalTracker.BeginMagnetOn();
-                    try
-                    {
-                        action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(bx + _ox, yPick, unlz), $"{bed.Code}首次充磁取料");
-                        action.MarkCommandSent();
-                        await cr.MagnetOnAsync(ct);
-                        operationalTracker.CompleteMagnetOn();
-                        action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "斜床首次充磁调用成功返回");
-                    }
-                    catch (Exception ex)
-                    {
-                        operationalTracker.FailMagnetOn();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
-                            operationalSite with { ActionStage = $"{bed.Code}首次充磁取料" }, operationalTracker, ex,
-                            "充磁方法异常，实际命令与磁铁状态未知", true);
-                        throw;
-                    }
-                    magnetOn = true;
-                }
-                //第一次吸版
-                else
-                {
-                    Console.WriteLine($"│ [下料] 退磁→Z↓到{unlz}→充磁");
-                    operationalTracker.BeginMagnetOff();
-                    try
-                    {
-                        action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(bx + _ox, yPick, unlz), $"{bed.Code}X11重试前退磁");
-                        action.MarkCommandSent();
-                        await cr.MagnetOffAsync(ct);
-                        operationalTracker.CompleteMagnetOff();
-                        action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "X11重试前退磁成功返回");
-                    }
-                    catch (Exception ex)
-                    {
-                        operationalTracker.FailMagnetOff();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
-                            operationalSite with { ActionStage = $"{bed.Code}X11重试前退磁" }, operationalTracker, ex,
-                            "退磁方法异常，实际退磁结果未知", true, holdingWorkpiece: holdingWorkpiece);
-                        throw;
-                    }
-                    magnetOn = false;
-                    try
-                    {
-                        operationalTracker.BeginZDown(unlz);
-                        action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(bx + _ox, yPick, unlz), $"{bed.Code}X11重试下探Z");
-                        action.MarkCommandSent();
-                        await cr.MoveAbsoluteAsync(-1, -1, unlz, ct: ct);
-                        action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "X11重试下探Z到位");
-                    }
-                    catch (PressureStopException)
-                    {
-                        await cr.RecoverFromPressureStopAsync(ct);
-                        throw;
-                    }
-
-                    operationalTracker.BeginMagnetOn();
-                    try
-                    {
-                        action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(bx + _ox, yPick, unlz), $"{bed.Code}X11重试后充磁");
-                        action.MarkCommandSent();
-                        await cr.MagnetOnAsync(ct);
-                        operationalTracker.CompleteMagnetOn();
-                        action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "X11重试后充磁调用成功返回");
-                    }
-                    catch (Exception ex)
-                    {
-                        operationalTracker.FailMagnetOn();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
-                            operationalSite with { ActionStage = $"{bed.Code}下探后再次充磁" }, operationalTracker, ex,
-                            "重试充磁方法异常，实际命令与磁铁状态未知", true);
-                        throw;
-                    }
-                    magnetOn = true;
-                }
-
-                Console.WriteLine("│ [下料] 等3s让X11稳定...");
-                await Task.Delay(_cfg.Grinding.X11StableDelayMs, ct); // X11稳定延时(配置文件)
-                operationalTracker.BeginX11Attempt();
-                bool x11;
-                try
-                {
-                    x11 = await cr.ReadXBitAsync(63497, ct);
-                    operationalTracker.CompleteX11(x11, DateTime.UtcNow);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    operationalTracker.FailX11();
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_X11_READ_FAILED",
-                        operationalSite with { ActionStage = $"{bed.Code}充磁后X11第{retry + 1}次读取" }, operationalTracker, ex,
-                        "充磁后X11读取失败；本次值无效并保留最后成功值（如有）", true);
-                    throw;
-                }
-                physicalTracker?.TryObserveX11(x11);
-                Console.WriteLine($"│ [下料] X11={(x11 ? "1(有版)" : "0(无版)")} (第{retry + 1}次)");
-                if (x11)
-                {
-                    bed.X11UnloadMissWarningShown = false;
-                    holdingWorkpiece = true; // X11=1才确认工件已由后天车持有, 异常时必须暂停人工处理
-                    action.BeginStep(FlowActionStep.ConfirmPickup, new FlowActionPosition(bx + _ox, yPick, unlz), "X11确认后天车已从斜床持件");
-                    action.RecordFeedback(new FlowActionPosition(bx + _ox, yPick, unlz), true, true, "斜床取料X11=1");
-                    action.SetOwnership(FlowWorkpieceOwnership.OnCarrier, "斜床取料X11=1，工件已由后天车持有");
-                    action.Confirm(new FlowActionPosition(bx + _ox, yPick, unlz), "X11=1确认工件已由后天车持有");
-                    Console.WriteLine($"│ [下料] ✓ X11=1 已吸到(保持在取料位Z={unlz})");
-                    break;
-                }
-
-                if (retry > 1)
-                {
-                    // X11连续三次均未确认有板：工件按“仍在斜床”处理。
-                    // 必须在仍持有后天车锁时先退磁、再把Z升到安全高度，成功后才允许释放锁并自动重试。
-                    var recoveryErrors = new List<string>();
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_X11_NOT_CONFIRMED",
-                        operationalSite with { ActionStage = $"{bed.Code}三次X11均未确认持件" }, operationalTracker, null,
-                        "三次业务X11读取均有效返回0；只能确认未确认持件，不能推断工件仍在斜床", true,
-                        holdingWorkpiece: false);
-                    operationalTracker.BeginMagnetOff();
-                    try
-                    {
-                        await cr.MagnetOffAsync(ct);
-                        operationalTracker.CompleteMagnetOff();
-                        magnetOn = false;
-                        Console.WriteLine("│ [下料恢复] X11三次均为0，退磁成功");
-                    }
-                    catch (Exception offEx)
-                    {
-                        operationalTracker.FailMagnetOff();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
-                            operationalSite with { ActionStage = $"{bed.Code}X11三次0安全恢复退磁" }, operationalTracker, offEx,
-                            "X11三次0后的安全恢复退磁失败，实际退磁结果未知", true,
-                            holdingWorkpiece: false);
-                        if (offEx is OperationCanceledException && ct.IsCancellationRequested)
-                            throw;
-                        recoveryErrors.Add($"退磁失败: {offEx.Message}");
-                        Console.WriteLine($"│ [下料恢复] ❌ 退磁失败: {offEx.Message}");
-                    }
-
-                    try
-                    {
-                        await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
-                        zMayBeDown = false; // X11失败恢复已确认Z回安全高度，异常收尾才允许尝试X退避
-                        operationalTracker.ConfirmSafeZ(sz, _cfg.AbsMove.Tolerance, "X11三次0安全恢复Z回升成功返回");
-                        Console.WriteLine($"│ [下料恢复] Z已回安全高度 {sz}");
-                    }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (Exception zEx)
-                    {
-                        recoveryErrors.Add($"Z回安全高度{sz}失败: {zEx.Message}");
-                        Console.WriteLine($"│ [下料恢复] ❌ Z回安全高度{sz}失败: {zEx.Message}");
-                    }
-
-                    if (recoveryErrors.Count > 0)
-                    {
-                        // 使旧动作失效并暂停。若Z回升失败，finally会依据zMayBeDown禁止X横移；
-                        // 按现场确认策略，异常收尾仍释放本动作的ZoneTS和后天车锁，并在弹窗中写明。
-                        operation.CancelAndInvalidate();
-                        _paused = true;
-                        string alarm = $"1号线后天车从{bed.Code}下料取料时，X11连续三次为0，且安全恢复失败：" +
-                                       string.Join("；", recoveryErrors) +
-                                       $"。工件{wp.IdentityText}仍保留在斜床等待下料，后端已暂停。请人工确认磁铁和Z轴位置。";
-                        Console.WriteLine($"│ [下料恢复] ⚠ {alarm}");
-                        pendingSafetyAlarm = alarm;
-                        throw new InvalidOperationException(alarm);
-                    }
-
-                    if (!bed.X11UnloadMissWarningShown)
-                    {
-                        bed.X11UnloadMissWarningShown = true;
-                        string warning = $"1号线后天车在{bed.Code}下料取料时，X11连续三次为0。" +
-                                         $"工件{wp.IdentityText}仍按留在斜床处理；后天车已退磁并将Z升到安全高度{sz}，引擎未暂停，将继续自动重试。";
-                        Console.WriteLine($"│ [下料恢复] ⚠ {warning}");
-                        OnRearCraneWarning?.Invoke(warning);
-                    }
-
-                    throw new InvalidOperationException("下料取料失败: 3次充磁后X11仍=0；已退磁并将Z升到安全高度，保留工件等待下轮重试");
-                }
-                unlz += 5;
-                Console.WriteLine($"│ [下料] ⚠ X11=0 未吸到, 准备下探5mm重试");
-            }
+            var pickup = await PickupProbeHelper.PickAsync(cr, zDown, pickupStableDelayMs,
+                action, operationalTracker, ct, validateAction: operation.ThrowIfInvalid);
+            int unlz = pickup.ActualZ;
+            magnetOn = true;
+            holdingWorkpiece = true;
+            bed.X11UnloadMissWarningShown = false;
+            physicalTracker?.TryObserveX11(true);
 
             Console.WriteLine("│ [下料] ② 清上一步信号 → 写天车下料到位 → 等CNC张开尾座(F5=1)...");
             if (isF) bed.F!.SafeSetMacro(1103, 0); // 清#1103
@@ -3229,7 +2772,9 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException ex)
         {
+            discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
+            OnRearCraneSafetyAlarm?.Invoke($"1号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
             _paused = true;
             action.MarkCommandResponseUnknown(ex.Message);
             action.PauseForManualResolution(ex.Message);
@@ -3250,7 +2795,9 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (PressureStopException ex)
         {
+            discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
+            OnRearCraneSafetyAlarm?.Invoke($"1号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
             _paused = true;
             action.MarkCommandResponseUnknown(ex.Message);
             action.PauseForManualResolution(ex.Message);
@@ -3270,7 +2817,9 @@ public sealed class Line1RearFlowEngine : IDisposable
         //下料时候线路暂停异常
         catch (LineNotStartedTimeoutException ex)
         {
+            discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
+            OnRearCraneSafetyAlarm?.Invoke($"1号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
             // 线路未启动超时：本趟分流作废。
             // 抛点固定在拿 M817/M720 之前、任何 XY 移动与退磁之前，所以天车仍停在斜床上方安全Z、
             // 保持持件，两把分流锁根本没拿。因此这里只做三件事：
@@ -3323,78 +2872,30 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            if (!operation.IsValid) return;
+            _paused = true;
+            discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
-            Console.WriteLine($"│ [下料] ❌ 异常: {bed.Wp?.IdentityText ?? "版号=未知"} {ex.Message}");
-            FlowActionExceptionConclusion exceptionConclusion = FlowActionExceptionConclusion.WaitRetry;
-            if (operationalPlaced && (!operationalCacheNotified ||
-                (operationalRequiresDownstreamNotification && !operationalDownstreamNotified)))
-            {
-                OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PHYSICAL_HANDOFF_NOT_CLOSED",
-                    operationalSite with { ActionStage = "目标位退磁放料后通知闭环未完成" }, operationalTracker, ex,
-                    "退磁已成功返回并推定工件已放到目标位，但缓存或PLC通知未完整成功", true,
-                    holdingWorkpiece: false, placed: operationalPlaced,
-                    cacheNotified: null,
-                    downstreamNotified: null,
-                    handoffClosed: false);
-            }
-            if (!placedToDestination)
-            {
-                exceptionConclusion = FlowActionExceptionResolver.Resolve(action, ex);
-            }
-            if (exceptionConclusion == FlowActionExceptionConclusion.PauseLineManual)
-            {
-                _paused = true;
-                requiresManualConfirmation = true;
-            }
-            // magnetOn 只表示发过充磁命令, 不等于工件已经吸住。
-            // holdingWorkpiece 由X11=1确认, 这是判断异常后是否需要暂停人工处理的安全边界。
-            if (holdingWorkpiece && !placedToDestination)
-            {
-                _paused = true;
-                bed.St = SkewState.Unloading;
-                if (bed.Wp is { } heldWp)
-                    SetRearCraneTask(heldWp, "已持件，目标位未完成放料", bed.Code, "分流目的地", true, "X11已确认持件，请人工确认天车和工件位置");
-                Console.WriteLine("│ ⚠ X11已确认工件离开斜床但未完成目标位放料/通知, 引擎已暂停, 请人工确认后天车和工件位置");
-                pendingSafetyAlarm = $"1号线后天车从{bed.Code}下料时发生异常，X11已确认工件在天车上，但目标位放料或通知尚未完成。引擎已暂停，请人工确认天车和工件位置。异常：{ex.Message}";
-            }
-            else if (exceptionConclusion == FlowActionExceptionConclusion.PauseLineManual && !placedToDestination)
-            {
-                bed.St = SkewState.Unloading;
-                if (bed.Wp is { } unknownWp)
-                    SetRearCraneTask(unknownWp, "物理命令响应未知", bed.Code, "分流目的地", true,
-                        "命令已发送但X11/目标交接未确认，禁止自动重试");
-                pendingSafetyAlarm = $"1号线后天车从{bed.Code}下料时，物理命令已发送但X11、工件位置或目标交接未确认。" +
-                    $"引擎已暂停，禁止自动重试；请人工确认天车、磁铁、工件和目标位。异常：{ex.Message}";
-                Console.WriteLine($"│ ⚠ {pendingSafetyAlarm}");
-            }
-            else if (magnetOn)
-            {
-                bed.St = SkewState.WaitingUnload;
-                Console.WriteLine("│ 磁铁曾充磁但X11未确认有版→不判定后天车持件, 保持等待下料/下轮重试");
-            }
-            else if (placedToDestination)
-            {
-                bed.St = SkewState.Idle;
-                bed.Wp = null;
-                ClearRearCraneTask();
-                Console.WriteLine("│ 工件已完成目标位放料确认→斜床可复位Idle");
-            }
-            else
-            {
-                bed.St = SkewState.WaitingUnload;
-                ClearRearCraneTask();
-                Console.WriteLine("│ 工件仍在斜床→保持等待下料");
-            }
-
-            // DoUnload不进入中转架, 不处理_transferRackLock；ST108/ST606只按任务牌处理ZoneTS。
+            OnRearCraneSafetyAlarm?.Invoke($"1号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
+            // 停止后禁止finally追加横移、下探或退磁；保留实际现场供人工处理。
+            operation.HoldForManualSafetyRecovery(ex.Message);
+            requiresManualConfirmation = true;
+            if (!action.IsFinalized) action.PauseForManualResolution(ex.Message);
+            pendingSafetyAlarm = $"1号线后天车{bed.Code}下料严重异常：{ex.Message}。本次板任务作废，设备内存将回Idle；请人工移走本板，确认天车安全及实际放磁后恢复。";
+            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, ex is PickupFailedException pickupFailure ? pickupFailure.EventCode : "ENGINE_FINAL_FAILURE",
+                operationalSite with { ActionStage = "严重异常作废" }, operationalTracker, ex,
+                pendingSafetyAlarm, true, actionSnapshot: action.Snapshot());
         }
         finally
         {
             // 异常自动作废：只要这一轮没走到 action.Complete(Completed)，就清这台斜床的
             // PLC 下发数据和内存工件数据并回空闲。放在 finally 最前面，让后面的告警文案
             // 能反映"已自动作废"这个事实。中转架账本完全不碰。
-            if (action.Disposition != FlowActionDisposition.Completed)
+            if (discardOnFailure && operation.IsValid && ReferenceEquals(bed.ActiveOperation, operation))
+            {
                 await ClearSkewOnAbortAsync(bed, isLoad: false);
+                action.Discard("异常本板已作废，设备内存Idle，旧人工续搬入口删除");
+            }
 
             if (operation.RequiresManualSafetyRecovery)
             {
@@ -3875,15 +3376,14 @@ public sealed class Line1RearFlowEngine : IDisposable
     /// </summary>
     /// <summary>
     /// 异常自动作废：清该斜床的 PLC 下发数据、清内存维护的工件数据并回空闲、清后天车任务牌、
-    /// 清该设备的动作账本快照，只写日志。
+    /// 由调用方只结本动作快照，并更新实际收尾结果。
     /// <para>
     /// 现场模型：异常了这块板会被人工<b>抽走</b>，设备侧随即变空，下一轮派发拿别的板。
-    /// 因此这里只清这台斜床，<b>完全不碰中转架账本</b>——来源预约与来源冻结仍由既有入口处理。
+    /// 因此设备helper只清这台斜床，来源作废在调用方处理——本次来源预约/代次作废由调用方核对并处理。
     /// </para>
-    /// 安全性：即使操作员还没来得及抽走板，下一轮取料前的 X11 残留检查
-    /// （DoLoad/DoUnload 开头的"取料前残留检查"）会在第一步拒绝并暂停，不会叠料或碰撞。
+    /// 安全边界：X11残留检查不能证明非磁铁承载面空，恢复前必须人工处理实物并确认安全。
     /// <para>
-    /// 使用 <see cref="CancellationToken.None"/>：本方法在 finally 中执行，而动作的 ct 可能已被
+    /// 使用独立10秒清理令牌：本方法在 finally 中执行，而动作的 ct 可能已被
     /// 应急取消；若沿用它会在此抛出 OperationCanceledException，掩盖真正的原始异常。
     /// </para>
     /// </summary>
@@ -3892,7 +3392,8 @@ public sealed class Line1RearFlowEngine : IDisposable
         string deviceLog;
         try
         {
-            deviceLog = await ClearSkewDeviceEmergencyRegistersAsync(bed, CancellationToken.None);
+            using var cleanupCts = new CancellationTokenSource(10_000);
+            deviceLog = await ClearSkewDeviceEmergencyRegistersAsync(bed, cleanupCts.Token);
         }
         catch (Exception ex)
         {
@@ -3911,23 +3412,21 @@ public sealed class Line1RearFlowEngine : IDisposable
             Interlocked.Increment(ref bed.PollVersion);
         }
         ClearRearCraneTask();
-        string ledgerLog = isLoad
-            ? SettleManualRearLoadForEmergency(bed)
-            : SettleManualRearUnloadOnCarrierForEmergency(bed);
+        string ledgerLog = "本次严重动作由调用方作废结案；其他设备人工记录未删除";
         _fastNextCycle = true;
 
         FlowAlarmPresentationContext.RecordCleanup(deviceLog, "斜床已回Idle，工件与请求快照已清；后天车任务牌已清",
             "中转架来源账本未由此清理修改；已移交下游的缓存不回滚；请核对实物与来源预约状态");
         Console.WriteLine(
             $"│ [作废] 1号线后天车{bed.Code}{(isLoad ? "上料" : "下料")}异常：本轮已自动作废——" +
-            $"PLC下发数据已清、内存工件已清并回空闲、任务牌已清；{ledgerLog}；{deviceLog}。" +
+            $"内存工件已清并回空闲、任务牌已清；{ledgerLog}；设备清理实际结果：{deviceLog}。" +
             "请把本块板抽走后启动线路继续。");
     }
 
     /// <summary>异常自动作废时写给操作员的统一指引，替换原先要求人工走应急的口径。</summary>
     private const string AbortClearInstruction =
-        "本轮已自动作废：斜床PLC下发数据与内存工件已清、斜床已回空闲、软件锁已释放。" +
-        "请把本块板抽走，确认斜床内无残留板后启动线路继续。";
+        "本轮软件任务已作废，斜床内存已回空闲；PLC清理和锁释放以本窗实际结果为准。" +
+        "请移走本次板，确认斜床无残留、天车安全位置和实际放磁，再启动对应线路；勿删下一板任务。";
 
     /// <summary>
     /// 后天车下料分流前确认本线已启动。判据是后端引擎自身的暂停位 <c>_paused</c>：

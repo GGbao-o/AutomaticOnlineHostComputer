@@ -1,4 +1,4 @@
-namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
+﻿namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
 /// <summary>前天车目标待交接只能补中转架缓存，绝不能清前端当前板或队列。</summary>
 public sealed class FrontCraneTargetSettlementContractTests
@@ -25,12 +25,12 @@ public sealed class FrontCraneTargetSettlementContractTests
     public void Pos3_x11_retry_records_the_command_and_uses_a_deeper_pick_target(string file)
     {
         string source = File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "Service", "FlowEngine", file));
+        Assert.Contains("PickupProbeHelper.PickAsync(crane, f2zOff, pickupStableDelayMs", source);
+        Assert.Contains("int f2PickZ = pos3Pickup.ActualZ;", source);
+        Assert.DoesNotContain("f2PickZ += 5;", source);
+        Assert.DoesNotContain("货叉Pos3 X11重试前退磁", source);
+        Assert.Contains("PickupProbeHelper.PickAsync(crane, markerZPickup, pickupStableDelayMs", source);
 
-        Assert.Contains("f2PickZ += 5;", source, StringComparison.Ordinal);
-        Assert.Contains("货叉Pos3 X11重试前退磁", source, StringComparison.Ordinal);
-        Assert.Contains("货叉Pos3 X11重试下探", source, StringComparison.Ordinal);
-        Assert.Contains("货叉Pos3 X11重试后充磁", source, StringComparison.Ordinal);
-        Assert.Contains("action.MarkCommandSent();", source, StringComparison.Ordinal);
     }
 
     [Theory]

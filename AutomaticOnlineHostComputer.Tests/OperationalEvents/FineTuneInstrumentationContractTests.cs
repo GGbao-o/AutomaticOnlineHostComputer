@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Service;
@@ -516,9 +516,9 @@ public sealed class FineTuneInstrumentationContractTests
                 ["Line2FrontFlowEngine.cs"] = FormulaCounts(7, 0, 0, 0),
                 ["Line1RearFlowEngine.cs"] = FormulaCounts(0, 4, 0, 0),
                 ["Line2RearFlowEngine.cs"] = FormulaCounts(0, 4, 0, 0),
-                // 账本也需要记录偏移后的真实目标坐标；新增的4处ApplyOffsetZ只用于
+                // 账本也需要记录偏移后的真实目标坐标；补偿以共用流程实际原始Z0为锚点，ApplyOffsetZ只用于
                 // 快照坐标，不改变原有研磨装卸的业务Z公式或运动顺序。
-                ["GrindingFlowEngine.cs"] = FormulaCounts(2, 0, 11, 2)
+                ["GrindingFlowEngine.cs"] = FormulaCounts(2, 0, 5, 2)
             };
 
         foreach ((string fileName, IReadOnlyDictionary<string, int> counts) in expected)

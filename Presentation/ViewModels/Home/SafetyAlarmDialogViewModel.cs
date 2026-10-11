@@ -49,7 +49,8 @@ internal sealed class SafetyAlarmDialogViewModel : ObservableObject, IDisposable
         RefreshProperties();
         try
         {
-            var sample = await _read(_context.Snapshot().CraneNo, _closed.Token);
+            var details = _context.Snapshot();
+            var sample = await _read(details.ManipulatorNo ?? details.CraneNo, _closed.Token);
             if (_disposed) return;
             _sample = sample;
             UpdateSections();

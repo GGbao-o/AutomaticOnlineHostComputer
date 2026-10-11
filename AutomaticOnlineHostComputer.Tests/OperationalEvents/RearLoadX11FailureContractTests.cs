@@ -1,4 +1,4 @@
-namespace AutomaticOnlineHostComputer.Tests.OperationalEvents;
+﻿namespace AutomaticOnlineHostComputer.Tests.OperationalEvents;
 
 public sealed class RearLoadX11FailureContractTests
 {
@@ -9,62 +9,18 @@ public sealed class RearLoadX11FailureContractTests
         string fileName,
         string lineName)
     {
-        string source = ReadFlowSource(fileName);
-        string method = ExtractMethod(source, "private async Task DoLoad");
+        string method = ExtractMethod(ReadFlowSource(fileName), "private async Task DoLoad");
+        Assert.Contains("PickupProbeHelper.PickAsync", method);
+        int fault = method.IndexOf("\n        catch (Exception ex)");
+        string severe = method[fault..];
+        Assert.True(severe.IndexOf("_paused = true;") < severe.IndexOf("ClearSkewOnAbortAsync"));
+        Assert.Contains("DiscardReservedWorkpiece(rs, actionId, rackArrivalSeq, wp)", severe);
+        Assert.Contains("operation.HoldForManualSafetyRecovery(ex.Message);", severe);
+        Assert.Contains("action.Discard(", severe);
+        Assert.Contains("OnRearCraneSafetyAlarm?.Invoke", severe);
+        Assert.Contains("operation.TryRelease(\"RearCrane\", _craneRearLock)", severe);
+        Assert.Contains(lineName, severe);
 
-        Assert.Contains("public bool X11PickupFailed;", source, StringComparison.Ordinal);
-        Assert.Contains("public string X11RecoverySummary", source, StringComparison.Ordinal);
-        Assert.Contains("OnRearCraneX11FinalSafetyAlarm", source, StringComparison.Ordinal);
-
-        int markFailed = method.IndexOf("loadState.X11PickupFailed = true;", StringComparison.Ordinal);
-        int throwFailed = method.IndexOf("取料失败: 3次充磁后X11仍=0", StringComparison.Ordinal);
-        Assert.True(markFailed >= 0, $"{fileName} 未在第三次X11=0时标记失败状态");
-        Assert.True(throwFailed > markFailed, $"{fileName} 必须先标记X11失败再抛异常");
-
-        int finalReport = method.IndexOf("TryReportRearLoadX11FinalFailure", StringComparison.Ordinal);
-        Assert.True(finalReport > throwFailed, $"{fileName} 最终结构化事件必须在原异常进入收尾后才上报");
-        Assert.Equal(1, CountOccurrences(method, "TryReportRearLoadX11FinalFailure"));
-        Assert.DoesNotContain(
-            "TryReportPhysical(_exceptionReporter, \"CRANE_X11_NOT_CONFIRMED\"",
-            method[..throwFailed],
-            StringComparison.Ordinal);
-
-        Assert.Contains(
-            "await cr.MoveAbsoluteAsync(-1, -1, 0, ct: CancellationToken.None);",
-            method,
-            StringComparison.Ordinal);
-        Assert.Contains("退磁成功", method, StringComparison.Ordinal);
-        Assert.Contains("退磁失败", method, StringComparison.Ordinal);
-        Assert.Contains("Z已回原点", method, StringComparison.Ordinal);
-        Assert.Contains("Z回原点失败", method, StringComparison.Ordinal);
-
-        int rearLockRelease = method.IndexOf(
-            "operation.TryRelease(\"RearCrane\", _craneRearLock)",
-            StringComparison.Ordinal);
-        int alarmText = method.IndexOf("string x11Alarm", StringComparison.Ordinal);
-        int pauseCondition = method.LastIndexOf(
-            "if (loadState.X11PickupFailed)",
-            alarmText,
-            StringComparison.Ordinal);
-        int pauseAssignment = method.IndexOf("_paused = true;", pauseCondition, StringComparison.Ordinal);
-        int alarmCallback = method.IndexOf("safetyAlarmCallback?.Invoke", StringComparison.Ordinal);
-
-        Assert.True(rearLockRelease >= 0, $"{fileName} 未找到后天车锁释放");
-        Assert.True(alarmText > rearLockRelease, $"{fileName} X11最终告警必须在后天车锁释放后生成");
-        Assert.True(pauseCondition > rearLockRelease, $"{fileName} 必须释放后天车锁后再生成X11暂停告警");
-        Assert.True(pauseAssignment > pauseCondition, $"{fileName} X11失败条件必须设置引擎暂停");
-        Assert.True(alarmCallback > pauseAssignment, $"{fileName} 必须在本引擎暂停后再暂停对应整线");
-        Assert.True(finalReport > alarmCallback, $"{fileName} 必须在安全告警回调完成后记录最终结构化事件");
-
-        string pauseBlock = method[pauseCondition..alarmCallback];
-        Assert.Contains($"{lineName}后天车从中转架", pauseBlock, StringComparison.Ordinal);
-        Assert.Contains("X11连续三次为0", pauseBlock, StringComparison.Ordinal);
-        Assert.Contains("X11RecoverySummary", pauseBlock, StringComparison.Ordinal);
-        Assert.Contains("pendingSafetyAlarm == null", pauseBlock, StringComparison.Ordinal);
-        Assert.Contains("X11Finalization", method, StringComparison.Ordinal);
-        Assert.Contains("ZoneTS", method[rearLockRelease..finalReport], StringComparison.Ordinal);
-        Assert.Contains("ZoneMT", method[rearLockRelease..finalReport], StringComparison.Ordinal);
-        Assert.Contains("RearCrane", method[rearLockRelease..finalReport], StringComparison.Ordinal);
     }
 
     [Theory]
@@ -72,20 +28,17 @@ public sealed class RearLoadX11FailureContractTests
     [InlineData("Line2RearFlowEngine.cs")]
     public void Rear_load_cleanup_never_de_magnetizes_once_pickup_may_have_happened(string fileName)
     {
-        string source = ReadFlowSource(fileName);
-        string method = ExtractMethod(source, "private async Task DoLoad");
+        string method = ExtractMethod(ReadFlowSource(fileName), "private async Task DoLoad");
+        int fault = method.IndexOf("\n        catch (Exception ex)");
+        int final = method.IndexOf("\n        finally", fault);
+        string severe = method[fault..final];
+        Assert.Contains("operation.HoldForManualSafetyRecovery(ex.Message);", severe);
+        Assert.Contains("requiresManualConfirmation = true;", severe);
+        Assert.DoesNotContain("MagnetOffAsync", severe);
+        Assert.DoesNotContain("MoveAbsoluteAsync", severe);
+        string helper = File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "Service", "FlowEngine", "PickupProbeHelper.cs"));
+        Assert.DoesNotContain("MagnetOffAsync", helper);
 
-        // “物理命令已开始且响应未知”分支必须置 requiresManualConfirmation，阻止后续退磁收尾。
-        Assert.Contains("physicalCommandStarted && !loadState.X11PickupFailed", method, StringComparison.Ordinal);
-
-        // 退磁收尾（if (mag && cr != null)）前必须是带 !requiresManualConfirmation 守卫的 else，
-        // 不能是裸 else，否则“持件等待/响应未知”会被当成“未取到板”而放磁。
-        int magOff = method.IndexOf("if (mag && cr != null)", StringComparison.Ordinal);
-        Assert.True(magOff > 0, $"{fileName} 未找到退磁收尾分支");
-        string guard = method[Math.Max(0, magOff - 96)..magOff];
-        Assert.Contains("else if (!requiresManualConfirmation)", guard, StringComparison.Ordinal);
-        Assert.DoesNotContain("else\n            {\n                if (mag && cr != null)",
-            method.Replace("\r\n", "\n"), StringComparison.Ordinal);
     }
 
     [Theory]

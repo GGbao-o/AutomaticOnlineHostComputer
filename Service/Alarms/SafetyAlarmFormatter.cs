@@ -19,7 +19,8 @@ internal static class SafetyAlarmFormatter
     {
         var a = d.FailureAction;
         var wp = d.Workpiece;
-        string title = $"{d.Scope} · {d.CraneNo}号天车 · {d.Operation}异常";
+        string carrier = d.ManipulatorNo.HasValue ? $"机械手{d.ManipulatorNo}" : $"{d.CraneNo}号天车";
+        string title = $"{d.Scope} · {carrier} · {d.Operation}异常";
         string failure = $"发生时间：{Time(d.OccurredAtUtc)}\n动作编号：{d.ActionId}\n" +
             $"异常原因：{d.Reason}\n失败步骤：{Known(d.FailureDisplayStep, a == null ? "未知" : Step(a.Step))}\n" +
             $"{(string.IsNullOrWhiteSpace(d.FailureDisplayStep) ? "步骤说明" : "最后业务步骤说明")}：{Known(a?.Detail)}\n最后成功步骤：{d.LastSuccessfulStep}";
@@ -64,6 +65,7 @@ internal static class SafetyAlarmFormatter
         FlowActionStep.MoveXYToSource => "XY移动到来源设备",
         FlowActionStep.FineTuneSource => "来源位置XY绝对编码器微调",
         FlowActionStep.MoveZDownToPick => "Z下降取料",
+        FlowActionStep.ProbeSourcePresence => "放磁状态探测来源板（尚未持件）",
         FlowActionStep.MagnetOnSent => "充磁取料，确认充磁反馈",
         FlowActionStep.ConfirmPickup => "检查X11，确认取到板",
         FlowActionStep.HoldingWorkpiece => "已确认持板",
@@ -77,6 +79,7 @@ internal static class SafetyAlarmFormatter
         FlowActionStep.NotifyDownstream => "等待或写入PLC/CNC及下游交接信号",
         FlowActionStep.ReturnSafe => "回安全位置／归位",
         FlowActionStep.Completed => "动作完成",
+        FlowActionStep.Discarded => "异常作废结案",
         _ => step.ToString()
     };
 
@@ -96,6 +99,7 @@ internal static class SafetyAlarmFormatter
         FlowWorkpieceOwnership.AtTargetPendingHandoff => "业务记录已放到目标，交接待确认",
         FlowWorkpieceOwnership.Completed => "业务动作完成",
         FlowWorkpieceOwnership.ManualConfirmation => "归属待人工确认",
+        FlowWorkpieceOwnership.Discarded => "软件任务已作废（实体待人工处理）",
         _ => "未知"
     };
 

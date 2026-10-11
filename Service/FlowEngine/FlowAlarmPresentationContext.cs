@@ -34,6 +34,7 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
     private string? _frontDispatchResult;
     private string _actionLockResult = "等待原业务收尾";
     private readonly List<string> _alarmMessages = new();
+    private readonly List<string> _pickupEvidence = new();
     private int _disposeStarted;
 
     private FlowAlarmPresentationContext(FlowActionContext action, WorkpieceCache? wp, string scope, int craneNo, string operation)
@@ -50,6 +51,10 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
 
     public static FlowAlarmPresentationContext? Current => Ambient.Value;
     public string ActionId => _action.OperationId;
+    public int? ManipulatorNo => _action.DeviceName switch
+    {
+        "机械手1" => 1, "机械手2" => 2, "机械手3" => 3, _ => null
+    };
     public event Action? Changed;
 
     // 只在动作退出时读现有软件事实；回调不取得/释放锁、不清理或恢复缓存。
@@ -82,7 +87,7 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
         else if (ledger.IsReserved(source, out owner))
             state += $"；来源仍被预约（{(owner == actionId ? "本动作" : owner)}）";
         else state += "；当前无来源预约";
-        return $"{source}：{state}。自动作废清理未修改中转架账本；已移交下游的缓存不回滚。";
+        return $"{source}退出时只读观察：{state}；已移交下游缓存不回滚。";
     }
 
     public static FlowAlarmPresentationContext Begin(FlowActionContext action, WorkpieceCache? wp, string scope, int craneNo, string operation)
@@ -129,6 +134,22 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
             context.NotifyChanged();
         }
         catch { }
+    }
+
+    public static void RecordPickupProbe(string result)
+    {
+        var context = Current;
+        if (context == null) return;
+        lock (context._gate) context._pickupEvidence.Add($"{DateTime.Now:HH:mm:ss.fff} {result}");
+        context.NotifyChanged();
+    }
+
+    public static void RecordMemoryCleanup(string result)
+    {
+        var context = Current;
+        if (context == null) return;
+        lock (context._gate) context._memoryCleanup = result;
+        context.NotifyChanged();
     }
 
     internal void CompleteFrontDispatch(bool released)
@@ -226,7 +247,7 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
             return new(ActionId, _scope, _craneNo, _operation, _occurredAtUtc, _workpiece,
                 _failureAction, _reason, _exceptionDetail, _lastSuccessfulStep, _deviceCleanup,
                 _memoryCleanup, _cacheCleanup, _lockCleanup, _finished, _cleanupAtUtc,
-                string.Join("\n\n", _alarmMessages), _failurePhase, _failureDisplayStep);
+                string.Join("\n\n", _alarmMessages.Concat(_pickupEvidence)), _failurePhase, _failureDisplayStep, ManipulatorNo);
     }
 
     private void NotifyChanged()
@@ -254,8 +275,8 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
                 _actionLockResult = _lockCleanup;
                 if (_waitForFrontDispatch)
                     _lockCleanup += "；" + (_frontDispatchResult ?? "前天车调度锁：等待调度层释放");
-                if (cacheResult != null) _cacheCleanup = cacheResult;
-                if (memoryResult != null) _memoryCleanup = memoryResult;
+                if (cacheResult != null) _cacheCleanup += "\n" + cacheResult;
+                if (memoryResult != null) _memoryCleanup += "\n退出时观察：" + memoryResult;
                 _actionBodyFinished = true;
                 _finished = !_waitForFrontDispatch || _frontDispatchFinished;
                 _cleanupAtUtc = DateTime.UtcNow;

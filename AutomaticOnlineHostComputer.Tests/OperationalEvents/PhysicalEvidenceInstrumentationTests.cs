@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using AutomaticOnlineHostComputer.Service;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 
@@ -18,29 +18,25 @@ public sealed class PhysicalEvidenceInstrumentationTests
         };
 
     [Fact]
-    public void Device_call_baseline_remains_26_magnet_on_26_x11_and_36_magnet_off()
+    public void Fourteen_entries_delegate_pickup_without_old_magnet_retry_loops()
     {
-        int on = 0, x11 = 0, off = 0;
-        foreach ((string file, (int expectedOn, int expectedX11, int expectedOff)) in Baseline)
+        var expectedEntries = new Dictionary<string, int>
         {
-            string source = ReadFlowSource(file);
-            int actualOn = Regex.Matches(source, @"\bMagnetOnAsync\(").Count;
-            int actualX11 = Regex.Matches(source, @"\bReadXBitAsync\(63497,").Count;
-            int actualOff = Regex.Matches(source, @"\bMagnetOffAsync\(").Count;
-            Assert.Equal(expectedOn, actualOn);
-            Assert.Equal(expectedX11, actualX11);
-            Assert.Equal(expectedOff, actualOff);
-            Assert.Equal(actualOn, Regex.Matches(source, @"CRANE_MAGNET_ON_RESPONSE_UNKNOWN").Count);
-            Assert.Equal(actualX11, Regex.Matches(source, @"CRANE_X11_READ_FAILED").Count);
-            Assert.Equal(actualOff, Regex.Matches(source, @"CRANE_MAGNET_OFF_FAILED").Count);
-            on += actualOn;
-            x11 += actualX11;
-            off += actualOff;
+            ["Line1FrontFlowEngine.cs"] = 3, ["Line2FrontFlowEngine.cs"] = 3,
+            ["Line1RearFlowEngine.cs"] = 2, ["Line2RearFlowEngine.cs"] = 2,
+            ["GrindingFlowEngine.cs"] = 2, ["BalancingFlowEngine.cs"] = 2
+        };
+        foreach (var entry in expectedEntries)
+        {
+            string source = ReadFlowSource(entry.Key);
+            Assert.Equal(entry.Value, Regex.Matches(source, @"PickupProbeHelper\.PickAsync\(").Count);
+            Assert.DoesNotContain("MagnetOnAsync(", source);
+            Assert.DoesNotContain("X11重试前退磁", source);
         }
+        string helper = ReadFlowSource("PickupProbeHelper.cs");
+        Assert.Equal(1, Regex.Matches(helper, @"crane\.MagnetOnAsync\(").Count);
+        Assert.DoesNotContain("MagnetOffAsync", helper);
 
-        Assert.Equal(26, on);
-        Assert.Equal(26, x11);
-        Assert.Equal(36, off);
     }
 
     [Fact]
@@ -49,10 +45,16 @@ public sealed class PhysicalEvidenceInstrumentationTests
         foreach (string file in Baseline.Keys)
         {
             string source = ReadFlowSource(file);
-            AssertEveryCallHasReportingCatch(source, file, "MagnetOnAsync(", "CRANE_MAGNET_ON_RESPONSE_UNKNOWN", mustExcludeCancellation: false);
             AssertEveryCallHasReportingCatch(source, file, "MagnetOffAsync(", "CRANE_MAGNET_OFF_FAILED", mustExcludeCancellation: false);
             AssertEveryCallHasReportingCatch(source, file, "ReadXBitAsync(63497,", "CRANE_X11_READ_FAILED", mustExcludeCancellation: true);
+            Assert.Contains("pickupFailure.EventCode", source);
+            Assert.Contains("actionSnapshot: action.Snapshot()", source);
         }
+        string helper = ReadFlowSource("PickupProbeHelper.cs");
+        Assert.Contains("tracker.FailMagnetOn();", helper);
+        Assert.Contains("tracker.FailX11();", helper);
+        Assert.Contains("catch (OperationCanceledException) { throw; }", helper);
+
     }
 
     [Fact]
@@ -130,21 +132,16 @@ public sealed class PhysicalEvidenceInstrumentationTests
     [Fact]
     public void Instrumentation_contract_mentions_all_required_event_codes_and_fourteen_safe_cycles()
     {
-        string all = string.Join(Environment.NewLine, Baseline.Keys.Select(ReadFlowSource));
-
+        string all = string.Join("\n", Baseline.Keys.Select(ReadFlowSource));
         Assert.Equal(14, Regex.Matches(all, @"OperationalEventContextFactory\.CreatePhysicalCycleTrackerOrDisabled\(").Count);
         Assert.Equal(14, Regex.Matches(all, @"OperationalEventContextFactory\.CreatePhysicalSiteOrEmpty\(").Count);
-        Assert.DoesNotContain("new OperationalPhysicalCycleTracker(", all, StringComparison.Ordinal);
-        Assert.DoesNotMatch(@"=\s*new OperationalEventContextFactory\.OperationalPhysicalEventSite\(", all);
-        Assert.DoesNotMatch(@"\.BeginZDown\(\s*\)", all);
-        Assert.Equal(26, Regex.Matches(all, @"CRANE_MAGNET_ON_RESPONSE_UNKNOWN").Count);
-        Assert.Equal(26, Regex.Matches(all, @"CRANE_X11_READ_FAILED").Count);
-        Assert.Equal(36, Regex.Matches(all, @"CRANE_MAGNET_OFF_FAILED").Count);
-        // 两条后天车上料出口延后到finally最终化助手；其余12个出口仍直接上报。
-        Assert.Equal(12, Regex.Matches(all, @"CRANE_X11_NOT_CONFIRMED").Count);
-        Assert.Equal(2, Regex.Matches(all, @"TryReportRearLoadX11FinalFailure").Count);
+        Assert.Equal(14, Regex.Matches(all, @"PickupProbeHelper\.PickAsync\(").Count);
         Assert.Equal(12, Regex.Matches(all, @"CRANE_X11_UNEXPECTED_WORKPIECE").Count);
-        Assert.Equal(16, Regex.Matches(all, @"PHYSICAL_HANDOFF_NOT_CLOSED").Count);
+        string helper = ReadFlowSource("PickupProbeHelper.cs");
+        Assert.Contains("CRANE_X11_NOT_CONFIRMED", helper);
+        Assert.Contains("CRANE_MAGNET_ON_RESPONSE_UNKNOWN", helper);
+        Assert.Contains("ENGINE_FINAL_FAILURE", helper);
+
     }
 
     [Fact]
@@ -330,16 +327,14 @@ public sealed class PhysicalEvidenceInstrumentationTests
     }
 
     [Fact]
-    public void Grinding_reports_real_magnet_attempts_inside_the_retry_delegate()
+    public void Grinding_reports_pickup_through_helper_without_business_replay()
     {
         string grinding = ReadFlowSource("GrindingFlowEngine.cs");
+        Assert.DoesNotContain("await CraneOpAsync(crane,", grinding);
+        Assert.Equal(2, Regex.Matches(grinding, @"PickupProbeHelper\.PickAsync\(").Count);
+        Assert.Contains("tracker.BeginMagnetOn();", ReadFlowSource("PickupProbeHelper.cs"));
+        Assert.Contains("tracker.FailMagnetOn();", ReadFlowSource("PickupProbeHelper.cs"));
 
-        Assert.Contains("await CraneOpAsync(crane, async c =>", grinding, StringComparison.Ordinal);
-        // 动作账本可在委托内外记录“已发送”，不应反过来要求物理监控调用必须是委托第一行。
-        Assert.Contains("operationalTracker.BeginMagnetOn();", grinding, StringComparison.Ordinal);
-        Assert.Contains("await crane.MagnetOnAsync(c);", grinding, StringComparison.Ordinal);
-        Assert.Contains("operationalTracker.BeginMagnetOff();", grinding, StringComparison.Ordinal);
-        Assert.Contains("await crane.MagnetOffAsync(c);", grinding, StringComparison.Ordinal);
     }
 
     [Fact]

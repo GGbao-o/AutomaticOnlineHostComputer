@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
@@ -15,11 +15,11 @@ public sealed class FlowActionFinalReportContractTests
     {
         string source = File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "Service", "FlowEngine", file));
 
-        Assert.Contains("机械手1动作最终异常", source, StringComparison.Ordinal);
+        Assert.Contains("机械手1严重异常作废", source, StringComparison.Ordinal);
         Assert.Contains("actionSnapshot: action.Snapshot()", source, StringComparison.Ordinal);
 
         int targetOwnership = source.IndexOf("action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff", StringComparison.Ordinal);
-        int finalReport = source.LastIndexOf("ActionStage = \"前天车动作最终异常\"", StringComparison.Ordinal);
+        int finalReport = source.LastIndexOf("ActionStage = \"前天车严重异常作废\"", StringComparison.Ordinal);
         Assert.True(targetOwnership >= 0, $"{file}缺少中转架目标待交接结论");
         Assert.True(finalReport > targetOwnership,
             $"{file}必须在中转架目标待交接结论后再生成前天车最终快照，不能展示过期的OnCarrier。");

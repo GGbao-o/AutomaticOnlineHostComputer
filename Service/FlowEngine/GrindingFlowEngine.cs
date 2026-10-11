@@ -1605,7 +1605,7 @@ public sealed class GrindingFlowEngine : IDisposable
     /// 安全性：即使操作员还没来得及抽走板，下一轮取料前的 X11 残留检查
     /// （上料 1773-1796 / 下料 2432-2456）会在第一步拒绝并暂停，不会叠料或碰撞。
     /// <para>
-    /// 使用 <see cref="CancellationToken.None"/>：本方法在 finally 中执行，动作可能已被应急取消；
+    /// 使用独立10秒清理令牌：本方法在 finally 中执行，动作可能已被应急取消；
     /// 若沿用流程 ct 会在此抛出 OperationCanceledException，掩盖真正的原始异常。
     /// </para>
     /// </summary>
@@ -1620,7 +1620,8 @@ public sealed class GrindingFlowEngine : IDisposable
             }
             else
             {
-                await grinder.Svc.ClearEmergencyRegistersAsync(CancellationToken.None);
+                using var cleanupCts = new CancellationTokenSource(10_000);
+                await grinder.Svc.ClearEmergencyRegistersAsync(cleanupCts.Token);
                 deviceLog = "研磨机参数与上位机输出已清零";
             }
         }
@@ -1633,21 +1634,13 @@ public sealed class GrindingFlowEngine : IDisposable
         grinder.StateChangedAt = DateTime.UtcNow;
         grinder.PendingWorkpiece = null;
 
-        // 清该设备相关的动作账本快照，避免异常监控继续挂"待人工确认"。
-        string scope = isLoad ? "研磨天车上料" : "研磨天车下料";
-        FlowActionSnapshot[] stale = FlowActionManualRegistry.Snapshot()
-            .Where(item => item.FlowScope == scope &&
-                           (item.Target == grinder.StationCode || item.Source == grinder.StationCode))
-            .ToArray();
-        foreach (FlowActionSnapshot snapshot in stale)
-            FlowActionManualRegistry.Remove(snapshot.OperationId);
-
+        // 调用方仅结案本动作；其他机台及其他动作人工记录保留。
         _fastNextCycle = true;
         FlowAlarmPresentationContext.RecordCleanup(deviceLog, "研磨机已回Idle，PendingWorkpiece已清",
             "本机清理不删除其他FIFO任务；上料异常暂停已按身份作废本板，非暂停退回保留；已交接下游缓存不回滚");
         Console.WriteLine(
             $"│ [作废] {grinder.Name}{(isLoad ? "上料" : "下料")}异常：本轮已自动作废——" +
-            $"PLC下发数据已清、内存工件已清并回空闲、动作账本已清{stale.Length}条；{deviceLog}。" +
+            $"内存工件已清并回空闲；设备清理实际结果：{deviceLog}。" +
             "请把本块板抽走后启动线路继续。");
     }
 
@@ -1667,7 +1660,8 @@ public sealed class GrindingFlowEngine : IDisposable
 
         try
         {
-            await grinder.Svc!.ClearEmergencyRegistersAsync(CancellationToken.None);
+            using var cleanupCts = new CancellationTokenSource(10_000);
+            await grinder.Svc!.ClearEmergencyRegistersAsync(cleanupCts.Token);
             Console.WriteLine(
                 $"[GrindingEngine] [{grinder.Name}] ✓ {phase}成功: 参数及上位机输出已清零; Pending保留");
             OperationalLog.Info(phase, "参数及上位机输出已清零，Pending保留，等待外层异常暂停",
@@ -1732,6 +1726,7 @@ public sealed class GrindingFlowEngine : IDisposable
     private async Task ProcessWorkpieceAsync(GrinderContext grinder, WorkpieceCache wp, int actionVersion,
         CancellationTokenSource actionCts, TaskCompletionSource<bool> completion)
     {
+        int pickupStableDelayMs = _cfg.Grinding.X11StableDelayMs;
         string actionId = OperationalEventContextFactory.NewActionId("GRIND-LOAD");
         var action = new FlowActionContext(actionId, "研磨天车上料", $"研磨天车#{_cfg.Grinding.CraneNo}",
             wp.IdentityText, "ST709", grinder.StationCode, "研磨FIFO");
@@ -1755,6 +1750,7 @@ public sealed class GrindingFlowEngine : IDisposable
         bool placedInGrinder = false;   // 退磁放入研磨机后, 工件已离开ST709缓存队列, 异常时绝不能回缓存
         bool operationalPlacementCommitted = false; // 仅供旁路证据，不参与业务判断
         bool discardWorkpieceOnAbort = false; // 仅本动作异常暂停触发；普通Pause/非暂停退回不删FIFO。
+        Task? activeZSafeTask = null;
         bool loadDoneNotified = false;  // SetLoadDone成功后, 研磨机PLC已收到上料完成, 状态可进入Machining
         var operationalTracker = OperationalEventContextFactory.CreatePhysicalCycleTrackerOrDisabled(actionId);
         var operationalSite = OperationalEventContextFactory.CreatePhysicalSiteOrEmpty(() => new OperationalEventContextFactory.OperationalPhysicalEventSite(
@@ -1768,6 +1764,7 @@ public sealed class GrindingFlowEngine : IDisposable
         try
         {
             // ═══ 连接天车(CraneConnectionCache共享, 不建重复TCP) ═══
+            ct.ThrowIfCancellationRequested();
             crane = _craneCache.GetOrCreateService(_cfg.Grinding.CraneNo);
             if (!crane.IsConnected) await crane.ConnectAsync(ct);
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ═══ 开始取料送料流程 {wp.IdentityText} 直径={wp.Diameter} ═══");
@@ -1930,142 +1927,13 @@ public sealed class GrindingFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), 0), "ST709取料前微调成功返回");
             int pickupTargetZ = ApplyOffsetZ(pickupZ);
-            operationalTracker.BeginZDown(pickupTargetZ);
-            action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), pickupTargetZ), "ST709下降取料");
-            action.MarkCommandSent();
-            await crane.MoveAbsoluteAsync(-1, -1, pickupTargetZ, ct: ct);
-            operationalTracker.CompleteZDown();
-            action.Confirm(new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), pickupTargetZ), "ST709取料Z到位");
-
-            // ── ⑤ 充磁取料 ───────────────────────────────────────
-            //    充磁成功=工件已吸附到天车上，之后失败无法自动回缓存
-            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑤ 充磁取料...");
-            operationalTracker.BeginMagnetOn();
-            try
-            {
-                action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), pickupTargetZ), "ST709首次充磁");
-                action.MarkCommandSent();
-                await crane.MagnetOnAsync(ct);
-                operationalTracker.CompleteMagnetOn();
-            }
-            catch (Exception ex)
-            {
-                operationalTracker.FailMagnetOn();
-                OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
-                    operationalSite with { ActionStage = "ST709首次充磁取料" }, operationalTracker, ex,
-                    "充磁方法异常，实际命令与磁铁状态未知", true);
-                throw;
-            }
+            var pickup = await PickupProbeHelper.PickAsync(crane, pickupTargetZ, pickupStableDelayMs,
+                action, operationalTracker, ct,
+                validateAction: () => { if (!IsGrindingActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
+            int pickupCheckZ = pickup.ActualZ;
             magnetOn = true;
-            action.Confirm();
-            action.RecordFeedback(FlowActionPosition.Unknown, null, true, "首次充磁调用成功返回");
-            Console.WriteLine($"[GrindingEngine] [{craneName}]   充磁完成");
-
-            // ── ⑤b X11检测: 充磁→等3s→查X11(63497)→没吸到退磁Z↓5mm重试, 最多2次 ──
-            Console.WriteLine($"[GrindingEngine] [{craneName}] ⑤b 充磁→等3s→X11检测");
-            int pickupCheckZ = pickupZ;
-            operationalTracker.BeginX11Stage("充磁后持件确认");
-            for (int retry = 0; retry <= 2; retry++)
-            {
-                if (retry == 0)
-                {
-                    Console.WriteLine($"[GrindingEngine] [{craneName}]   充磁(X11第1次)");
-                }
-                else
-                {
-                    pickupCheckZ += 5;
-                    Console.WriteLine($"[GrindingEngine] [{craneName}]   退磁→Z↓到{pickupCheckZ}→充磁");
-                    operationalTracker.BeginMagnetOff();
-                    try
-                    {
-                        action.BeginStep(FlowActionStep.MagnetOffSent, new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), ApplyOffsetZ(pickupCheckZ)), "ST709 X11重试前退磁");
-                        action.MarkCommandSent();
-                        await crane.MagnetOffAsync(ct);
-                        operationalTracker.CompleteMagnetOff();
-                        action.Confirm(new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), ApplyOffsetZ(pickupCheckZ)), "ST709 X11重试前退磁成功返回");
-                    }
-                    catch (Exception ex)
-                    {
-                        operationalTracker.FailMagnetOff();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
-                            operationalSite with { ActionStage = "ST709 X11重试前退磁" }, operationalTracker, ex,
-                            "退磁方法异常，实际退磁结果未知", true, holdingWorkpiece: holdingWorkpiece);
-                        throw;
-                    }
-                    magnetOn = false;
-                    int retryTargetZ = ApplyOffsetZ(pickupCheckZ);
-                    operationalTracker.BeginZDown(retryTargetZ);
-                    try
-                    {
-                        action.BeginStep(FlowActionStep.MoveZDownToPick, new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), retryTargetZ), "ST709 X11重试下探Z");
-                        action.MarkCommandSent();
-                        await crane.MoveAbsoluteAsync(-1, -1, retryTargetZ, ct: ct);
-                        operationalTracker.CompleteZDown();
-                        action.Confirm(new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), retryTargetZ), "ST709 X11重试下探Z到位");
-                    }
-                    catch (PressureStopException)
-                    {
-                        operationalTracker.MarkZUnknown("ST709 X11重试下探触发下压保护，恢复后实际位置未知");
-                        await crane.RecoverFromPressureStopAsync(ct);
-                        throw;
-                    }
-                    operationalTracker.BeginMagnetOn();
-                    try
-                    {
-                        action.BeginStep(FlowActionStep.MagnetOnSent, new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), retryTargetZ), "ST709 X11重试后充磁");
-                        action.MarkCommandSent();
-                        await crane.MagnetOnAsync(ct);
-                        operationalTracker.CompleteMagnetOn();
-                        action.Confirm(new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), retryTargetZ), "ST709 X11重试后充磁成功返回");
-                    }
-                    catch (Exception ex)
-                    {
-                        operationalTracker.FailMagnetOn();
-                        OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
-                            operationalSite with { ActionStage = "ST709下探后再次充磁" }, operationalTracker, ex,
-                            "重试充磁方法异常，实际命令与磁铁状态未知", true);
-                        throw;
-                    }
-                    magnetOn = true;
-                }
-                Console.WriteLine($"[GrindingEngine] [{craneName}]   等3s让X11稳定...");
-                await Task.Delay(_cfg.Grinding.X11StableDelayMs, ct); // X11稳定延时(配置文件)
-                operationalTracker.BeginX11Attempt();
-                bool x11;
-                try
-                {
-                    x11 = await crane.ReadXBitAsync(63497, ct);
-                    operationalTracker.CompleteX11(x11, DateTime.UtcNow);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    operationalTracker.FailX11();
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_X11_READ_FAILED",
-                        operationalSite with { ActionStage = $"ST709充磁后X11第{retry + 1}次读取" }, operationalTracker, ex,
-                        "充磁后X11读取失败；本次值无效并保留最后成功值（如有）", true);
-                    throw;
-                }
-                physicalTracker?.TryObserveX11(x11);
-                if (x11)
-                {
-                    holdingWorkpiece = true;
-                    action.BeginStep(FlowActionStep.ConfirmPickup, new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), ApplyOffsetZ(pickupCheckZ)), "X11确认研磨天车持件");
-                    action.RecordFeedback(new FlowActionPosition(ApplyOffsetX(rackX), ApplyOffsetY(rackY), ApplyOffsetZ(pickupCheckZ)), true, true, "X11=1确认持件");
-                    action.SetOwnership(FlowWorkpieceOwnership.OnCarrier, "X11=1确认工件由研磨天车持有");
-                    action.Confirm();
-                    Console.WriteLine($"[GrindingEngine] [{craneName}]   ✓ X11=1 已吸到");
-                    break;
-                }
-                if (retry > 1)
-                {
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_X11_NOT_CONFIRMED",
-                        operationalSite with { ActionStage = "ST709三次X11均未确认持件" }, operationalTracker, null,
-                        "三次业务X11读取均有效返回0；只能确认未确认持件，不能推断工件仍在ST709", true,
-                        holdingWorkpiece: false);
-                    throw new Exception($"上料取料失败: 2次充磁后X11仍=0");
-                }
-                Console.WriteLine($"[GrindingEngine] [{craneName}]   ⚠ X11=0 未吸到, 准备下探5mm重试");
-            }
+            holdingWorkpiece = true;
+            physicalTracker?.TryObserveX11(true);
 
             // ── ⑤c Z 升到安全高度，并行通知PLC已取走 ──
             //    现场确认：启动Z回升后经过配置延时即可写M731释放传送带。
@@ -2075,7 +1943,7 @@ public sealed class GrindingFlowEngine : IDisposable
             action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, null, safeZ), "持件后Z上升安全高度");
             action.MarkCommandSent();
             //升安全高度
-            Task zSafeTask = crane.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
+            Task zSafeTask = activeZSafeTask = crane.MoveAbsoluteAsync(-1, -1, safeZ, ct: ct);
             Console.WriteLine($"[GrindingEngine] [{craneName}] Z回升已启动，{_cfg.Grinding.M731NotifyDelayMs}ms后写M731并行通知PLC");
             //延时2000ms  这个是配置文件配置的
             await Task.Delay(_cfg.Grinding.M731NotifyDelayMs, ct);
@@ -2115,6 +1983,10 @@ public sealed class GrindingFlowEngine : IDisposable
                 try
                 {
                     await Task.WhenAll(zSafeTask, m731Task);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -2159,8 +2031,17 @@ public sealed class GrindingFlowEngine : IDisposable
             {
                 await Task.WhenAll(xyMoveTask, parameterTransferTask);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
+                if (!IsGrindingActionCurrent(actionVersion)) throw;
+                discardWorkpieceOnAbort = true;
+                _paused = true;
+                FlowAlarmPresentationContext.RecordFailure(ex);
+                OnSafetyAlarm?.Invoke($"{grinder.Name}目标准备异常：{ex.Message}。研磨引擎已暂停，正在收尾。");
                 await ClearTargetGrinderPreparationAsync(grinder, wp, ex);
                 throw;
             }
@@ -2190,8 +2071,17 @@ public sealed class GrindingFlowEngine : IDisposable
                         physicalPhase: OperationalEventContextFactory.PlacementBeforeZDown(magnetOn, holdingWorkpiece, physicalTracker, "ST709取料X11=1且研磨机尚未进入上料请求等待", "天车/研磨机上方")),
                     actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
+                if (!IsGrindingActionCurrent(actionVersion)) throw;
+                discardWorkpieceOnAbort = true;
+                _paused = true;
+                FlowAlarmPresentationContext.RecordFailure(ex);
+                OnSafetyAlarm?.Invoke($"{grinder.Name}目标准备异常：{ex.Message}。研磨引擎已暂停，正在收尾。");
                 await ClearTargetGrinderPreparationAsync(grinder, wp, ex);
                 throw;
             }
@@ -2297,6 +2187,10 @@ public sealed class GrindingFlowEngine : IDisposable
             action.Complete("研磨机上料、SetLoadDone和加工状态已完整闭环");
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ═══ 上料完成，研磨机开始加工 {wp.IdentityText} ═══");
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 普通取消保留来源；应急失效动作由应急流程结案。
+        }
         catch (CraneMotionTimeoutException timeout)
         {
             FlowAlarmPresentationContext.RecordFailure(timeout);
@@ -2336,7 +2230,7 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine($"══════════════════════════════════════════════");
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠⚠⚠ 下压急停(D4523)触发！");
             Console.WriteLine($"[GrindingEngine]   异常: {pEx.Message}");
-            Console.WriteLine($"[GrindingEngine]   充磁状态={(magnetOn ? "已充磁(工件在天车上)" : "未充磁(工件在ST709架上)")}");
+            Console.WriteLine($"[GrindingEngine]   充磁调用记录={(magnetOn ? "本次已成功返回" : "本次尚未成功返回/可能未知")}；实际板位置须按充磁后X11及现场确认");
             Console.WriteLine($"[GrindingEngine]   恢复: ①写D4523=0 ②清除D4514=2→0 ③重新启动引擎");
             if (!IsGrindingActionCurrent(actionVersion))
             {
@@ -2374,7 +2268,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 action.MarkCommandResponseUnknown(ex.Message);
                 action.PauseForManualResolution(ex.Message);
             }
-            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
+            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, ex is PickupFailedException pickupFailure ? pickupFailure.EventCode : "ENGINE_FINAL_FAILURE",
                 operationalSite with { ActionStage = "研磨天车上料最终异常" }, operationalTracker, ex,
                 "研磨引擎已暂停，异常页面应以动作账本确认工件归属、步骤和锁。", true,
                 actionSnapshot: action.Snapshot());
@@ -2386,7 +2280,7 @@ public sealed class GrindingFlowEngine : IDisposable
                     "退磁成功返回并推定工件已放入研磨机，但SetLoadDone未确认", true,
                     holdingWorkpiece: null, placed: null, downstreamNotified: null, handoffClosed: null);
             }
-            Console.WriteLine($"[GrindingEngine]   充磁状态={(magnetOn ? "已充磁(工件在天车上)" : "未充磁(工件在ST709架上)")}");
+            Console.WriteLine($"[GrindingEngine]   充磁调用记录={(magnetOn ? "本次已成功返回" : "本次尚未成功返回/可能未知")}；实际板位置须按充磁后X11及现场确认");
             if (!IsGrindingActionCurrent(actionVersion))
             {
                 Console.WriteLine($"[GrindingEngine] [{grinder.Name}] 旧上料动作已被应急取消, 跳过状态/缓存写回");
@@ -2394,7 +2288,7 @@ public sealed class GrindingFlowEngine : IDisposable
             }
             if (ex is MagnetFeedbackTimeoutException magnetFeedback)
             {
-                // 反馈三次未确认时，不能把工件当作仍在ST709而回缓存；先暂停保留本轮身份供人工核实。
+                // 反馈三次未确认时，不能把工件当作仍在ST709而回缓存；先暂停冻结本轮身份供人工核实，最终收尾作废。
                 discardWorkpieceOnAbort = true;
                 _paused = true;
                 grinder.State = GrinderState.Loading;
@@ -2414,7 +2308,7 @@ public sealed class GrindingFlowEngine : IDisposable
             }
             else if (holdingWorkpiece || magnetOn)
             {
-                // X11确认吸住后, 异常必须保留在途数据, 由人工确认天车上工件去向。
+                // 异常阶段暂存持件数据供事故冻结；最终严重收尾作废，实物由人工处理。
                 discardWorkpieceOnAbort = true;
                 _paused = true; // 暂停引擎防止天车带着工件继续动
                 grinder.State = GrinderState.Loading;
@@ -2424,23 +2318,24 @@ public sealed class GrindingFlowEngine : IDisposable
             }
             else
             {
-                // 还没充磁→工件还在ST709架上→自动放回缓存, 等下次分配
-                RequeueWorkpiece(wp);
-                grinder.State = GrinderState.Idle;
-                grinder.PendingWorkpiece = null;
-                Console.WriteLine($"[GrindingEngine] ↩ 工件 d={wp.Diameter} 放回缓存(未充磁,自动恢复)");
+                // 已分配动作的微调/通信/探测失败也属严重异常，不能因未充磁自动回FIFO。
+                discardWorkpieceOnAbort = true;
+                _paused = true;
+                OnSafetyAlarm?.Invoke($"{grinder.Name}上料严重异常：{ex.Message}。研磨引擎已暂停，本板{wp.IdentityText}作废，不回FIFO；请人工移走本板，确认天车安全位置及实际放磁后恢复。");
             }
             grinder.StateChangedAt = DateTime.UtcNow;
         }
         finally
         {
-            // 异常自动作废：这一轮没走到 action.Complete(Completed) 就清这台研磨机的
-            // PLC 下发数据与内存工件数据并回空闲。放在 finally 最前面，与两个流程的收尾保持一致。
-            // 中转架账本完全不碰。
+            // 严重异常且版本仍归本动作时才作废；先等并行运动退出，防止清理后旧任务继续执行。
+            if (activeZSafeTask != null)
+                try { await activeZSafeTask; } catch { /* 原catch已暂停，先等运动真正退出。 */ }
             if (discardWorkpieceOnAbort && IsGrindingActionCurrent(actionVersion))
+            {
                 DiscardGrindingSourceWorkpiece(wp);
-            if (action.Disposition != FlowActionDisposition.Completed)
                 await ClearGrinderOnAbortAsync(grinder, isLoad: true);
+                action.Discard("异常本板作废，研磨机内存Idle，旧续搬入口删除");
+            }
 
             ReleaseRecordedCraneLock($"{grinder.Name}上料finally", actionVersion); // ← 无论如何释放天车锁, 防止死锁
             FinishGrindingAction(actionVersion, completion);
@@ -2469,13 +2364,14 @@ public sealed class GrindingFlowEngine : IDisposable
     /// </summary>
     /// <summary>
     /// 下料全流程: 天车#5→研磨机取成品→等门开→等尾座松开→Z↑→下料架ST710放下→通知PLC完成。
-    /// 主循环已设State=Unloading+StateChangedAt, 本方法完成后设State=Idle+清PendingWorkpiece；异常时保留现场数据。
+    /// 主循环已设State=Unloading+StateChangedAt, 本方法完成后设State=Idle+清PendingWorkpiece；严重异常时冻结事故证据，最终清本动作所属工件。
     /// <para>⚠ finally释放_craneLock, 保证天车锁不泄漏。</para>
     /// <para>⚠ 取料失败时(magnetOn=true)无法自动回缓存, 需人工处理。</para>
     /// </summary>
     private async Task UnloadFromGrinderAsync(GrinderContext grinder, int actionVersion,
         CancellationTokenSource actionCts, TaskCompletionSource<bool> completion)
     {
+        int pickupStableDelayMs = _cfg.Grinding.X11StableDelayMs;
         string actionId = OperationalEventContextFactory.NewActionId("GRIND-UNLOAD");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
         using var _ = actionCts;
@@ -2492,6 +2388,7 @@ public sealed class GrindingFlowEngine : IDisposable
         OperationalLog.Info("搬运动作开始", "已创建研磨下料任务", ("板号与序号", wp?.IdentityText ?? "待人工补录"));
         action.RegisterLock("GrindingCrane");
         var craneName = $"天车#{_cfg.Grinding.CraneNo}";
+        bool discardWorkpieceOnAbort = false;
         bool magnetOn = false;  // 充磁标志: true=成品已吸在天车上, 异常时无法恢复
         bool holdingWorkpiece = false;     // X11确认吸住后, 成品才算真实在天车上
         bool placedOnUnloadRack = false;   // ST710退磁成功后, 成品已在下料架, 不能再当作仍在研磨机
@@ -2510,15 +2407,17 @@ public sealed class GrindingFlowEngine : IDisposable
 
         try
         {
+            ct.ThrowIfCancellationRequested();
             if (!wp.HasValue)
             {
                 // 理论上主循环已挡住PendingWorkpiece=null, 这里仍保护锁释放和现场状态。
+                discardWorkpieceOnAbort = true;
                 _paused = true;
                 grinder.State = GrinderState.WaitingForUnload;
                 grinder.StateChangedAt = DateTime.UtcNow;
                 grinder.WpRecoveryNeeded = true;
                 Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ⚠ PendingWorkpiece=null，无法知道成品直径，暂停等待人工确认后再下料");
-                OnSafetyAlarm?.Invoke($"{grinder.Name}请求下料，但PendingWorkpiece为空，无法确认成品身份和直径。研磨引擎已暂停，请人工补录工件信息。");
+                OnSafetyAlarm?.Invoke($"{grinder.Name}请求下料，但PendingWorkpiece为空，无法确认成品身份和直径。研磨引擎已暂停，本轮作废；请人工处理本板并确认天车安全位置及实际放磁后恢复。");
                 return;
             }
             var workpiece = wp.Value;
@@ -2594,7 +2493,7 @@ public sealed class GrindingFlowEngine : IDisposable
             action.BeginStep(FlowActionStep.MoveXYToSource,
                 new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), 0), $"XY到{grinder.StationCode}下料来源位");
             action.MarkCommandSent();
-            await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(ApplyOffsetX(gx), ApplyOffsetY(gy), -1, ct: c), "XY去研磨机取料位", ct);
+            await crane.MoveAbsoluteAsync(ApplyOffsetX(gx), ApplyOffsetY(gy), -1, ct: ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), 0), "研磨机来源位XY到位");
             action.BeginStep(FlowActionStep.FineTuneSource,
                 new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), 0), $"{grinder.StationCode}取料前XY微调");
@@ -2612,154 +2511,13 @@ public sealed class GrindingFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), 0), "研磨机来源位XY微调完成");
             int grinderPickupTargetZ = ApplyOffsetZ(pickupZ);
-            operationalTracker.BeginZDown(grinderPickupTargetZ);
-            action.BeginStep(FlowActionStep.MoveZDownToPick,
-                new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), grinderPickupTargetZ), $"{grinder.StationCode}下降取料");
-            action.MarkCommandSent();
-            await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(-1, -1, grinderPickupTargetZ, ct: c), "Z降研磨机取料位", ct);
-            operationalTracker.CompleteZDown();
-            action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), grinderPickupTargetZ), "研磨机取料Z到位");
-
-            // ── ③ 充磁取工件 ─────────────────────────────────────
-            Console.WriteLine($"[GrindingEngine] [{craneName}] ③ 充磁取工件");
-            action.BeginStep(FlowActionStep.MagnetOnSent,
-                new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), grinderPickupTargetZ), $"{grinder.StationCode}首次充磁");
-            action.MarkCommandSent();
-            await CraneOpAsync(crane, async c =>
-            {
-                operationalTracker.BeginMagnetOn();
-                try
-                {
-                    await crane.MagnetOnAsync(c);
-                    operationalTracker.CompleteMagnetOn();
-                }
-                catch (Exception ex)
-                {
-                    operationalTracker.FailMagnetOn();
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
-                        operationalSite with { ActionStage = $"{grinder.StationCode}首次充磁取料" }, operationalTracker, ex,
-                        "CraneOp实际充磁尝试失败；即使包装器随后重连成功也保留本次真实失败", true);
-                    throw;
-                }
-            }, "充磁", ct);
+            var pickup = await PickupProbeHelper.PickAsync(crane, grinderPickupTargetZ, pickupStableDelayMs,
+                action, operationalTracker, ct,
+                validateAction: () => { if (!IsGrindingActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
+            int unlPickupCheckZ = pickup.ActualZ;
             magnetOn = true;
-            action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), grinderPickupTargetZ), "研磨机首次充磁调用成功返回");
-
-            // ── ③b X11检测: 充磁→等3s→查X11→没吸到退磁Z↓5mm重试, 最多2次 ──
-            Console.WriteLine($"[GrindingEngine] [{craneName}] ③b 充磁→等3s→X11检测");
-            int unlPickupCheckZ = pickupZ;
-            operationalTracker.BeginX11Stage("充磁后持件确认");
-            for (int retry = 0; retry <= 2; retry++)
-            {
-                if (retry == 0)
-                {
-                    Console.WriteLine($"[GrindingEngine] [{craneName}]   充磁(X11第1次)");
-                }
-                else
-                {
-                    unlPickupCheckZ += 5;
-                    Console.WriteLine($"[GrindingEngine] [{craneName}]   退磁→Z↓到{unlPickupCheckZ}→充磁");
-                    await CraneOpAsync(crane, async c =>
-                    {
-                        operationalTracker.BeginMagnetOff();
-                        try
-                        {
-                            action.BeginStep(FlowActionStep.MagnetOffSent, FlowActionPosition.Unknown, $"{grinder.StationCode}X11重试前退磁");
-                            action.MarkCommandSent();
-                            await crane.MagnetOffAsync(c);
-                            operationalTracker.CompleteMagnetOff();
-                            action.Confirm();
-                        }
-                        catch (Exception ex)
-                        {
-                            operationalTracker.FailMagnetOff();
-                            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
-                                operationalSite with { ActionStage = $"{grinder.StationCode}X11重试前退磁" }, operationalTracker, ex,
-                                "CraneOp实际退磁尝试失败；实际退磁结果未知", true,
-                                holdingWorkpiece: holdingWorkpiece);
-                            throw;
-                        }
-                    }, "退磁(X11重试)", ct);
-                    magnetOn = false;
-                    int retryTargetZ = ApplyOffsetZ(unlPickupCheckZ);
-                    operationalTracker.BeginZDown(retryTargetZ);
-                    try
-                    {
-                        action.BeginStep(FlowActionStep.MoveZDownToPick,
-                            new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), retryTargetZ), $"{grinder.StationCode}X11重试下探");
-                        action.MarkCommandSent();
-                        await crane.MoveAbsoluteAsync(-1, -1, retryTargetZ, ct: ct);
-                        operationalTracker.CompleteZDown();
-                        action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), retryTargetZ), "X11重试下探Z到位");
-                    }
-                    catch (PressureStopException)
-                    {
-                        operationalTracker.MarkZUnknown($"{grinder.StationCode} X11重试下探触发下压保护，恢复后实际位置未知");
-                        await crane.RecoverFromPressureStopAsync(ct);
-                        throw;
-                    }
-                    await CraneOpAsync(crane, async c =>
-                    {
-                        operationalTracker.BeginMagnetOn();
-                        try
-                        {
-                            action.BeginStep(FlowActionStep.MagnetOnSent,
-                                new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), retryTargetZ), $"{grinder.StationCode}X11重试后充磁");
-                            action.MarkCommandSent();
-                            await crane.MagnetOnAsync(c);
-                            operationalTracker.CompleteMagnetOn();
-                            action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), retryTargetZ), "X11重试后充磁调用成功返回");
-                        }
-                        catch (Exception ex)
-                        {
-                            operationalTracker.FailMagnetOn();
-                            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_ON_RESPONSE_UNKNOWN",
-                                operationalSite with { ActionStage = $"{grinder.StationCode}下探后再次充磁" }, operationalTracker, ex,
-                                "CraneOp实际重试充磁失败；实际命令与磁铁状态未知", true);
-                            throw;
-                        }
-                    }, "充磁(X11重试)", ct);
-                    magnetOn = true;
-                }
-                Console.WriteLine($"[GrindingEngine] [{craneName}]   等3s让X11稳定...");
-                await Task.Delay(_cfg.Grinding.X11StableDelayMs, ct); // X11稳定延时(配置文件)
-                operationalTracker.BeginX11Attempt();
-                bool x11;
-                try
-                {
-                    x11 = await crane.ReadXBitAsync(63497, ct);
-                    operationalTracker.CompleteX11(x11, DateTime.UtcNow);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    operationalTracker.FailX11();
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_X11_READ_FAILED",
-                        operationalSite with { ActionStage = $"{grinder.StationCode}充磁后X11第{retry + 1}次读取" }, operationalTracker, ex,
-                        "充磁后X11读取失败；本次值无效并保留最后成功值（如有）", true);
-                    throw;
-                }
-                physicalTracker?.TryObserveX11(x11);
-                Console.WriteLine($"[GrindingEngine] [{craneName}]   X11={(x11 ? "1(有版)" : "0(无版)")} (第{retry + 1}次)");
-                if (x11)
-                {
-                    holdingWorkpiece = true;
-                    action.BeginStep(FlowActionStep.ConfirmPickup, FlowActionPosition.Unknown, "X11确认研磨天车已从研磨机持件");
-                    action.RecordFeedback(FlowActionPosition.Unknown, true, true, "X11=1确认持件");
-                    action.SetOwnership(FlowWorkpieceOwnership.OnCarrier, "X11=1确认工件由研磨天车持有");
-                    action.Confirm();
-                    Console.WriteLine($"[GrindingEngine] [{craneName}]   ✓ X11=1 已吸到");
-                    break;
-                }
-                if (retry > 1)
-                {
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_X11_NOT_CONFIRMED",
-                        operationalSite with { ActionStage = $"{grinder.StationCode}三次X11均未确认持件" }, operationalTracker, null,
-                        "三次业务X11读取均有效返回0；只能确认未确认持件，不能推断工件仍在研磨机", true,
-                        holdingWorkpiece: false);
-                    throw new Exception("下料取料失败: 2次充磁后X11仍=0");
-                }
-                Console.WriteLine($"[GrindingEngine] [{craneName}]   ⚠ X11=0 未吸到, 准备下探5mm重试");
-            }
+            holdingWorkpiece = true;
+            physicalTracker?.TryObserveX11(true);
 
             // ── ④ 下料到达位置（通知研磨机 PLC：天车已到，请松开尾座）──
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ④ 下料到达位置(3s长信号)...");
@@ -2779,7 +2537,7 @@ public sealed class GrindingFlowEngine : IDisposable
             Console.WriteLine($"[GrindingEngine] [{craneName}] ⑥ Z升到安全高度 {_cfg.Grinding.SafeZHeight}（绝对坐标，不加偏移）");
             action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece, new FlowActionPosition(null, null, _cfg.Grinding.SafeZHeight), "研磨机取料后Z升安全高度");
             action.MarkCommandSent();
-            await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(-1, -1, _cfg.Grinding.SafeZHeight, ct: c), "Z升安全高度", ct);
+            await crane.MoveAbsoluteAsync(-1, -1, _cfg.Grinding.SafeZHeight, ct: ct);
             action.Confirm(new FlowActionPosition(null, null, _cfg.Grinding.SafeZHeight), "研磨机取料后Z安全到位");
             physicalTracker?.TryConfirmSafeZ(_cfg.Grinding.SafeZHeight, _cfg.AbsMove.Tolerance, "研磨机取料后Z升安全命令成功返回");
             operationalTracker.ConfirmSafeZ(_cfg.Grinding.SafeZHeight, _cfg.AbsMove.Tolerance, "研磨机取料后Z升安全命令成功返回");
@@ -2795,7 +2553,7 @@ public sealed class GrindingFlowEngine : IDisposable
             action.BeginStep(FlowActionStep.MoveXYToTarget,
                 new FlowActionPosition(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), _cfg.Grinding.SafeZHeight), "持件XY到ST710下料架");
             action.MarkCommandSent();
-            await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), -1, ct: c), "XY去下料架", ct);
+            await crane.MoveAbsoluteAsync(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), -1, ct: ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), _cfg.Grinding.SafeZHeight), "ST710目标位XY到位");
             action.BeginStep(FlowActionStep.FineTuneTarget,
                 new FlowActionPosition(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), _cfg.Grinding.SafeZHeight), "ST710放料前XY微调");
@@ -2823,7 +2581,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 action.BeginStep(FlowActionStep.MoveZDownToPlace,
                     new FlowActionPosition(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), unloadTargetZ), "ST710下降放料");
                 action.MarkCommandSent();
-                await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(-1, -1, unloadTargetZ, ct: c), "Z降放料", ct);
+                await crane.MoveAbsoluteAsync(-1, -1, unloadTargetZ, ct: ct);
                 operationalTracker.CompleteZDown();
                 action.Confirm(new FlowActionPosition(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), unloadTargetZ), "ST710放料Z到位");
             }
@@ -2838,28 +2596,21 @@ public sealed class GrindingFlowEngine : IDisposable
             action.BeginStep(FlowActionStep.MagnetOffSent,
                 new FlowActionPosition(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), unloadTargetZ), "ST710退磁放料");
             action.MarkCommandSent();
-            await CraneOpAsync(crane, async c =>
+            operationalTracker.BeginPlacementMagnetOff("ST710");
+            try
             {
-                operationalTracker.BeginPlacementMagnetOff("ST710");
-                try
-                {
-                    await crane.MagnetOffAsync(c);
-                    operationalTracker.CompletePlacementMagnetOff("ST710");
-                    operationalPlacementCommitted = true;
-                    operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, "ST710下料完整交接",
-                        "目标位退磁成功返回，放料推定成立；等待Z安全回升、M721和SetUnloadDone通知");
-                }
-                catch (Exception ex)
-                {
-                    operationalTracker.FailMagnetOff();
-                    OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
-                        operationalSite with { Station = "ST710", ActionStage = "ST710目标位退磁放料" }, operationalTracker, ex,
-                        "CraneOp实际退磁尝试失败；工件是否释放未知", true,
-                        holdingWorkpiece: null, placed: null,
-                        downstreamNotified: null, handoffClosed: null);
-                    throw;
-                }
-            }, "退磁", ct);
+                await crane.MagnetOffAsync(ct);
+                operationalTracker.CompletePlacementMagnetOff("ST710");
+                operationalPlacementCommitted = true;
+            }
+            catch (Exception ex)
+            {
+                operationalTracker.FailMagnetOff();
+                OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "CRANE_MAGNET_OFF_FAILED",
+                    operationalSite with { ActionStage = "ST710退磁放料" }, operationalTracker, ex,
+                    "退磁响应未知，不重放物理业务", true);
+                throw;
+            }
             magnetOn = false;
             placedOnUnloadRack = true; // MagnetOff成功返回后, 按物理现场处理为成品已放到ST710。
             action.SetOwnership(FlowWorkpieceOwnership.AtTargetPendingHandoff, "ST710退磁成功，等待M721和SetUnloadDone闭环");
@@ -2870,7 +2621,7 @@ public sealed class GrindingFlowEngine : IDisposable
             action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece,
                 new FlowActionPosition(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), _cfg.Grinding.SafeZHeight), "ST710放料后Z升安全高度");
             action.MarkCommandSent();
-            await CraneOpAsync(crane, c => crane.MoveAbsoluteAsync(-1, -1, _cfg.Grinding.SafeZHeight, ct: c), "Z升安全高度", ct);
+            await crane.MoveAbsoluteAsync(-1, -1, _cfg.Grinding.SafeZHeight, ct: ct);
             operationalTracker.ConfirmSafeZ(_cfg.Grinding.SafeZHeight, _cfg.AbsMove.Tolerance, "ST710放料后Z升安全命令成功返回");
             action.Confirm(new FlowActionPosition(ApplyOffsetX(unloadX), ApplyOffsetY(unloadY), _cfg.Grinding.SafeZHeight), "ST710放料后Z安全到位");
 
@@ -2924,6 +2675,10 @@ public sealed class GrindingFlowEngine : IDisposable
             action.Complete("研磨下料、M721和SetUnloadDone已完整闭环");
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ═══ 下料完成，研磨机空闲 {workpiece.IdentityText} ═══");
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 普通取消保留来源；应急失效动作由应急流程结案。
+        }
         catch (CraneMotionTimeoutException timeout)
         {
             FlowAlarmPresentationContext.RecordFailure(timeout);
@@ -2933,6 +2688,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 "研磨引擎已暂停，异常页面应以动作账本确认工件归属、步骤和锁。", true,
                 actionSnapshot: action.Snapshot());
             if (!IsGrindingActionCurrent(actionVersion)) return;
+            discardWorkpieceOnAbort = true;
             _paused = true;
             grinder.State = placedOnUnloadRack && unloadDoneNotified ? GrinderState.Idle : GrinderState.Unloading;
             grinder.StateChangedAt = DateTime.UtcNow;
@@ -2970,6 +2726,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 Console.WriteLine($"[GrindingEngine] [{grinder.Name}] 旧下料动作已被应急取消, 跳过急停状态/Pending写回");
                 return;
             }
+            discardWorkpieceOnAbort = true;
             _paused = true;
             // 这里只按物理位置记录一个中间状态，供本 catch 内后续的证据上报与告警使用；
             // 本方法的 finally 会统一把该研磨机状态自动作废清成空闲，所以这个记录不会长期保留。
@@ -2989,7 +2746,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 action.MarkCommandResponseUnknown(ex.Message);
                 action.PauseForManualResolution(ex.Message);
             }
-            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
+            OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, ex is PickupFailedException pickupFailure ? pickupFailure.EventCode : "ENGINE_FINAL_FAILURE",
                 operationalSite with { ActionStage = "研磨天车下料最终异常" }, operationalTracker, ex,
                 "研磨引擎已暂停，异常页面应以动作账本确认工件归属、步骤和锁。", true,
                 actionSnapshot: action.Snapshot());
@@ -3008,6 +2765,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 Console.WriteLine($"[GrindingEngine] [{grinder.Name}] 旧下料动作已被应急取消, 跳过状态/Pending写回");
                 return;
             }
+            discardWorkpieceOnAbort = true;
             _paused = true;
             // 磁铁反馈失败：真实磁铁状态未知，保留Unloading和Pending等待人工确认。
             // 未吸住: 成品大概率还在研磨机内, 保持WaitingForUnload。
@@ -3030,8 +2788,11 @@ public sealed class GrindingFlowEngine : IDisposable
         {
             // 异常自动作废：这一轮没走到 action.Complete(Completed) 就清这台研磨机的
             // PLC 下发数据与内存工件数据并回空闲。中转架账本完全不碰。
-            if (action.Disposition != FlowActionDisposition.Completed)
+            if (discardWorkpieceOnAbort && IsGrindingActionCurrent(actionVersion))
+            {
                 await ClearGrinderOnAbortAsync(grinder, isLoad: false);
+                action.Discard("异常下料板作废，研磨机内存Idle，旧续搬入口删除");
+            }
 
             ReleaseRecordedCraneLock($"{grinder.Name}下料finally", actionVersion);
             if (IsGrindingActionCurrent(actionVersion))

@@ -1,4 +1,4 @@
-namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
+﻿namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
 /// <summary>
 /// 机械手1 取料板长校验（ST007 D100 ↔ 任务板长）的源码契约。
@@ -65,30 +65,25 @@ public sealed class St007PlateLengthVerificationContractTests
     public void Mismatch_alarm_carries_everything_the_operator_needs(string fileName)
     {
         string source = ReadFront(fileName);
-        string mismatchBranch = ExtractMismatchBranch(source, fileName);
+        string failure = ExtractMismatchBranch(source, fileName);
+        Assert.Contains("OnSafetyAlarm?.Invoke", failure);
+        Assert.Contains("{ex.Message}", failure);
+        Assert.Contains("{wp.IdentityText}", failure);
+        Assert.Contains("FlowAlarmPresentationContext.Begin(action, wp", source);
+        string exception = File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "Service", "FlowEngine", "PlateLengthMismatchException.cs"));
+        foreach (string detail in new[] { "D100实测板长", "任务板长", "偏差", "容差" }) Assert.Contains(detail, exception);
+        Assert.Contains("ManipulatorAbortInstruction", failure);
 
-        Assert.Contains("OnSafetyAlarm?.Invoke(", mismatchBranch, StringComparison.Ordinal);
-        Assert.Contains("实测板长(D100)", mismatchBranch, StringComparison.Ordinal);
-        Assert.Contains("任务板长(ERP)", mismatchBranch, StringComparison.Ordinal);
-        Assert.Contains("（容差 ", mismatchBranch, StringComparison.Ordinal);
-        Assert.Contains("来源工位：ST007", mismatchBranch, StringComparison.Ordinal);
-        // 必须明确"实物板仍在 ST007"，否则现场会以为系统已经处理掉了这块板。
-        Assert.Contains("实物板仍在ST007未被处理", mismatchBranch, StringComparison.Ordinal);
-        // 换板必须等到日志确认 M800 复位，否则复位门永久关闭（除重启无法恢复）。
-        Assert.Contains("已观察到上一块M800复位为0", mismatchBranch, StringComparison.Ordinal);
-        // 工件身份必须出现在弹窗里，便于按版号/序号重导 ERP 任务。
-        Assert.Contains("{wp.IdentityText}", mismatchBranch, StringComparison.Ordinal);
     }
 
     /// <summary>截取"板长不一致"分支本体：从分支条件到通用回退分支的注释之前。</summary>
     private static string ExtractMismatchBranch(string source, string fileName)
     {
-        int start = source.IndexOf("else if (ex is PlateLengthMismatchException", StringComparison.Ordinal);
-        Assert.True(start >= 0, $"{fileName} 缺少板长不一致的专用 catch 分支");
-
-        int end = source.IndexOf("// 尚未确认从总上料架吸起", start, StringComparison.Ordinal);
-        Assert.True(end > start, $"{fileName} 未找到通用回退分支的边界注释");
-
+        int pickup = source.IndexOf("private async Task ProcessManipulatorPickupAsync(");
+        int start = source.IndexOf("\n        catch (Exception ex)", pickup);
+        Assert.True(start >= 0, $"{fileName} 缺少统一严重异常catch");
+        int end = source.IndexOf("\n        finally", start);
+        Assert.True(end > start);
         return source[start..end];
     }
 
