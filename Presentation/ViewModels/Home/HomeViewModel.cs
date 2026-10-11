@@ -16,6 +16,8 @@ using AutomaticOnlineHostComputer.Communication.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
 using AutomaticOnlineHostComputer.Presentation.ViewModels.Machine;
 using AutomaticOnlineHostComputer.Service;
+using AutomaticOnlineHostComputer.Service.Alarms;
+using AutomaticOnlineHostComputer.Views.Home.Dialogs;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
 using RackAddr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
 
@@ -29,6 +31,9 @@ public sealed class HomeViewModel : ObservableObject
     private readonly IOperationalEventReporter _exceptionReporter;
     private readonly ProductionFlowEngine _flowEngine;
     private readonly CraneConnectionCache _craneCache;
+    private readonly Dictionary<string, SafetyAlarmDialog> _safetyAlarmDialogs = new();
+    private readonly HashSet<string> _shownSafetyAlarmActions = new();
+    private readonly Queue<string> _safetyAlarmActionHistory = new();
     private readonly MotionConfig _cfg;
     private readonly ManipulatorConnectionCache _manipulatorCache;
     private readonly McConnectionCache _mcCache = new();
@@ -1927,6 +1932,7 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>后天车无法完成退磁/回升时，立即暂停对应整线并在主页面显示安全告警。</summary>
     private void HandleLineSafetyAlarm(int line, string source, string message, bool recordLegacyEvent = true)
     {
+        var alarmContext = FlowAlarmPresentationContext.Current;
         // 先同步关闭前后端派发门；不能等待UI线程调度后再暂停。
         if (line == 1)
         {
@@ -1959,7 +1965,11 @@ public sealed class HomeViewModel : ObservableObject
         // X11三次失败会在finally生成完整结构化事件；该专用入口只跳过重复Legacy记录，暂停和弹窗完全相同。
         if (recordLegacyEvent)
             _attentionEvents.Record(AttentionEventKind.SafetyAlarm, $"{line}号线", source, message);
-        if (popupAlreadyShown) return;
+        alarmContext?.ObserveAlarm(message);
+        if (alarmContext == null)
+        {
+            if (popupAlreadyShown) return;
+        }
 
         void UpdateUiAndShowAlarm()
         {
@@ -1967,6 +1977,7 @@ public sealed class HomeViewModel : ObservableObject
             else if (line == 2) IsLine2Running = false;
 
             Console.WriteLine($"[HomeViewModel] ⚠ {source}: {message}");
+            if (alarmContext != null && TryShowDetailedSafetyAlarm(alarmContext)) return;
             MessageBox.Show(message, $"{line}号线{source} - 引擎已暂停",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
@@ -2024,6 +2035,7 @@ public sealed class HomeViewModel : ObservableObject
     /// <summary>动平衡/研磨最终安全异常：每次恢复运行前只显示第一条。</summary>
     private void HandleStandaloneSafetyAlarm(string engine, string message)
     {
+        var alarmContext = FlowAlarmPresentationContext.Current;
         if (engine == "动平衡") _line1BalancingEngine?.Pause();
         else if (engine == "研磨") _grindingEngine?.PauseForCraneZeroPosition();
 
@@ -2045,13 +2057,18 @@ public sealed class HomeViewModel : ObservableObject
         }
 
         _attentionEvents.Record(AttentionEventKind.SafetyAlarm, engine, $"{engine}流程安全异常", message);
-        if (popupAlreadyShown) return;
+        alarmContext?.ObserveAlarm(message);
+        if (alarmContext == null)
+        {
+            if (popupAlreadyShown) return;
+        }
 
         void ShowAlarm()
         {
             if (engine == "动平衡") IsBalancingRunning = false;
             else if (engine == "研磨") IsGrindingRunning = false;
             Console.WriteLine($"[HomeViewModel] ⚠ {engine}流程安全异常: {message}");
+            if (alarmContext != null && TryShowDetailedSafetyAlarm(alarmContext)) return;
             MessageBox.Show(message, $"{engine}流程异常 - 引擎已暂停",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
@@ -2059,6 +2076,49 @@ public sealed class HomeViewModel : ObservableObject
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher == null || dispatcher.CheckAccess()) ShowAlarm();
         else dispatcher.BeginInvoke((Action)ShowAlarm);
+    }
+
+    // 只在原告警入口完成暂停/事件记录后展示；本方法不调用任何业务恢复或设备控制。
+    private bool TryShowDetailedSafetyAlarm(FlowAlarmPresentationContext context)
+    {
+        SafetyAlarmDialogViewModel? model = null;
+        try
+        {
+            if (_safetyAlarmDialogs.TryGetValue(context.ActionId, out var existing))
+            {
+                if (existing.WindowState == WindowState.Minimized) existing.WindowState = WindowState.Normal;
+                existing.Activate();
+                return true;
+            }
+            // 用户关闭后，同一动作finally的后续报告也不重新打开；不同动作仍独立显示。
+            if (_shownSafetyAlarmActions.Contains(context.ActionId)) return true;
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null) return false;
+            var reader = new CraneAlarmSnapshotReader(_craneCache.GetCraneInfo);
+            model = new SafetyAlarmDialogViewModel(context, reader.ReadAsync, update =>
+            {
+                if (dispatcher.CheckAccess()) update();
+                else if (!dispatcher.HasShutdownStarted) dispatcher.BeginInvoke(update);
+            });
+            var dialog = new SafetyAlarmDialog(model);
+            var owner = Application.Current?.MainWindow;
+            if (owner?.IsVisible == true) dialog.Owner = owner;
+            _safetyAlarmDialogs.Add(context.ActionId, dialog);
+            dialog.Closed += (_, _) => _safetyAlarmDialogs.Remove(context.ActionId);
+            dialog.Show();
+            _shownSafetyAlarmActions.Add(context.ActionId);
+            _safetyAlarmActionHistory.Enqueue(context.ActionId);
+            while (_safetyAlarmActionHistory.Count > 256)
+                _shownSafetyAlarmActions.Remove(_safetyAlarmActionHistory.Dequeue());
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _safetyAlarmDialogs.Remove(context.ActionId);
+            model?.Dispose();
+            Console.WriteLine($"[HomeViewModel] 异常详情窗显示失败，使用原提示：{ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>启动/暂停动平衡流转(两条线共用)</summary>

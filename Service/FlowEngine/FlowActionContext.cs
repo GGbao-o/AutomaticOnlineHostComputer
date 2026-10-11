@@ -140,6 +140,8 @@ internal sealed class FlowActionContext
         or FlowActionDisposition.Completed;
     public string PauseReason { get; private set; } = string.Empty;
     public string Detail { get; private set; } = string.Empty;
+    /// <summary>仅用于异常说明，保存最近一次成功返回的步骤描述。</summary>
+    public string LastConfirmedDetail { get; private set; } = string.Empty;
 
     /// <summary>只登记当前动作实际已经取得的锁；释放时同步删掉，快照不会伪称仍持有。</summary>
     public void RegisterLock(string lockName)
@@ -185,6 +187,7 @@ internal sealed class FlowActionContext
         LastKnownPosition = lastKnownPosition;
         CommandState = FlowCommandState.Confirmed;
         Detail = detail;
+        LastConfirmedDetail = detail;
     }
 
     /// <summary>调用方没有新位置快照时，只确认命令已正常返回。</summary>

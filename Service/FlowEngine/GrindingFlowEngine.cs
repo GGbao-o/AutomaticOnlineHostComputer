@@ -1620,6 +1620,8 @@ public sealed class GrindingFlowEngine : IDisposable
             FlowActionManualRegistry.Remove(snapshot.OperationId);
 
         _fastNextCycle = true;
+        FlowAlarmPresentationContext.RecordCleanup(deviceLog, "研磨机已回Idle，PendingWorkpiece已清",
+            "研磨FIFO未由此清理删除；未取料异常可能已回队，已移交下游的缓存不回滚；请核对实物与队列");
         Console.WriteLine(
             $"│ [作废] {grinder.Name}{(isLoad ? "上料" : "下料")}异常：本轮已自动作废——" +
             $"PLC下发数据已清、内存工件已清并回空闲、动作账本已清{stale.Length}条；{deviceLog}。" +
@@ -1712,6 +1714,10 @@ public sealed class GrindingFlowEngine : IDisposable
             wp.IdentityText, "ST709", grinder.StationCode, "研磨FIFO");
         using var logAction = OperationalLog.BeginAction("研磨", $"{_cfg.Grinding.CraneNo}号天车", actionId,
             wp.IdentityText, "ST709", grinder.StationCode);
+        using var alarmPresentation = FlowAlarmPresentationContext.Begin(action, wp, "研磨", _cfg.Grinding.CraneNo, "研磨机上料");
+        alarmPresentation.ObserveFinalState(
+            () => { lock (_emergencyLock) return actionVersion != _grindingActionVersion ? "本动作版本已失效，未释放当前新动作的锁；旧动作锁结果需结合应急记录核对" : _craneLockHeldByFlow ? "研磨天车软件锁仍登记持有" : "研磨天车软件锁已释放（不代表现场位置安全）"; },
+            () => { lock (_cacheLock) return _cacheQueue.Any(item => item.PlateNo == wp.PlateNo && item.Sequence == wp.Sequence) ? "研磨FIFO当前仍含本块板身份；处置实物时同时核对队列，自动作废未删除FIFO。" : "研磨FIFO当前未找到本块板身份；已移交下游的缓存不回滚。"; });
         OperationalLog.Info("搬运动作开始", "已创建研磨上料任务", ("板号与序号", wp.IdentityText));
         action.RegisterLock("GrindingCrane");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
@@ -2269,6 +2275,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException timeout)
         {
+            FlowAlarmPresentationContext.RecordFailure(timeout);
             if (!action.IsFinalized) { action.MarkCommandResponseUnknown(timeout.Message); action.PauseForManualResolution(timeout.Message); }
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
                 operationalSite with { ActionStage = "研磨天车上料运动超时" }, operationalTracker, timeout,
@@ -2286,6 +2293,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (PressureStopException pEx)
         {
+            FlowAlarmPresentationContext.RecordFailure(pEx);
             if (!action.IsFinalized) { action.MarkCommandResponseUnknown(pEx.Message); action.PauseForManualResolution(pEx.Message); }
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PRESSURE_STOP_DETECTED",
                 operationalSite with { ActionStage = "研磨天车上料下压保护" }, operationalTracker, pEx,
@@ -2333,6 +2341,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            FlowAlarmPresentationContext.RecordFailure(ex);
             // ═══ 通用异常: 网络断/PLC超时/Modbus异常等 ═══
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ✘ 上料流程异常: {ex.Message}");
             if (!action.IsFinalized && action.CommandState != FlowCommandState.NotSent)
@@ -2446,6 +2455,10 @@ public sealed class GrindingFlowEngine : IDisposable
             wp?.IdentityText ?? "待人工补录", grinder.StationCode, "ST710", "研磨机PendingWorkpiece");
         using var logAction = OperationalLog.BeginAction("研磨", $"{_cfg.Grinding.CraneNo}号天车", actionId,
             wp?.IdentityText ?? "待人工补录", grinder.StationCode, "ST710");
+        using var alarmPresentation = FlowAlarmPresentationContext.Begin(action, wp, "研磨", _cfg.Grinding.CraneNo, "研磨机下料");
+        alarmPresentation.ObserveFinalState(
+            () => { lock (_emergencyLock) return actionVersion != _grindingActionVersion ? "本动作版本已失效，未释放当前新动作的锁；旧动作锁结果需结合应急记录核对" : _craneLockHeldByFlow ? "研磨天车软件锁仍登记持有" : "研磨天车软件锁已释放（不代表现场位置安全）"; },
+            () => "本动作来源为研磨机PendingWorkpiece，清理结果见上方；本下料动作不删除研磨FIFO，不回滚下游缓存。");
         OperationalLog.Info("搬运动作开始", "已创建研磨下料任务", ("板号与序号", wp?.IdentityText ?? "待人工补录"));
         action.RegisterLock("GrindingCrane");
         var craneName = $"天车#{_cfg.Grinding.CraneNo}";
@@ -2883,6 +2896,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException timeout)
         {
+            FlowAlarmPresentationContext.RecordFailure(timeout);
             if (!action.IsFinalized) { action.MarkCommandResponseUnknown(timeout.Message); action.PauseForManualResolution(timeout.Message); }
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
                 operationalSite with { ActionStage = "研磨天车下料运动超时" }, operationalTracker, timeout,
@@ -2899,6 +2913,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (PressureStopException pEx)
         {
+            FlowAlarmPresentationContext.RecordFailure(pEx);
             if (!action.IsFinalized) { action.MarkCommandResponseUnknown(pEx.Message); action.PauseForManualResolution(pEx.Message); }
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PRESSURE_STOP_DETECTED",
                 operationalSite with { ActionStage = "研磨天车下料下压保护" }, operationalTracker, pEx,
@@ -2937,6 +2952,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            FlowAlarmPresentationContext.RecordFailure(ex);
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ✘ 下料流程异常：{ex.Message}");
             if (!action.IsFinalized && action.CommandState != FlowCommandState.NotSent)
             {

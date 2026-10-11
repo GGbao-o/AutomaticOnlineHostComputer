@@ -1527,6 +1527,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         // 预约成功后才拥有真实工件身份；后续异常一律以这个动作账本的事实为准。
         var action = new FlowActionContext(actionId, "1号线后天车上料", "2号天车", wp.IdentityText, rs, bed.Code, rs);
         using var logAction = OperationalLog.BeginAction("1号线后天车", "2号天车", actionId, wp.IdentityText, rs, bed.Code);
+        using var alarmPresentation = FlowAlarmPresentationContext.Begin(action, wp, "1号线", 2, "斜床上料");
         OperationalLog.Info("搬运动作开始", "已创建后天车上料任务", ("板号与序号", wp.IdentityText));
         action.BeginStep(FlowActionStep.SourceReserved);
         action.SetOwnership(FlowWorkpieceOwnership.ReservedAtSource);
@@ -1570,6 +1571,8 @@ public sealed class Line1RearFlowEngine : IDisposable
         operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.DownstreamNotification, $"{bed.Code}CNC上料完成");
         operationalTracker.RegisterMonitorStep(OperationalMonitorStepKind.PhysicalHandoff, $"{bed.Code}上料完整交接");
         using var operation = BeginSkewOperation(bed, "上料", ct, transferLocked);
+        alarmPresentation.ObserveFinalState(() => FlowAlarmPresentationContext.DescribeLocks(operation),
+            () => FlowAlarmPresentationContext.DescribeRackCache(_rackLedger, rs, actionId, wp));
         ct = operation.Token;
         Console.WriteLine($"\n┌── [上料] 开始 ──────────────────────────");
         Console.WriteLine($"│ 源={rs} → 目标={bed.Code}  {wp.IdentityText}  直径={wp.Diameter}mm  版长={wp.Length}mm  堵孔={wp.BoreType}mm");
@@ -1920,6 +1923,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException ex)
         {
+            FlowAlarmPresentationContext.RecordFailure(ex);
             // 运动超时意味着位置未知：暂停且禁止自动恢复动作；软件锁在finally释放，
             // 工件身份保留在账本/斜床任务牌中，等待人工确认真实现场状态。
             _paused = true;
@@ -1943,6 +1947,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            FlowAlarmPresentationContext.RecordFailure(ex);
             Console.WriteLine($"│ [上料] ❌ 异常: {wp.IdentityText} {ex.Message}");
             if (loadState.X11PickupFailed) loadState.X11FailureException = ex;
             // 已开始物理命令后的普通异常也可能是命令响应未知，不能落入旧的自动恢复分支。
@@ -2401,6 +2406,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             initialWorkpiece.IdentityText, bed.Code, "ST019/ST010分流目标", bed.Code);
         using var logAction = OperationalLog.BeginAction("1号线后天车", "2号天车", actionId,
             initialWorkpiece.IdentityText, bed.Code, "ST019/ST010分流目标");
+        using var alarmPresentation = FlowAlarmPresentationContext.Begin(action, initialWorkpiece, "1号线", 2, "斜床下料");
         OperationalLog.Info("搬运动作开始", "已创建后天车下料任务", ("板号与序号", initialWorkpiece.IdentityText));
         action.BeginStep(FlowActionStep.PreCheck, FlowActionPosition.Unknown, "斜床下料前检查");
         OperationalEventContextFactory.FineTunePhysicalTracker? physicalTracker = OperationalEventContextFactory.TryCreatePhysicalTracker();
@@ -2426,6 +2432,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             bed.Code, "ST019/ST010分流目标", "1号线后天车", bed.Code,
             "斜床加工完成等待后天车下料", "ZoneTS/后天车锁/M817/M720"));
         using var operation = BeginSkewOperation(bed, "下料", ct, holdsTransferRack: false);
+        alarmPresentation.ObserveFinalState(() => FlowAlarmPresentationContext.DescribeLocks(operation),
+            () => operationalCacheNotified ? "原流程已确认下游缓存通知；已移交缓存不回滚。斜床内存清理见上方结果。" : "原流程未确认下游缓存通知完成，接收端状态需核对；斜床清理不会回滚已移交的缓存。");
         ct = operation.Token;
         action.RegisterLock("RearCrane");
         try
@@ -3221,6 +3229,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException ex)
         {
+            FlowAlarmPresentationContext.RecordFailure(ex);
             _paused = true;
             action.MarkCommandResponseUnknown(ex.Message);
             action.PauseForManualResolution(ex.Message);
@@ -3241,6 +3250,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (PressureStopException ex)
         {
+            FlowAlarmPresentationContext.RecordFailure(ex);
             _paused = true;
             action.MarkCommandResponseUnknown(ex.Message);
             action.PauseForManualResolution(ex.Message);
@@ -3260,6 +3270,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         //下料时候线路暂停异常
         catch (LineNotStartedTimeoutException ex)
         {
+            FlowAlarmPresentationContext.RecordFailure(ex);
             // 线路未启动超时：本趟分流作废。
             // 抛点固定在拿 M817/M720 之前、任何 XY 移动与退磁之前，所以天车仍停在斜床上方安全Z、
             // 保持持件，两把分流锁根本没拿。因此这里只做三件事：
@@ -3312,6 +3323,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            FlowAlarmPresentationContext.RecordFailure(ex);
             Console.WriteLine($"│ [下料] ❌ 异常: {bed.Wp?.IdentityText ?? "版号=未知"} {ex.Message}");
             FlowActionExceptionConclusion exceptionConclusion = FlowActionExceptionConclusion.WaitRetry;
             if (operationalPlaced && (!operationalCacheNotified ||
@@ -3904,6 +3916,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             : SettleManualRearUnloadOnCarrierForEmergency(bed);
         _fastNextCycle = true;
 
+        FlowAlarmPresentationContext.RecordCleanup(deviceLog, "斜床已回Idle，工件与请求快照已清；后天车任务牌已清",
+            "中转架来源账本未由此清理修改；已移交下游的缓存不回滚；请核对实物与来源预约状态");
         Console.WriteLine(
             $"│ [作废] 1号线后天车{bed.Code}{(isLoad ? "上料" : "下料")}异常：本轮已自动作废——" +
             $"PLC下发数据已清、内存工件已清并回空闲、任务牌已清；{ledgerLog}；{deviceLog}。" +
