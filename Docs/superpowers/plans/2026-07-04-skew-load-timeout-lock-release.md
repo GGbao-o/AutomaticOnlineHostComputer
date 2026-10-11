@@ -1,5 +1,8 @@
 # ST108/ST606上料异常退避与锁释放 Implementation Plan
 
+> **2026-10-11现行差异提示：** 当前上/下料非Completed均在finally自动作废该床；来源冻结/缓存独立保留。持锁释放或床Idle不证明现场安全。 当前规则见[业务总文档](../../全线业务逻辑详解.md)与[现场处置](../../运维/异常弹窗与现场故障处置.md)。下文为历史记录，不覆盖上述现行说明。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 仅修改1、2号线后天车上料异常处理，使Z已下降时不执行X+1000，同时所有异常收尾释放本次动作持有的锁并用一次弹窗说明退避和锁释放结果。

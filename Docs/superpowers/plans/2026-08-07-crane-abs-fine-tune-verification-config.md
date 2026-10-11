@@ -1,5 +1,8 @@
 # 天车绝对编码器微调验证节奏配置 Implementation Plan
 
+> **2026-10-11现行差异提示：** 共享验证模型默认1200ms/3次/200ms/1mm/1200ms保留；当前工作区JSON两项沉降为700ms。配置页更改共享内存可见，外部JSON修改无自动Reload。 当前规则见[业务总文档](../../全线业务逻辑详解.md)与[现场处置](../../运维/异常弹窗与现场故障处置.md)。下文为历史记录，不覆盖上述现行说明。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将天车绝对编码器微调的等待与稳定读取规则改为所有天车共享、可在配置页面即时调整并保存的运行时配置。

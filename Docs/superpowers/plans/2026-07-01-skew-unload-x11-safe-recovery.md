@@ -1,5 +1,8 @@
 # Skew Unload X11 Safe Recovery Implementation Plan
 
+> **2026-10-11现行差异提示：** X11三次0的局部退磁/Z恢复仍存在；catch中WaitingUnload/Wp暂存最终被未Completed的finally自动作废覆盖，不是自动重试同板。 当前规则见[业务总文档](../../全线业务逻辑详解.md)与[现场处置](../../运维/异常弹窗与现场故障处置.md)。下文为历史记录，不覆盖上述现行说明。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Execute inline in the current session; the user already approved the bounded design.
 
 **Goal:** When rear-crane unloading exhausts all X11 pickup attempts without detecting a plate, demagnetize and raise Z before releasing the crane lock; continue automatically only when both recovery actions succeed.

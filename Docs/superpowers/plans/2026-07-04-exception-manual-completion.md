@@ -1,5 +1,8 @@
 # 全量异常、暂停、弹窗、锁释放与恢复手册 Implementation Plan
 
+> **2026-10-11现行差异提示：** 人工结案器仍存在，但六条斜床/研磨动作可能先自动删除匹配快照、Wp/Pending，旧目标身份或任务牌不再匹配时结案会被拒绝。保板续跑不作为通用保证。 当前规则见[业务总文档](../../全线业务逻辑详解.md)与[现场处置](../../运维/异常弹窗与现场故障处置.md)。下文为历史记录，不覆盖上述现行说明。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 全面重写 `Docs/异常Catch_弹窗_暂停_锁释放与恢复审查.md`，将源码及Docs中分散的异常、暂停、弹窗、锁释放和恢复规则归并为一份按代码可追溯的权威手册。

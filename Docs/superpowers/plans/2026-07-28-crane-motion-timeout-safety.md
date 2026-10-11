@@ -1,5 +1,8 @@
 # Crane Motion Timeout Safety Implementation Plan
 
+> **2026-10-11现行差异提示：** 当前后天车及研磨动作未Completed时finally自动清本机Wp/Pending并回Idle、释放本次持锁；来源冻结与下游身份不随之清。本文保留当时设计，旧“运动超时保留锁/工件直到应急”不作为现行最终状态。 当前规则见[业务总文档](../../全线业务逻辑详解.md)与[现场处置](../../运维/异常弹窗与现场故障处置.md)。下文为历史记录，不覆盖上述现行说明。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make every automatic crane motion timeout a 120-second, evidence-rich safety pause that preserves physical-zone ownership and requires an explicit human recovery decision.
