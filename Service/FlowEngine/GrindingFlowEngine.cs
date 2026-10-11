@@ -2193,6 +2193,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException timeout)
         {
+            if (!IsGrindingActionCurrent(actionVersion)) return;
             FlowAlarmPresentationContext.RecordFailure(timeout);
             if (!action.IsFinalized) { action.MarkCommandResponseUnknown(timeout.Message); action.PauseForManualResolution(timeout.Message); }
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
@@ -2212,6 +2213,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (PressureStopException pEx)
         {
+            if (!IsGrindingActionCurrent(actionVersion)) return;
             FlowAlarmPresentationContext.RecordFailure(pEx);
             if (!action.IsFinalized) { action.MarkCommandResponseUnknown(pEx.Message); action.PauseForManualResolution(pEx.Message); }
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PRESSURE_STOP_DETECTED",
@@ -2260,6 +2262,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            if (!IsGrindingActionCurrent(actionVersion)) return;
             FlowAlarmPresentationContext.RecordFailure(ex);
             // ═══ 通用异常: 网络断/PLC超时/Modbus异常等 ═══
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ✘ 上料流程异常: {ex.Message}");
@@ -2681,6 +2684,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException timeout)
         {
+            if (!IsGrindingActionCurrent(actionVersion)) return;
             FlowAlarmPresentationContext.RecordFailure(timeout);
             if (!action.IsFinalized) { action.MarkCommandResponseUnknown(timeout.Message); action.PauseForManualResolution(timeout.Message); }
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
@@ -2699,6 +2703,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (PressureStopException pEx)
         {
+            if (!IsGrindingActionCurrent(actionVersion)) return;
             FlowAlarmPresentationContext.RecordFailure(pEx);
             if (!action.IsFinalized) { action.MarkCommandResponseUnknown(pEx.Message); action.PauseForManualResolution(pEx.Message); }
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "PRESSURE_STOP_DETECTED",
@@ -2739,6 +2744,7 @@ public sealed class GrindingFlowEngine : IDisposable
         }
         catch (Exception ex)
         {
+            if (!IsGrindingActionCurrent(actionVersion)) return;
             FlowAlarmPresentationContext.RecordFailure(ex);
             Console.WriteLine($"[GrindingEngine] [{grinder.Name}] ✘ 下料流程异常：{ex.Message}");
             if (!action.IsFinalized && action.CommandState != FlowCommandState.NotSent)

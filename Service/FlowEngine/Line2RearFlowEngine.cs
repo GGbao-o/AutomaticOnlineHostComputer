@@ -1739,12 +1739,13 @@ public sealed class Line2RearFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException ex)
         {
+            if (!operation.IsValid) return;
+            _paused = true;
             discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
             OnRearCraneSafetyAlarm?.Invoke($"2号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
             // 运动超时意味着位置未知：暂停且禁止自动恢复动作；软件锁在finally释放，
-            // 工件身份保留在账本/斜床任务牌中，等待人工确认真实现场状态。
-            _paused = true;
+            // 冻结本板及现场证据，finally再按本动作归属作废；不保留旧任务自动重试。
             requiresManualConfirmation = true;
             action.PauseForManualResolution(ex.Message);
             if (action.Ownership == FlowWorkpieceOwnership.ReservedAtSource)
@@ -1760,7 +1761,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             pendingSafetyAlarm = $"2号线后天车给{bed.Code}上料时{ex.Stage}运动超时。" +
                 $"目标=({ex.XTarget},{ex.YTarget},{ex.ZTarget})，最后坐标={ex.LastKnownStatus?.XPos}/{ex.LastKnownStatus?.YPos}/{ex.LastKnownStatus?.ZPos}，" +
                 $"未到位轴={string.Join("/", ex.UnreachedAxes)}，D4518停止={(ex.EmergencyStopCommandSucceeded ? "已发送" : "发送失败")}。" +
-                "引擎已暂停；本动作软件锁将在收尾后释放，工件状态保留待人工确认，禁止自动重试。";
+                "引擎已暂停；本动作软件锁将在收尾后释放，本板软件任务将在收尾作废，现场位置须人工确认，禁止自动重试。";
             Console.WriteLine($"│ [上料] ⚠ {pendingSafetyAlarm}");
         }
         //处理异常
@@ -1782,9 +1783,8 @@ public sealed class Line2RearFlowEngine : IDisposable
         }
         finally
         {
-            // 异常自动作废：只要这一轮没走到 action.Complete(Completed)，就清这台斜床的
-            // PLC 下发数据和内存工件数据并回空闲。放在 finally 最前面，让后面的告警文案
-            // 能反映"已自动作废"这个事实。中转架账本完全不碰。
+            // 仅严重失败且仍归本动作时作废本床；来源按预约、代次和完整身份清理。
+            // 普通取消、失效动作和已完成任务不套用这次作废。
             if (discardOnFailure && operation.IsValid && ReferenceEquals(bed.ActiveOperation, operation))
             {
                 bool sourceDiscarded = _rackLedger.DiscardReservedWorkpiece(rs, actionId, rackArrivalSeq, wp);
@@ -2617,10 +2617,11 @@ public sealed class Line2RearFlowEngine : IDisposable
         }
         catch (CraneMotionTimeoutException ex)
         {
+            if (!operation.IsValid) return;
+            _paused = true;
             discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
             OnRearCraneSafetyAlarm?.Invoke($"2号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
-            _paused = true;
             action.MarkCommandResponseUnknown(ex.Message);
             action.PauseForManualResolution(ex.Message);
             operation.HoldForManualSafetyRecovery(ex.Message);
@@ -2635,15 +2636,16 @@ public sealed class Line2RearFlowEngine : IDisposable
             pendingSafetyAlarm = $"2号线后天车从{bed.Code}下料时{ex.Stage}运动超时。" +
                 $"目标=({ex.XTarget},{ex.YTarget},{ex.ZTarget})，最后坐标={ex.LastKnownStatus?.XPos}/{ex.LastKnownStatus?.YPos}/{ex.LastKnownStatus?.ZPos}，" +
                 $"未到位轴={string.Join("/", ex.UnreachedAxes)}，D4518停止={(ex.EmergencyStopCommandSucceeded ? "已发送" : "发送失败")}。" +
-                "引擎已暂停；工件状态保留待人工确认，本动作软件锁将在收尾后释放，禁止自动重试。";
+                "引擎已暂停；本板软件任务将在收尾作废，现场位置须人工确认，本动作软件锁将在收尾后释放，禁止自动重试。";
             Console.WriteLine($"│ [下料] ⚠ {pendingSafetyAlarm}");
         }
         catch (PressureStopException ex)
         {
+            if (!operation.IsValid) return;
+            _paused = true;
             discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
             OnRearCraneSafetyAlarm?.Invoke($"2号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
-            _paused = true;
             action.MarkCommandResponseUnknown(ex.Message);
             action.PauseForManualResolution(ex.Message);
             requiresManualConfirmation = true;
@@ -2661,6 +2663,8 @@ public sealed class Line2RearFlowEngine : IDisposable
         }
         catch (LineNotStartedTimeoutException ex)
         {
+            if (!operation.IsValid) return;
+            _paused = true;
             discardOnFailure = true;
             FlowAlarmPresentationContext.RecordFailure(ex);
             OnRearCraneSafetyAlarm?.Invoke($"2号线后天车{bed.Code}异常：{ex.Message}。线路已暂停，正在按本次动作作废收尾；请勿恢复或删除下一板。");
@@ -2671,7 +2675,6 @@ public sealed class Line2RearFlowEngine : IDisposable
             // 后天车锁由外层 finally 释放，本分支不需要任何手工释放（拿锁前的等待也不存在锁泄漏）。
             // 不设置 pendingSafetyAlarm：外层 finally 会在其非空时追加一条要求先走斜床应急的口径，
             // 而本场景斜床已回空闲，操作员应当直接启动线路继续，故由本分支自己发一条告警。
-            _paused = true;
             action.MarkCommandResponseUnknown(ex.Message);
             action.PauseForManualResolution(ex.Message);
             OperationalEventContextFactory.TryReportPhysical(_exceptionReporter, "ENGINE_FINAL_FAILURE",
