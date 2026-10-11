@@ -7,7 +7,7 @@ internal sealed record SafetyAlarmDetails(
     AlarmWorkpiece? Workpiece, FlowActionSnapshot? FailureAction, string Reason,
     string ExceptionDetail, string LastSuccessfulStep, string DeviceCleanup, string MemoryCleanup,
     string CacheCleanup, string LockCleanup, bool CleanupFinished, DateTime? CleanupAtUtc,
-    string AlarmMessages = "");
+    string AlarmMessages = "", string TransferPhase = "", string FailureDisplayStep = "");
 
 internal sealed record AlarmInputValue(bool? Value, DateTime? ReadAtUtc, string Error)
 {

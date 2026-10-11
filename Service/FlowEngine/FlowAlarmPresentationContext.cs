@@ -27,6 +27,12 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
     private DateTime? _cleanupAtUtc;
     private Func<string>? _readLocks;
     private Func<string>? _readCache;
+    private Func<string>? _readMemory;
+    private string? _phaseSource, _phaseTarget;
+    private string _phase = "", _displayStep = "", _failurePhase = "", _failureDisplayStep = "";
+    private bool _waitForFrontDispatch, _actionBodyFinished, _frontDispatchFinished;
+    private string? _frontDispatchResult;
+    private string _actionLockResult = "等待原业务收尾";
     private readonly List<string> _alarmMessages = new();
     private int _disposeStarted;
 
@@ -47,10 +53,18 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
     public event Action? Changed;
 
     // 只在动作退出时读现有软件事实；回调不取得/释放锁、不清理或恢复缓存。
-    public void ObserveFinalState(Func<string> readLocks, Func<string> readCache)
+    public void ObserveFinalState(Func<string> readLocks, Func<string>? readCache = null, Func<string>? readMemory = null)
     {
         _readLocks = readLocks;
         _readCache = readCache;
+        _readMemory = readMemory;
+    }
+
+    internal static string DescribeFrontActionLocks(FlowActionContext action)
+    {
+        var held = action.Snapshot().HeldLocks.Where(name => name is "ZoneMT" or "ZoneTS").ToArray();
+        return held.Length == 0 ? "本动作ZoneMT/ZoneTS账本无持锁记录（未取得或登记已释放；实际释放结果需核对原日志）"
+            : $"本动作仍登记持有：{string.Join("、", held)}；请核对原流程释放结果";
     }
 
     internal static string DescribeLocks(EmergencyActionLease lease)
@@ -76,6 +90,63 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
         var context = new FlowAlarmPresentationContext(action, wp, scope, craneNo, operation);
         Ambient.Value = context;
         return context;
+    }
+
+    public static FlowAlarmPresentationContext BeginFront(FlowActionContext action, WorkpieceCache wp, string scope, int craneNo)
+    {
+        var context = Begin(action, wp, scope, craneNo, "前天车搬运");
+        context._deviceCleanup = "原前天车异常处理未统一清除PLC参数及输出；停止与保护恢复按原流程处理";
+        context._cacheCleanup = "本次前天车工件已出队；中转架缓存交接尚未确认，不自动回滚下游缓存";
+        context._waitForFrontDispatch = FrontCraneAlarmDispatchScope.Track(context);
+        return context;
+    }
+
+    // 阶段只覆盖展示快照；不改变FlowActionContext的来源、目标、步骤或工件归属。
+    public static void RecordTransferPhase(string source, string target, string phase, string? displayStep = null)
+    {
+        try
+        {
+            var context = Current;
+            if (context == null) return;
+            lock (context._gate)
+            {
+                context._phaseSource = source;
+                context._phaseTarget = target;
+                context._phase = phase;
+                context._displayStep = displayStep ?? "";
+            }
+        }
+        catch { }
+    }
+
+    public static void RecordCacheState(string result)
+    {
+        try
+        {
+            var context = Current;
+            if (context == null) return;
+            lock (context._gate) context._cacheCleanup = result;
+            context.NotifyChanged();
+        }
+        catch { }
+    }
+
+    internal void CompleteFrontDispatch(bool released)
+    {
+        try
+        {
+            lock (_gate)
+            {
+                _frontDispatchFinished = true;
+                _frontDispatchResult = released ? "前天车调度锁已释放（不代表现场位置安全）"
+                    : "前天车调度锁未取得成功释放记录，请核对调度异常";
+                _lockCleanup = _actionLockResult + "；" + _frontDispatchResult;
+                _finished = _actionBodyFinished;
+                _cleanupAtUtc = DateTime.UtcNow;
+            }
+            NotifyChanged();
+        }
+        catch { }
     }
 
     public static void RecordFailure(Exception exception)
@@ -122,6 +193,10 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
     private void CaptureAction()
     {
         _failureAction = _action.Snapshot();
+        if (_phaseSource != null) _failureAction = _failureAction with { Source = _phaseSource };
+        if (_phaseTarget != null) _failureAction = _failureAction with { Target = _phaseTarget };
+        _failurePhase = _phase;
+        _failureDisplayStep = _displayStep;
         _occurredAtUtc = DateTime.UtcNow;
         if (!string.IsNullOrWhiteSpace(_action.LastConfirmedDetail))
             _lastSuccessfulStep = _action.LastConfirmedDetail;
@@ -151,7 +226,7 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
             return new(ActionId, _scope, _craneNo, _operation, _occurredAtUtc, _workpiece,
                 _failureAction, _reason, _exceptionDetail, _lastSuccessfulStep, _deviceCleanup,
                 _memoryCleanup, _cacheCleanup, _lockCleanup, _finished, _cleanupAtUtc,
-                string.Join("\n\n", _alarmMessages));
+                string.Join("\n\n", _alarmMessages), _failurePhase, _failureDisplayStep);
     }
 
     private void NotifyChanged()
@@ -165,18 +240,24 @@ internal sealed class FlowAlarmPresentationContext : IDisposable
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
         try
         {
-            string? lockResult = null, cacheResult = null;
+            string? lockResult = null, cacheResult = null, memoryResult = null;
             if (_failureAction != null)
             {
                 try { lockResult = _readLocks?.Invoke(); } catch (Exception ex) { lockResult = $"锁状态读取失败：{ex.Message}"; }
                 try { cacheResult = _readCache?.Invoke(); } catch (Exception ex) { cacheResult = $"缓存状态读取失败：{ex.Message}"; }
+                try { memoryResult = _readMemory?.Invoke(); } catch (Exception ex) { memoryResult = $"内存状态读取失败：{ex.Message}"; }
             }
             lock (_gate)
             {
                 var held = _action.Snapshot().HeldLocks;
                 _lockCleanup = lockResult ?? (held.Count == 0 ? "动作账本没有登记持锁，实际锁状态未知" : $"动作账本曾登记：{string.Join("、", held)}；实际释放结果未知");
+                _actionLockResult = _lockCleanup;
+                if (_waitForFrontDispatch)
+                    _lockCleanup += "；" + (_frontDispatchResult ?? "前天车调度锁：等待调度层释放");
                 if (cacheResult != null) _cacheCleanup = cacheResult;
-                _finished = true;
+                if (memoryResult != null) _memoryCleanup = memoryResult;
+                _actionBodyFinished = true;
+                _finished = !_waitForFrontDispatch || _frontDispatchFinished;
                 _cleanupAtUtc = DateTime.UtcNow;
             }
             NotifyChanged();

@@ -21,14 +21,15 @@ internal static class SafetyAlarmFormatter
         var wp = d.Workpiece;
         string title = $"{d.Scope} · {d.CraneNo}号天车 · {d.Operation}异常";
         string failure = $"发生时间：{Time(d.OccurredAtUtc)}\n动作编号：{d.ActionId}\n" +
-            $"异常原因：{d.Reason}\n失败步骤：{(a == null ? "未知" : Step(a.Step))}\n" +
-            $"步骤说明：{Known(a?.Detail)}\n最后成功步骤：{d.LastSuccessfulStep}";
-        string workpiece = $"所属线路：{(d.Scope == "研磨" ? "研磨共用（本工件来源线路未记录）" : d.Scope)}\n" +
+            $"异常原因：{d.Reason}\n失败步骤：{Known(d.FailureDisplayStep, a == null ? "未知" : Step(a.Step))}\n" +
+            $"{(string.IsNullOrWhiteSpace(d.FailureDisplayStep) ? "步骤说明" : "最后业务步骤说明")}：{Known(a?.Detail)}\n最后成功步骤：{d.LastSuccessfulStep}";
+        string workpiece = (string.IsNullOrWhiteSpace(d.TransferPhase) ? "" : $"当前阶段：{d.TransferPhase}\n") +
+            $"所属线路：{(d.Scope == "研磨" ? "研磨共用（本工件来源线路未记录）" : d.Scope)}\n" +
             $"来源：{StationName(a?.Source)}\n目标：{StationName(a?.Target)}\n" +
             $"版号：{Known(wp?.PlateNo)}    序号：{Known(wp?.Sequence)}\n" +
             $"长度：{Measure(wp?.Length)}    直径：{Measure(wp?.Diameter)}\n" +
             $"孔型：{(wp == null ? "未知" : wp.BoreType.ToString(CultureInfo.InvariantCulture))}";
-        string historical = $"本步骤运动目标：{Position(a?.TargetPosition, true)}\n" +
+        string historical = $"{(string.IsNullOrWhiteSpace(d.TransferPhase) ? "本步骤运动目标" : "业务账本最后登记运动目标")}：{Position(a?.TargetPosition, true)}\n" +
             $"最后业务确认坐标：{Position(a?.LastKnownPosition)}\n" +
             $"最后X11记录：{Bit(a?.X11)}    业务充磁记录：{Bit(a?.MagnetOn)}\n" +
             $"业务工件归属：{Ownership(a?.Ownership)}\n" +
@@ -120,6 +121,8 @@ internal static class SafetyAlarmFormatter
 
     private static readonly IReadOnlyDictionary<string, string> StationNames = new Dictionary<string, string>
     {
+        ["ST713"] = "1号线货叉Pos3取料位", ["ST714"] = "2号线货叉Pos3取料位",
+        ["ST107"] = "1号线打号机", ["ST502"] = "2号线打号机",
         ["ST101"] = "1号线中转架（M812）", ["ST105"] = "1号线中转架（M811）", ["ST106"] = "1号线中转架（M813）",
         ["ST016"] = "2号线中转架4", ["ST017"] = "2号线中转架5", ["ST018"] = "2号线中转架6",
         ["ST108"] = "1号斜床", ["ST109"] = "2号斜床", ["ST111"] = "3号斜床", ["ST110"] = "4号斜床", ["ST112"] = "5号斜床",
