@@ -2440,17 +2440,54 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 await Task.Delay(500, ct);
             }
             Console.WriteLine("[Line1Front] [前天车] ③ 获取ZoneMT(打号机↔中转架碰撞区)...");
-            while (!await _safety.MarkerTransferCollisionLock.WaitAsync(TimeSpan.FromSeconds(1), ct))
-            {
-                if (_cycleCount % 10 == 1)
-                    Console.WriteLine("[Line1Front] [前天车] 等ZoneMT...");
-            }
-            Console.WriteLine("[Line1Front] [前天车] ZoneMT已获取 ✓");
-            bool zoneMtLocked = true;
-            action.RegisterLock("ZoneMT");
+            // ZoneMT准入：拿锁后先复核三个架位；全满释放重抢，有空位但暂停则持锁无限等启动。
+            // 获取和读取都放在原try/finally内，通信/取消异常仍由原收尾释放实际持有的锁。
+            bool zoneMtLocked = false;
             bool zoneTsLocked = false;
             try
             {
+                while (true)
+                {
+                    while (!await _safety.MarkerTransferCollisionLock.WaitAsync(TimeSpan.FromSeconds(1), ct))
+                    {
+                        if (_cycleCount % 10 == 1)
+                            Console.WriteLine("[Line1Front] [前天车] 等ZoneMT...");
+                    }
+                    zoneMtLocked = true;
+                    action.RegisterLock("ZoneMT");
+                    Console.WriteLine("[Line1Front] [前天车] ZoneMT已获取 ✓");
+
+                    // 判断1：拿锁后实时读取本线M811/M812/M813，不沿用锁外预检结果。
+                    var lockedRackStatus = await _rackSvc!.ReadAllStatusAsync(ct);
+                    if (lockedRackStatus.Station1HasPlate && lockedRackStatus.Station2HasPlate && lockedRackStatus.Station3HasPlate)
+                    {
+                        _safety.MarkerTransferCollisionLock.Release();
+                        zoneMtLocked = false;
+                        action.TryReleaseLock("ZoneMT");
+                        Console.WriteLine("[Line1Front] [前天车] 拿锁后中转架1/2/3全满，已释放ZoneMT，锁外等空位...");
+                        // 锁外持续读，后天车才能拿ZoneMT取板腾空位；有空位后重新拿锁、再次读。
+                        while (true)
+                        {
+                            await Task.Delay(500, ct);
+                            var outsideRackStatus = await _rackSvc.ReadAllStatusAsync(ct);
+                            if (!outsideRackStatus.Station1HasPlate || !outsideRackStatus.Station2HasPlate || !outsideRackStatus.Station3HasPlate)
+                                break;
+                        }
+                        continue;
+                    }
+
+                    // 判断2：有空位后再看本引擎volatile暂停位。暂停时保留当前板、动作及ZoneMT。
+                    // 按现场要求没有业务超时；启动后直接继续，不新增恢复后的空位复核或回队。
+                    if (_paused)
+                    {
+                        Console.WriteLine("[Line1Front] [前天车] 中转架有空位但线路暂停，持有ZoneMT无限等待启动...");
+                        while (_paused)
+                            await Task.Delay(500, ct);
+                        Console.WriteLine("[Line1Front] [前天车] 线路已启动，保持本趟任务继续打号");
+                    }
+                    break;
+                }
+
                 //打号机流程
                 await MarkingHandshakeAsync(crane, wp, safeZ, actionId, physicalTracker,
                     pos3OperationalTracker, pos3OperationalSite, markerOperationalTracker, markerOperationalSite, action, ct, pickupStableDelayMs);
