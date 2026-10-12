@@ -214,6 +214,22 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
+                        <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionHeaderStyle}" Text="共享区X退避距离 (mm)" />
+                        <StackPanel Orientation="Horizontal" Margin="8,0,0,6">
+                            <TextBlock Width="220" Text="1号线 · 1号斜床（ST108）" Style="{StaticResource ParamLabelStyle}" />
+                            <TextBox Text="{Binding SkewBed1RetreatX, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                            <TextBlock Text="mm" Style="{StaticResource ParamLabelStyle}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="8,0,0,6">
+                            <TextBlock Width="220" Text="2号线 · 6号斜床（ST606）" Style="{StaticResource ParamLabelStyle}" />
+                            <TextBox Text="{Binding SkewBed6RetreatX, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                            <TextBlock Text="mm" Style="{StaticResource ParamLabelStyle}" />
+                        </StackPanel>
+                        <TextBlock Text="填写正整数；退避目标X＝实时当前X＋此距离。编辑影响后续退避，点击保存后持久化。"
+                                   TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="8,0,0,6" />
+
                         <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionHeaderStyle}" Text="研磨机最大加工长度 (mm)" />
                         <TextBlock Margin="0,2,0,6" Foreground="#6B7280" Text="0 或未配置时，该研磨机不参与自动上料派发。" />
                         <Border Padding="8,4" Margin="0,0,0,4" Background="{StaticResource HeaderBrush}" CornerRadius="4">

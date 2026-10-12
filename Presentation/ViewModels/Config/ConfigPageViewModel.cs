@@ -154,6 +154,22 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     public int LargeBoreOffset { get => _cfg.SkewBed.LargeBoreOffset; set { _cfg.SkewBed.LargeBoreOffset = value; OnPropertyChanged(); } }
     public int SmallBoreOffset { get => _cfg.SkewBed.SmallBoreOffset; set { _cfg.SkewBed.SmallBoreOffset = value; OnPropertyChanged(); } }
 
+    /// <summary>
+    /// 1号斜床ST108共享区X退避距离(mm)。读取现有配置，不另设页面默认值；编辑直接更新共享字典。
+    /// 后天车实际退避目标仍由原流程计算为当前X+此距离，保存沿用_cfg.Save()。
+    /// </summary>
+    public int SkewBed1RetreatX
+    {
+        get => _cfg.SkewBed.GetSharedAreaRetreatX("ST108");
+        set { _cfg.SkewBed.SharedAreaRetreatX["ST108"] = value; OnPropertyChanged(); }
+    }
+    /// <summary>6号斜床ST606共享区X退避距离(mm)，与ST108分别保存，不改变原上/下料退避条件。</summary>
+    public int SkewBed6RetreatX
+    {
+        get => _cfg.SkewBed.GetSharedAreaRetreatX("ST606");
+        set { _cfg.SkewBed.SharedAreaRetreatX["ST606"] = value; OnPropertyChanged(); }
+    }
+
     public int XAbsToleranceMm { get => _cfg.XAbsFineTune.ToleranceMm; set { _cfg.XAbsFineTune.ToleranceMm = value; OnPropertyChanged(); } }
     public int XAbsMaxAdjustMm { get => _cfg.XAbsFineTune.MaxAdjustMm; set { _cfg.XAbsFineTune.MaxAdjustMm = value; OnPropertyChanged(); } }
     public int YAbsToleranceMm { get => _cfg.YAbsFineTune.ToleranceMm; set { _cfg.YAbsFineTune.ToleranceMm = value; OnPropertyChanged(); } }
