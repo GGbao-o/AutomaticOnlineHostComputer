@@ -1661,10 +1661,11 @@ public sealed class Line2RearFlowEngine : IDisposable
             Console.WriteLine($"│ [取料] step3: Z下降到{pz + _oz}");
             loadState.ZMayBeDown = true;
             // 来源中转架此时只是预约，尚未消费。共用组件先读放磁反馈再下降，
-            // 在实际Z0/+5/+10探测，充磁后X11=1才算持件；原台面/直径/Z偏移只用于首次目标。
+            // 按本次配置探测（默认实际Z0/+5/+10），充磁后X11=1才算持件；原Z偏移只用于首次目标。
             // 每次取板IO前复核本动作租约，应急失效后不得继续运动或充磁。
             var pickup = await PickupProbeHelper.PickAsync(cr, pz + _oz, pickupStableDelayMs,
-                action, operationalTracker, ct, validateAction: operation.ThrowIfInvalid);
+                action, operationalTracker, ct, validateAction: operation.ThrowIfInvalid,
+                settings: new(_cfg.Grinding.PickupProbeCount, _cfg.Grinding.PickupProbeStepMm));
             int currentZ = pickup.ActualZ;
             mag = true;
             holdingWorkpiece = true;
@@ -2262,7 +2263,8 @@ public sealed class Line2RearFlowEngine : IDisposable
             // 斜床下料同样先确认已放磁，按原zDown下降并探测，再充磁后独立确认持件。
             // 未确认持件不开始原下料交接；严重失败由本动作catch作废本床，已移交下游的数据不回滚。
             var pickup = await PickupProbeHelper.PickAsync(cr, zDown, pickupStableDelayMs,
-                action, operationalTracker, ct, validateAction: operation.ThrowIfInvalid);
+                action, operationalTracker, ct, validateAction: operation.ThrowIfInvalid,
+                settings: new(_cfg.Grinding.PickupProbeCount, _cfg.Grinding.PickupProbeStepMm));
             int unlz = pickup.ActualZ;
             magnetOn = true;
             holdingWorkpiece = true;

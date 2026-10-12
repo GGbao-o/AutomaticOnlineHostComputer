@@ -1454,10 +1454,11 @@ public sealed class BalancingFlowEngine : IDisposable
             action.MarkCommandSent();
             await _m2.MoveAbsoluteAsync(-1, pickY, -1, ct: ct);
             action.Confirm(new FlowActionPosition(null, pickY, 0), "来源Y到位");
-            // M2来源已确定为M817/M818，但此时不消费缓存。先放磁检查，再实际Z0/+5/+10探测，
+            // M2来源已确定为M817/M818，但此时不消费缓存。先放磁检查，再按配置探测（默认Z0/+5/+10），
             // 充磁后独立X11=1才允许来源转在途；首次pzDown保留原台面/直径/偏移计算。
             var pickup = await PickupProbeHelper.PickAsync(_m2!, pzDown, pickupStableDelayMs,
                 action, operationalTracker, ct,
+                settings: new(_cfg.Grinding.PickupProbeCount, _cfg.Grinding.PickupProbeStepMm),
                 validateAction: () => { if (!IsM2ActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
             int curZ = pickup.ActualZ;
             mag = true;
@@ -1921,6 +1922,7 @@ public sealed class BalancingFlowEngine : IDisposable
             // 先探测再充磁、后确认成功才登记持件；探测位置由这次实际停稳Z0决定，不重复叠加偏移。
             var pickup = await PickupProbeHelper.PickAsync(_m3!, pzDown, pickupStableDelayMs,
                 action, operationalTracker, ct,
+                settings: new(_cfg.Grinding.PickupProbeCount, _cfg.Grinding.PickupProbeStepMm),
                 validateAction: () => { if (!IsM3ActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
             int curZ = pickup.ActualZ;
             mag = true;

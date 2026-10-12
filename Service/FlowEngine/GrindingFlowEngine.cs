@@ -1943,6 +1943,7 @@ public sealed class GrindingFlowEngine : IDisposable
             // 未充磁的探测/通信/微调失败同样属于本次动作严重失败，不能因magnetOn=false回FIFO。
             var pickup = await PickupProbeHelper.PickAsync(crane, pickupTargetZ, pickupStableDelayMs,
                 action, operationalTracker, ct,
+                settings: new(_cfg.Grinding.PickupProbeCount, _cfg.Grinding.PickupProbeStepMm),
                 validateAction: () => { if (!IsGrindingActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
             int pickupCheckZ = pickup.ActualZ;
             magnetOn = true;
@@ -2535,10 +2536,11 @@ public sealed class GrindingFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             action.Confirm(new FlowActionPosition(ApplyOffsetX(gx), ApplyOffsetY(gy), 0), "研磨机来源位XY微调完成");
             int grinderPickupTargetZ = ApplyOffsetZ(pickupZ);
-            // 研磨机取成品与ST709上料使用相同的放磁检查/三位置探测/充磁后确认。
+            // 研磨机取成品与ST709上料使用相同的放磁检查/可配置探测/充磁后确认。
             // 首次高度保留本机原公式与偏移，后续补偿只用实际Z0；成功后才按原下料握手继续。
             var pickup = await PickupProbeHelper.PickAsync(crane, grinderPickupTargetZ, pickupStableDelayMs,
                 action, operationalTracker, ct,
+                settings: new(_cfg.Grinding.PickupProbeCount, _cfg.Grinding.PickupProbeStepMm),
                 validateAction: () => { if (!IsGrindingActionCurrent(actionVersion)) throw new OperationCanceledException(ct); });
             int unlPickupCheckZ = pickup.ActualZ;
             magnetOn = true;

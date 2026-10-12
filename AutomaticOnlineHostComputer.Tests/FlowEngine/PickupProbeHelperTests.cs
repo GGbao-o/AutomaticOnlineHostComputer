@@ -1,5 +1,6 @@
 using AutomaticOnlineHostComputer.Service;
 using AutomaticOnlineHostComputer.Service.OperationalEvents;
+using AutomaticOnlineHostComputer.Infrastructure.Config;
 
 namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 
@@ -10,6 +11,86 @@ namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 /// </summary>
 public class PickupProbeHelperTests
 {
+    // 配置次数包括首次位置；非默认步长必须同时改变运动目标、循环次数和实际Z上界。
+    [Theory]
+    [InlineData(4, 2)]
+    [InlineData(3, 8)]
+    public async Task Configured_positions_and_step_drive_the_entire_probe(int count, int step)
+    {
+        var fake = new PickupFake(100, Enumerable.Repeat(false, count - 1).Concat(new[] { true, true }).ToArray())
+            { Settings = new(count, step) };
+        var result = await fake.Pick();
+        Assert.Equal(Enumerable.Range(0, count).Select(n => 100 + n * step), fake.Moves);
+        Assert.Equal(count, result.ProbeCount);
+        Assert.Equal(100 + (count - 1) * step, result.ActualZ);
+        Assert.Equal(1, fake.MagnetCalls);
+    }
+
+    [Fact]
+    public async Task One_position_disables_compensation_and_fails_without_magnet()
+    {
+        var fake = new PickupFake(100, false) { Settings = new(1, 5) };
+        var error = await Assert.ThrowsAsync<PickupFailedException>(() => fake.Pick());
+        Assert.Equal(PickupFailureReason.NoPlate, error.Reason);
+        Assert.Contains("1个位置", error.Message);
+        Assert.Contains("0mm", error.Message);
+        Assert.Equal(new[] { 100 }, fake.Moves);
+        Assert.Equal(0, fake.MagnetCalls);
+    }
+
+    [Fact]
+    public async Task Configured_failure_has_no_extra_position_and_reports_actual_limit()
+    {
+        var fake = new PickupFake(100, false, false, false, false) { Settings = new(4, 2) };
+        var error = await Assert.ThrowsAsync<PickupFailedException>(() => fake.Pick());
+        Assert.Equal(new[] { 100, 102, 104, 106 }, fake.Moves);
+        Assert.Equal(0, fake.MagnetCalls);
+        Assert.Contains("4个位置", error.Message);
+        Assert.Contains("6mm", error.Message);
+    }
+
+    // 非法参数不能自动回退为另一套物理动作；必须在任何输入读取、下降及充磁之前拒绝。
+    [Theory]
+    [InlineData(0, 5)]
+    [InlineData(-1, 5)]
+    [InlineData(3, 0)]
+    [InlineData(3, -1)]
+    [InlineData(3, int.MaxValue)]
+    public async Task Invalid_or_overflowing_settings_fail_before_device_io(int count, int step)
+    {
+        var fake = new PickupFake(100, true, true) { Settings = new(count, step) };
+        var error = await Assert.ThrowsAsync<PickupFailedException>(() => fake.Pick());
+        Assert.Equal(PickupFailureReason.UnsafeProbe, error.Reason);
+        Assert.Empty(fake.Moves);
+        Assert.Equal(0, fake.InputReads);
+        Assert.Equal(0, fake.MagnetCalls);
+    }
+
+    [Fact]
+    public async Task One_mm_step_is_not_accepted_before_actual_motion()
+    {
+        var fake = new PickupFake(100, false, true, true)
+            { Settings = new(2, 1), ProbePositionLagReads = 2 };
+        var result = await fake.Pick();
+        Assert.Equal(101, result.ActualZ);
+        Assert.True(fake.ReadsSinceProbeAtSecondX11 >= 4);
+    }
+
+    [Fact]
+    public async Task Editing_shared_config_during_pickup_does_not_change_its_snapshot()
+    {
+        var config = new MotionConfig();
+        var fake = new PickupFake(100, false, false, true, true)
+        {
+            Settings = new(config.Grinding.PickupProbeCount, config.Grinding.PickupProbeStepMm),
+            OnFirstX11 = () => { config.Grinding.PickupProbeCount = 1; config.Grinding.PickupProbeStepMm = 20; }
+        };
+        await fake.Pick();
+        Assert.Equal(new[] { 100, 105, 110 }, fake.Moves);
+        Assert.Equal(1, config.Grinding.PickupProbeCount);
+        Assert.Equal(20, config.Grinding.PickupProbeStepMm);
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -184,6 +265,9 @@ public class PickupProbeHelperTests
         public int MagnetCalls, X11Reads, Stops, FailX11Read, ProbePositionLagReads, ReadsSinceProbeAtSecondX11;
         public int? FirstActualZ;
         public bool X6, X7 = true, X2, FailMagnet, ProbeOvertravel;
+        public PickupProbeSettings? Settings;
+        public System.Action? OnFirstX11;
+        public int InputReads;
         public Task<PickupProbeResult> Pick(CancellationToken ct = default) => PickupProbeHelper.PickAsync(new(
             token => { Moves.Add(_initial); _z = FirstActualZ ?? _initial; return Task.CompletedTask; },
             (z, token) => { Moves.Add(z); _probeTarget = z; _readsSinceProbe = 0;
@@ -192,17 +276,19 @@ public class PickupProbeHelperTests
                 return Task.FromResult(new FlowActionPosition(1, 2, _z)); },
             (address, token) =>
             {
+                InputReads++;
                 if (address == 63494) return Task.FromResult(X6);
                 if (address == 63495) return Task.FromResult(X7);
                 if (address == 63490) return Task.FromResult(X2);
                 OwnershipAtReads.Add(Action.Ownership);
                 if (++X11Reads == FailX11Read) throw new IOException("通信失败");
+                if (X11Reads == 1) OnFirstX11?.Invoke();
                 if (X11Reads == 2) ReadsSinceProbeAtSecondX11 = _readsSinceProbe;
                 return Task.FromResult(_values.Dequeue());
             },
             token => { MagnetCalls++; OwnershipAtMagnet = Action.Ownership; HoldingAtMagnet = Tracker.Snapshot().HoldingWorkpiece;
                 return FailMagnet ? Task.FromException(new IOException("充磁响应丢失")) : Task.CompletedTask; },
             token => { Stops++; return Task.CompletedTask; }, (ms, token) => Task.CompletedTask),
-            _initial, 0, Action, Tracker, ct);
+            _initial, 0, Action, Tracker, ct, Settings);
     }
 }

@@ -118,6 +118,29 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     }
     /// <summary>全线自动取料共用：充磁成功返回后，等待该时长再读取 X11 有板反馈（单位：ms）。</summary>
     public int X11StableDelayMs { get => _cfg.Grinding.X11StableDelayMs; set { _cfg.Grinding.X11StableDelayMs = value; OnPropertyChanged(); } }
+    /// <summary>全线来源探测位置数，包含首次位置；修改共享内存并刷新累计距离预览，不改变正在取板的快照。</summary>
+    public int PickupProbeCount
+    {
+        get => _cfg.Grinding.PickupProbeCount;
+        set { _cfg.Grinding.PickupProbeCount = value; OnPropertyChanged(); OnPropertyChanged(nameof(PickupProbeSummary)); }
+    }
+    /// <summary>全线每次额外下降毫米数；实际取板组件在设备IO前校验，不将非法值静默改为默认值。</summary>
+    public int PickupProbeStepMm
+    {
+        get => _cfg.Grinding.PickupProbeStepMm;
+        set { _cfg.Grinding.PickupProbeStepMm = value; OnPropertyChanged(); OnPropertyChanged(nameof(PickupProbeSummary)); }
+    }
+    /// <summary>只读预览：位置数包含首次，所以最多补偿次数比位置数少1；long计算避免页面预览溢出。</summary>
+    public string PickupProbeSummary
+    {
+        get
+        {
+            long distance = ((long)PickupProbeCount - 1) * PickupProbeStepMm;
+            if (PickupProbeCount < 1 || PickupProbeStepMm < 1 || distance > int.MaxValue)
+                return "探测配置无效：次数和步长必须≥1，累计距离不能溢出；取料会报错暂停。";
+            return $"最多{PickupProbeCount}个位置，步长{PickupProbeStepMm}mm，最大额外下降{distance}mm（从首次实际Z0起算）。";
+        }
+    }
     /// <summary>ST709取料后：先启动天车5 Z回安全高度，再等待该时长写M731释放传送带（单位：ms）。</summary>
     public int M731NotifyDelayMs { get => _cfg.Grinding.M731NotifyDelayMs; set { _cfg.Grinding.M731NotifyDelayMs = value; OnPropertyChanged(); } }
     /// <summary>ST010放料后：先启动1号线后天车Z回安全高度，再等待该时长写M721通知传送带（单位：ms）。</summary>

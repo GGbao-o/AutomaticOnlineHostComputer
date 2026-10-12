@@ -383,6 +383,8 @@
     "handshakeTimeoutMs": 120000,
     "lineStartWaitTimeoutMs": 120000,
     "x11StableDelayMs": 500,
+    "pickupProbeCount": 3,
+    "pickupProbeStepMm": 5,
     "m731NotifyDelayMs": 2000,
     "m721NotifyDelayMs": 2000,
     "maxFifoCount": 13,

@@ -483,6 +483,20 @@
                                     <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
                                                Text="全线共用：前/后天车、机械手、动平衡和研磨天车每次充磁后，等待该时长再读取X11有板信号。" />
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="充磁前最多探测位置" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding PickupProbeCount, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                        <TextBlock Text="次（含首次）" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="无板时每次补偿下降" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding PickupProbeStepMm, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                        <TextBlock Text="mm" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding PickupProbeSummary}" TextWrapping="Wrap" FontSize="11"
+                                               Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6" />
+                                    <TextBlock Text="全线5台天车＋机械手1/2/3共用；参数必须为正整数。修改影响后续取板，本次取板使用开始时的参数；保存后下次启动沿用。"
+                                               TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                         <TextBlock Text="ST709取料后M731延时" Style="{StaticResource ParamLabelStyle}" />
                                         <TextBox Text="{Binding M731NotifyDelayMs, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
                                         <TextBlock Text="ms" Style="{StaticResource ParamLabelStyle}" />

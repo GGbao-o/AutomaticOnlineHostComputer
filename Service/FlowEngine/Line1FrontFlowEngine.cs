@@ -1813,10 +1813,10 @@ public sealed class Line1FrontFlowEngine : IDisposable
     // ═══════════════════════════════════════════════════════════════════
     //  S2: ProcessManipulatorPickupAsync — 机械手1 取料送叉
     //  完整流程:
-    //    ① 读 D100 板长 (仅日志)
-    //    ② ST007 取料: XY→公式Z → 充磁 → X11确认, 未吸住最多下探2次
+    //    ① 读D100实测板长并校验任务长度，超差在运动前拒绝取料。
+    //    ② ST007取料：确认放磁→首次XYZ→按本次配置探测X11→有板才充磁→独立确认持件。
     //      ②a. MoveAbsoluteAsync(rx, ry, ComputePickupZ(rz,d)) — 下压触发视为异常
-    //      ②b. X11=0 → 退磁 → Z每次下探5mm → 再充磁确认
+    //      ②b. 只有有效X11=0才补偿下探，默认3位置/5mm步长，来源探测期间不反复充退磁。
     //      ②c. X11=1后 Z升安全高度
     //    ③ ST711 送叉: XY→公式Z → 退磁 → Z升 → Y回安全
     //      ③a~③c 不再依赖下压信号; 下压触发视为异常保护
@@ -1825,8 +1825,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
     //    ④ M801=1 通知上料架取料完成
     //
     //  异常处理:
-    //    magnetOn=true → 工件在机械手上悬空 → 清 _currentWp 避免死锁 → 人工介入
-    //    magnetOn=false → 工件已安全放下 → 正常
+    //    交叉未闭环的严重失败，不论是否充磁均暂停并作废本板；实际板/磁铁由人工确认。
+    //    完整交叉后的空载回位失败保护货叉已接收板，不凭magnetOn推断实物归属。
     //
     //  锁: 在 finally 中释放 _manipulatorLock，无论成功或失败
     // ═══════════════════════════════════════════════════════════════════
@@ -1938,11 +1938,12 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 m1Spd.Y.Speed, m1Spd.Y.Accel, m1Spd.Y.Decel, m1Spd.Z.Speed,
                 m1Spd.Z.Accel, m1Spd.Z.Decel, ct);
             action.Confirm();
-            // 放磁状态三个位置探测；充磁后再次确认，成功前不得提交来源。
-            // formulaZ已包含ST007台面/直径计算；首次仍用原XYZ复合动作，补偿只按实际Z0+5/+10。
-            // 放磁确认是读X6/X7，不自动退磁。三处无板或反馈未知抛严重异常，进入本方法统一作废。
+            // 按配置位置数/步长探测（默认实际Z0/+5/+10），充磁后再次确认，成功前不得提交来源。
+            // formulaZ已包含ST007台面/直径计算；首次仍用原XYZ复合动作，不在补偿时叠加偏移。
+            // 放磁确认只读X6/X7；配置在本次取板开始时固定，无板/未知反馈仍走本方法统一作废。
             var pickup = await PickupProbeHelper.PickAsync(_manipulator1!, formulaZ, pickupStableDelayMs,
                 action, operationalTracker, ct,
+                settings: new(_cfg.Grinding.PickupProbeCount, _cfg.Grinding.PickupProbeStepMm),
                 moveInitial: async token =>
                 {
                     action.BeginStep(FlowActionStep.MoveXYToSource, new(rx, ry, formulaZ), "ST007 XYZ复合到来源取料位");
@@ -2390,7 +2391,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
             // Pos3首次Z已由本入口算好偏移。先只读放磁反馈，再下降/探测/充磁/后确认；
             // helper成功以后才能按原顺序回升并通知货叉回待机，不能因充磁前X11=1提前交接。
             var pos3Pickup = await PickupProbeHelper.PickAsync(crane, f2zOff, pickupStableDelayMs,
-                action, pos3OperationalTracker, ct);
+                action, pos3OperationalTracker, ct,
+                settings: new(_cfg.Grinding.PickupProbeCount, _cfg.Grinding.PickupProbeStepMm));
             int f2PickZ = pos3Pickup.ActualZ;
             magnetOn = true;
             holdingWorkpiece = true;
@@ -2726,7 +2728,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
         // 打号机取回是同板的第二次独立取板，重新检查放磁及X11，不沿用Pos3那次持件反馈。
         // markerZPickup保留原打号机台面/直径/偏移公式，补偿以这次实际停稳Z重新计算。
         var markerPickup = await PickupProbeHelper.PickAsync(crane, markerZPickup, pickupStableDelayMs,
-            action, markerOperationalTracker, ct);
+            action, markerOperationalTracker, ct,
+            settings: new(_cfg.Grinding.PickupProbeCount, _cfg.Grinding.PickupProbeStepMm));
         int mPickZ = markerPickup.ActualZ;
         physicalTracker?.TryObserveX11(true);
         // 回安全位置

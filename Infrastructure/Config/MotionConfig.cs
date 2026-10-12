@@ -284,6 +284,16 @@ public sealed class MotionConfig
         public int LineStartWaitTimeoutMs { get; set; } = 120_000;
         /// <summary>X11有版检测稳定延时(ms)，充磁后等待磁铁吸稳再读取</summary>
         public int X11StableDelayMs { get; set; } = 3000;
+        /// <summary>
+        /// 全线5台天车及机械手1/2/3：充磁前最多探测多少个Z位置，包含首次位置，必须>=1。
+        /// 1表示首次无板就失败，不补偿下探；旧JSON缺少此字段时默认3。每次取板使用固定快照。
+        /// </summary>
+        public int PickupProbeCount { get; set; } = 3;
+        /// <summary>
+        /// 全线充磁前X11有效为0时，每次额外向下补偿的距离(mm)，必须>=1，默认5。
+        /// 累计上限=(PickupProbeCount-1)*本值，从首次实际停稳Z0计算，不重复叠加业务Z偏移。
+        /// </summary>
+        public int PickupProbeStepMm { get; set; } = 5;
         /// <summary>ST709取料后：启动Z回安全高度后，延时多久写M731释放传送带（ms）。</summary>
         public int M731NotifyDelayMs { get; set; } = 1000;
         /// <summary>ST010放料后：启动后天车Z回安全高度后，延时多久写M721通知传送带（ms）。</summary>
