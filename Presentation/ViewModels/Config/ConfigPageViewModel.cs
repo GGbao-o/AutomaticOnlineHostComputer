@@ -97,6 +97,17 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     public int Crane4HomeX { get => GetHomeX(4); set => SetHomeX(4, value); }
     public int Crane5HomeX { get => GetHomeX(5); set => SetHomeX(5, value); }
 
+    // 四项直接绑定共享配置，各入口每轮读取最新值；不是归位X，也不是相对退避距离。
+    // 允许有符号整数，负数/0不代表关闭；保存继续使用本页原有的_cfg.Save()。
+    /// <summary>1号前天车放行：2号实际X>=此阈值(mm)。</summary>
+    public int Crane1MinCrane2X { get => _cfg.CranePeerXAdmission.Crane1MinCrane2X; set { _cfg.CranePeerXAdmission.Crane1MinCrane2X = value; OnPropertyChanged(); } }
+    /// <summary>2号后天车上料放行：1号实际X<=此阈值(mm)。</summary>
+    public int Crane2MaxCrane1X { get => _cfg.CranePeerXAdmission.Crane2MaxCrane1X; set { _cfg.CranePeerXAdmission.Crane2MaxCrane1X = value; OnPropertyChanged(); } }
+    /// <summary>3号前天车放行：4号实际X>=此阈值(mm)。</summary>
+    public int Crane3MinCrane4X { get => _cfg.CranePeerXAdmission.Crane3MinCrane4X; set { _cfg.CranePeerXAdmission.Crane3MinCrane4X = value; OnPropertyChanged(); } }
+    /// <summary>4号后天车上料放行：3号实际X<=此阈值(mm)。</summary>
+    public int Crane4MaxCrane3X { get => _cfg.CranePeerXAdmission.Crane4MaxCrane3X; set { _cfg.CranePeerXAdmission.Crane4MaxCrane3X = value; OnPropertyChanged(); } }
+
     // 机械手1是两线共用设备。分线路配置表示“首次离开货叉区并允许货叉启动”的安全点；
     // 取板待机Y表示货叉放行后继续前往的预定位点，两者不能混为一个配置。
     public int Manipulator1Line1SafeY { get => _cfg.SkewBed.Manipulator1Line1SafeY; set { _cfg.SkewBed.Manipulator1Line1SafeY = value; OnPropertyChanged(); } }

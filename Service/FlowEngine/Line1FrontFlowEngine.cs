@@ -2487,6 +2487,12 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     }
                     break;
                 }
+                // 1号前天车进入打号前，已完成空位/暂停判断且持有ZoneMT。
+                // 实时读2号实际X>=配置阈值才继续；不满足持锁无限等，不回队、不丢板、不发运动。
+                // 取消或读取失败仍进入本层原catch/finally，避免把未知坐标当作已退开。
+                await CranePeerXGate.WaitAsync(
+                    _craneCache.GetOrCreateService(2), 1, 2,
+                    () => _cfg.CranePeerXAdmission.Crane1MinCrane2X, requireAtLeast: true, ct: ct);
 
                 //打号机流程
                 await MarkingHandshakeAsync(crane, wp, safeZ, actionId, physicalTracker,

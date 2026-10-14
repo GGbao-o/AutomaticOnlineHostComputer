@@ -427,6 +427,32 @@
                                 </StackPanel>
                             </Border>
 
+                            <!-- 四方向独立阈值。比较PLC实际X，方向固定；页面编辑直接供等待轮询读取。 -->
+                            <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="前后天车X放行条件 (mm)" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="1号等2号 X ≥" Width="130" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding Crane1MinCrane2X, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="2号等1号 X ≤" Width="130" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding Crane2MaxCrane1X, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="3号等4号 X ≥" Width="130" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding Crane3MinCrane4X, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="4号等3号 X ≤" Width="130" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding Crane4MaxCrane3X, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"
+                                               Text="填写有符号整数，直接比较实际X，不加偏移。未满足时持锁无限等待；编辑影响下一轮判断，点击保存后持久化。" />
+                                </StackPanel>
+                            </Border>
+
                             <!-- 机械手安全位 -->
                             <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">

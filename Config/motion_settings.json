@@ -441,6 +441,12 @@
     "4": -5000,
     "5": 2000
   },
+  "cranePeerXAdmission": {
+    "crane1MinCrane2X": -14000,
+    "crane2MaxCrane1X": 2500,
+    "crane3MinCrane4X": -14000,
+    "crane4MaxCrane3X": 2500
+  },
   "diameterOffsets": {
     "boring1": 1.5,
     "boring2": 1.5,

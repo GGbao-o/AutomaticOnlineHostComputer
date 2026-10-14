@@ -357,6 +357,28 @@ public sealed class MotionConfig
     /// <summary>取天车归位X(有配置用配置, 没有用默认)</summary>
     public int GetCraneHomeX(int craneNo) => CraneHomeX.TryGetValue(craneNo, out var x) ? x : 1000;
 
+    /// <summary>前后天车持锁进入共享区前，对另一台天车实际显示X的四个独立放行阈值。</summary>
+    public CranePeerXAdmissionSection CranePeerXAdmission { get; set; } = new();
+
+    public sealed class CranePeerXAdmissionSection
+    {
+        // 配置页(UI线程)和引擎轮询线程共享此对象。volatile保证下一轮读取可见已提交的编辑值；
+        // 不在动作开始时缓存阈值，故人工改值也能影响正在等待的入口。负数和0都是有效坐标。
+        private volatile int _crane1MinCrane2X = -14000;
+        private volatile int _crane2MaxCrane1X = 2500;
+        private volatile int _crane3MinCrane4X = -14000;
+        private volatile int _crane4MaxCrane3X = 2500;
+
+        /// <summary>1号前天车打号前：2号实际X必须大于等于此值(mm)，不叠加偏移。</summary>
+        public int Crane1MinCrane2X { get => _crane1MinCrane2X; set => _crane1MinCrane2X = value; }
+        /// <summary>2号后天车上料前：1号实际X必须小于等于此值(mm)，不叠加偏移。</summary>
+        public int Crane2MaxCrane1X { get => _crane2MaxCrane1X; set => _crane2MaxCrane1X = value; }
+        /// <summary>3号前天车打号前：4号实际X必须大于等于此值(mm)，不叠加偏移。</summary>
+        public int Crane3MinCrane4X { get => _crane3MinCrane4X; set => _crane3MinCrane4X = value; }
+        /// <summary>4号后天车上料前：3号实际X必须小于等于此值(mm)，不叠加偏移。</summary>
+        public int Crane4MaxCrane3X { get => _crane4MaxCrane3X; set => _crane4MaxCrane3X = value; }
+    }
+
     /// <summary>直径补偿(mm)：按站号写入CNC前叠加。不影响Z公式/UI显示/缓存直径。</summary>
     public Dictionary<string, double> DiameterOffsets { get; set; } = new();
     public double GetDiameterOffset(string stationCode)

@@ -1549,6 +1549,14 @@ public sealed class Line2RearFlowEngine : IDisposable
             sharedLocked = bed.Code == "ST606";
             Console.WriteLine("│ ZoneTS已获取 ✓，当前可进入中转架取料");
 
+            // 4号后天车上料已持有ZoneMT+ZoneTS，实时读3号实际X<=本线独立阈值。
+            // 不满足时持锁每500ms无限等，不移动、不清工件；取消/通信异常沿用原动作收尾。
+            // 等待中继续校验动作租约，满足后仍执行原来源身份和目标机请求数据复核。
+            await CranePeerXGate.WaitAsync(
+                _craneCache.GetOrCreateService(3), 4, 3,
+                () => _cfg.CranePeerXAdmission.Crane4MaxCrane3X, requireAtLeast: false, ct: ct,
+                validateAction: operation.ThrowIfInvalid);
+
             if (!RackHasPhysicalPlateSnapshot(rs))
                 throw new InvalidOperationException($"中转架{rs}物理信号无板, 禁止后天车取料; 软件缓存将恢复等待人工/下轮确认");
             // 锁后复核（获取ZoneMT/ZoneTS可能持续较久）：

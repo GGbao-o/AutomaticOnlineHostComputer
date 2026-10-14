@@ -2479,6 +2479,12 @@ public sealed class Line2FrontFlowEngine : IDisposable
                     break;
                 }
 
+                // 3号前天车进入打号前，已完成空位/暂停判断且持有ZoneMT。
+                // 实时读4号实际X>=独立阈值，不满足持锁每500ms无限等；不改变当前板或原异常收尾。
+                await CranePeerXGate.WaitAsync(
+                    _craneCache.GetOrCreateService(4), 3, 4,
+                    () => _cfg.CranePeerXAdmission.Crane3MinCrane4X, requireAtLeast: true, ct: ct);
+
                 await MarkingHandshakeAsync(crane, wp, safeZ, actionId, physicalTracker,
                     pos3OperationalTracker, pos3OperationalSite, markerOperationalTracker, markerOperationalSite, action, ct, pickupStableDelayMs);
                 FlowAlarmPresentationContext.RecordTransferPhase("ST502", "中转架（尚未选择）", "等待进入中转架");
