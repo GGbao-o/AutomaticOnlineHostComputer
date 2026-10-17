@@ -10,6 +10,7 @@
 | 外部编辑程序运行目录Config/motion_settings.json | 不自动生效：没有文件监视或Reload入口 | 下次HomeViewModel加载时读取 |
 | 外部编辑仓库Config/motion_settings.json | 不自动生效，也不保证是实际运行文件 | 构建/复制发布后还要核实运行目录文件与重新加载 |
 | 改数据库工位坐标/偏移 | 不等同于修改绝对标定配置；各引擎有已加载缓存或初始化局部字段 | 以各具体重新加载/初始化入口为准，不能宣称所有在途动作立即改变 |
+| 改数据库machine.ip/port | 设备管理保存只更新数据库和列表；已初始化生产上下文不自动切换 | 首次初始化或允许的显式重载重新装载；自动重连不等于重新查数据库 |
 
 HomeViewModel构造调用MotionConfig.Load；CreateConfigPageViewModel把同一_cfg传给配置页，各引擎也共享该对象。Load基于AppDomain.CurrentDomain.BaseDirectory，不按当前PowerShell目录查找。Save序列化共享内存到同目录临时文件，验证JSON后替换正式文件并保留.bak；Save不是“重新读取外部刚改的文件”。
 
@@ -28,6 +29,12 @@ HomeViewModel构造调用MotionConfig.Load；CreateConfigPageViewModel把同一_
 配置页“其他→前后天车X放行条件(mm)”增加四项：`cranePeerXAdmission.crane1MinCrane2X=-14000`、`crane2MaxCrane1X=2500`、`crane3MinCrane4X=-14000`、`crane4MaxCrane3X=2500`。1/3号前天车要求对方实际X大于等于各自阈值，2/4号后天车上料要求对方实际X小于等于各自阈值。四项独立、包含等号，负数和0有效，不叠加坐标偏移。
 
 与一次取板的探测配置快照不同，这四个阈值每轮轮询重新读取。页面编辑提交后，volatile字段供引擎线程读取，可影响当前持锁等待的下一轮判断。原保存按钮持久化，外部JSON修改仍不热加载。旧配置缺节/缺字段使用上述默认值。等待不释放区域锁，无业务超时；取消及通信失败交原动作收尾。完整入口、人工移车示例及范围见[前后天车X持锁准入](2026-10-14前后天车X持锁准入.md)。
+
+### 1.3 设备IP修改与自动重连（2026-10-17）
+
+恢复原目标地址的连接通常不需要重启；“后来连接成功”不能单独证明已读取数据库新IP。设备管理保存后只刷新列表，切回已初始化主页面的默认LoadAsync也只是轻量刷新。代码保留受保护的forceReload=true重载能力，但当前未找到界面调用该入口；普通暂停/启动不能替代地址重载。天车、机械手客户端保存创建时的IP，研磨采集循环也保存初始化传入的IP。
+
+研磨工件显示屏`grinding.workpieceDisplayIp`是不同入口：配置页修改共享内存，后续显示屏写入读取该配置；不能套用到数据库machine.ip。具体设备分类、连接恢复情景、源码依据和日志核对见[设备IP修改与自动重连](2026-10-17设备IP修改与自动重连说明.md)。
 
 ## 2. 三种坐标不能混用
 
