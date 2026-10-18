@@ -158,6 +158,8 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     public int M721NotifyDelayMs { get => _cfg.Grinding.M721NotifyDelayMs; set { _cfg.Grinding.M721NotifyDelayMs = value; OnPropertyChanged(); } }
     /// <summary>研磨上料FIFO允许的最大缓存笔数；超限时天车5在派发前暂停并等待人工确认。</summary>
     public int GrindingMaxFifoCount { get => _cfg.Grinding.MaxFifoCount; set { _cfg.Grinding.MaxFifoCount = value; OnPropertyChanged(); } }
+    /// <summary>派发前D200补长下限(mm)；直接修改共享配置，后续预检读取，原保存按钮负责持久化。</summary>
+    public int GrindingD200MinLengthMm { get => _cfg.Grinding.D200MinLengthMm; set { _cfg.Grinding.D200MinLengthMm = value; OnPropertyChanged(); } }
     public int GrindingLoadingTimeoutMinutes { get => _cfg.Grinding.LoadingTimeoutMinutes; set { _cfg.Grinding.LoadingTimeoutMinutes = value; OnPropertyChanged(); } }
     public int GrindingWaitingForUnloadTimeoutMinutes { get => _cfg.Grinding.WaitingForUnloadTimeoutMinutes; set { _cfg.Grinding.WaitingForUnloadTimeoutMinutes = value; OnPropertyChanged(); } }
     public int GrindingUnloadingTimeoutMinutes { get => _cfg.Grinding.UnloadingTimeoutMinutes; set { _cfg.Grinding.UnloadingTimeoutMinutes = value; OnPropertyChanged(); } }

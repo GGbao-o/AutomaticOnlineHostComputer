@@ -808,7 +808,9 @@ public sealed class GrindingFlowEngine : IDisposable
         {
             var d200 = await _mc65.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, ct);
             double length = d200.IntValues.Length > 0 ? d200.IntValues[0] : 0;
-            if (length <= 0)
+            // 原380下限改为共享配置；不合格仍只保留队头等待，不暂停、不丢弃、不出队。
+            // 仅作用于本次D200补长，前面的已有正长度直接返回和后续校验均保持原样。
+            if (length <= _cfg.Grinding.D200MinLengthMm)
             {
                 if (ShouldLogWaiting("grinding-length:d200-invalid"))
                     Console.WriteLine($"[GrindingEngine] ⏳ M700来源且FIFO长度为0，D200测长无效 len={length}mm；FIFO队头保留，不派发天车");

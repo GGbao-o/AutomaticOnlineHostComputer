@@ -301,6 +301,11 @@ public sealed class MotionConfig
         /// <summary>研磨上料FIFO最大缓存笔数。超过该值时，天车5在下一次上料派发前软暂停并等待人工确认。</summary>
         public int MaxFifoCount { get; set; } = 2;
         /// <summary>
+        /// 派发前从D200补长时的长度下限(mm)，默认380；读数小于等于此值则保留FIFO队头等待。
+        /// 仅替换该处固定阈值，不对已有正长度或上料动作内的补长校验增加新规则。
+        /// </summary>
+        public int D200MinLengthMm { get; set; } = 380;
+        /// <summary>
         /// 各研磨机允许加工的最大工件长度(mm)。未配置或配置为0/负数时不可派发，
         /// 防止机台长度能力未知时将ST709队头误送入研磨机。
         /// </summary>

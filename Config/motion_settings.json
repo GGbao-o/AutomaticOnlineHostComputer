@@ -388,6 +388,7 @@
     "m731NotifyDelayMs": 2000,
     "m721NotifyDelayMs": 2000,
     "maxFifoCount": 13,
+    "d200MinLengthMm": 380,
     "maxWorkpieceLengthMm": {
       "ST 701": 0,
       "ST 702": 0,

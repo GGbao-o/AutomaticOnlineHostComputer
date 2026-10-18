@@ -553,6 +553,13 @@
                                     <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,6"
                                                Text="1号线后天车放入ST010后，先启动Z回安全高度；经过该延时写M721，M721成功即写入研磨FIFO，再等待Z安全到位收尾。" />
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="D200补长下限" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding GrindingD200MinLengthMm, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                        <TextBlock Text="mm" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                               Text="仅派发前D200补长：读数≤此值时保留队头等待，不派发、不暂停、不丢弃；已有正长度的处理不变。" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                         <TextBlock Text="研磨上料FIFO最大缓存数" Style="{StaticResource ParamLabelStyle}" />
                                         <TextBox Text="{Binding GrindingMaxFifoCount, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
                                         <TextBlock Text="笔" Style="{StaticResource ParamLabelStyle}" />
