@@ -160,8 +160,6 @@ public sealed class Line1FrontFlowEngine : IDisposable
 
     /// <summary>前端放料到中转架时回调, 通知后端引擎工件数据。参数: (站号, 工件数据)</summary>
     public Action<string, WorkpieceCache>? OnRackPlaced;
-    /// <summary>天车任务出队前连续两次读到XYZ全零时通知主页面暂停整条1号线并弹窗。</summary>
-    public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
     /// <summary>前端进入人工确认暂停时通知主页面弹窗。</summary>
     public Action<string>? OnSafetyAlarm;
     /// <summary>机械手1为两线共享设备；回取板待机点时位置不确定，需要同步暂停两条线。</summary>
@@ -1659,17 +1657,6 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         {
                             while (!ct.IsCancellationRequested && _craneQueue.TryPeek(out _))
                             {
-                                // 必须在出队前检查。若疑似断电，保留队头工件，避免暂停后丢失任务身份。
-                                var crane = _craneCache.GetOrCreateService(CraneFront1No);
-                                var zeroAlarm = await CraneZeroPositionGuard.CheckAsync(
-                                    crane, CraneFront1No, "1号线前天车", "前天车任务出队前", ct);
-                                if (zeroAlarm != null)
-                                {
-                                    _paused = true;
-                                    OnCraneZeroPositionDetected?.Invoke(zeroAlarm);
-                                    break;
-                                }
-
                                 if (!TryDequeueFrontCrane(out var craneWp))
                                     break;
 

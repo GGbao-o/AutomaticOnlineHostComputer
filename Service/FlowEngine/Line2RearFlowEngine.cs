@@ -78,8 +78,6 @@ public sealed class Line2RearFlowEngine : IDisposable
 
     /// <summary>下料放至动平衡架时回调, 通知平衡引擎取料</summary>
     public Action<string, WorkpieceCache>? OnBalancingRackPlaced;
-    /// <summary>后天车连续两次读到XYZ全零时通知主页面暂停整条2号线并弹窗。</summary>
-    public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
     /// <summary>后天车异常恢复失败、现场位置不再可确认时通知主页面暂停整条2号线并弹窗。</summary>
     public Action<string>? OnRearCraneSafetyAlarm;
     /// <summary>X11三次失败已有最终结构化事件；此回调只复用整线暂停和弹窗，避免重复Legacy事件。</summary>
@@ -600,17 +598,6 @@ public sealed class Line2RearFlowEngine : IDisposable
         Console.WriteLine("[后引擎2] 主循环退出");
     }
 
-    private async Task<bool> EnsureRearCranePositionReadyAsync(string context, CancellationToken ct)
-    {
-        var crane = _craneCache.GetOrCreateService(CraneRearNo);
-        var alarm = await CraneZeroPositionGuard.CheckAsync(crane, CraneRearNo, "2号线后天车", context, ct);
-        if (alarm == null) return true;
-
-        _paused = true;
-        OnCraneZeroPositionDetected?.Invoke(alarm);
-        return false;
-    }
-
     private string StCn(int i) { var b = _beds[i]; return b == null ? "?" : $"{b.St}({(b.Ok ? "连" : "断")})"; }
     private static readonly string[] codes = { "ST606", "ST607", "ST608", "ST609", "ST610" }; // 2号线全FANUC
 
@@ -960,9 +947,6 @@ public sealed class Line2RearFlowEngine : IDisposable
         bool triggered = false;
         try
         {
-            if (!await EnsureRearCranePositionReadyAsync("斜床上料任务派发前", ct))
-                return;
-
             var scan = BuildLoadCandidateScan(logDetails: true);
             if (scan.Candidates.Count == 0)
             {
@@ -1007,9 +991,6 @@ public sealed class Line2RearFlowEngine : IDisposable
         bool triggered = false;
         try
         {
-            if (!await EnsureRearCranePositionReadyAsync("斜床下料任务派发前", ct))
-                return;
-
             var scan = await BuildUnloadCandidateScanAsync(fds, logDetails: true, ct);
             if (scan.Candidates.Count == 0)
             {

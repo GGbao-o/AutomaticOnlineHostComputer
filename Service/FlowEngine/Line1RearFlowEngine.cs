@@ -82,8 +82,6 @@ public sealed class Line1RearFlowEngine : IDisposable
     public Action<string, WorkpieceCache>? OnBalancingRackPlaced;
     /// <summary>下料放至研磨上料架ST010时回调, 通知研磨引擎入缓存(完整工件信息)</summary>
     public Action<WorkpieceCache>? OnGrindingRackPlaced;
-    /// <summary>后天车连续两次读到XYZ全零时通知主页面暂停整条1号线并弹窗。</summary>
-    public Action<CraneZeroPositionAlarm>? OnCraneZeroPositionDetected;
     /// <summary>后天车异常恢复失败、现场位置不再可确认时通知主页面暂停整条1号线并弹窗。</summary>
     public Action<string>? OnRearCraneSafetyAlarm;
     /// <summary>X11三次失败已有最终结构化事件；此回调只复用整线暂停和弹窗，避免重复Legacy事件。</summary>
@@ -625,17 +623,6 @@ public sealed class Line1RearFlowEngine : IDisposable
         Console.WriteLine("[后引擎] 主循环退出");
     }
 
-    private async Task<bool> EnsureRearCranePositionReadyAsync(string context, CancellationToken ct)
-    {
-        var crane = _craneCache.GetOrCreateService(CraneRearNo);
-        var alarm = await CraneZeroPositionGuard.CheckAsync(crane, CraneRearNo, "1号线后天车", context, ct);
-        if (alarm == null) return true;
-
-        _paused = true;
-        OnCraneZeroPositionDetected?.Invoke(alarm);
-        return false;
-    }
-
     private string StCn(int i) { var b = _beds[i]; return b == null ? "?" : $"{b.St}({(b.Ok ? "连" : "断")})"; }
     private static readonly string[] codes = { "ST108", "ST109", "ST111", "ST110", "ST112" }; // 1~5号斜床显示顺序: ST110为4号, ST112为5号
 
@@ -983,9 +970,6 @@ public sealed class Line1RearFlowEngine : IDisposable
         bool triggered = false;
         try
         {
-            if (!await EnsureRearCranePositionReadyAsync("斜床上料任务派发前", ct))
-                return;
-
             var scan = BuildLoadCandidateScan(logDetails: true);
             if (scan.Candidates.Count == 0)
             {
@@ -1030,8 +1014,6 @@ public sealed class Line1RearFlowEngine : IDisposable
         bool triggered = false;
         try
         {
-            if (!await EnsureRearCranePositionReadyAsync("斜床下料任务派发前", ct))
-                return;
             //锁后再次复合下料候选
             var scan = await BuildUnloadCandidateScanAsync(fds, logDetails: true, ct);
             if (scan.Candidates.Count == 0)

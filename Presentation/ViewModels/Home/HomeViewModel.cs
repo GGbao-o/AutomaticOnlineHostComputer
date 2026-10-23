@@ -1772,8 +1772,8 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
-            if (!await EnsureCranePositionsReadyForStartAsync(
-                    new[] { (1, "1号线前天车"), (2, "1号线后天车") }, "1号线引擎启动/恢复前"))
+            // 两台天车六个回原点完成值必须全为1；失败直接返回，不触碰本轮工件或设备状态。
+            if (!await EnsureLineCranesHomedForStartAsync(1))
                 return;
 
             lock (_lineSafetyPopupLock) _line1SafetyPopupShown = false;
@@ -1808,8 +1808,8 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
-            if (!await EnsureCranePositionsReadyForStartAsync(
-                    new[] { (3, "2号线前天车"), (4, "2号线后天车") }, "2号线引擎启动/恢复前"))
+            // 2号线只检查天车3/4，不用显示坐标是否为0来判断是否允许启动。
+            if (!await EnsureLineCranesHomedForStartAsync(2))
                 return;
 
             lock (_lineSafetyPopupLock) _line2SafetyPopupShown = false;
@@ -1831,8 +1831,28 @@ public sealed class HomeViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 引擎启动/恢复前读取天车实时显示坐标。第一次全零后延时500ms复核，
-    /// 只有连续两次全零才阻止启动；读取失败仍交由原通信异常流程处理。
+    /// 1/2号线启动和暂停后恢复共用的只读检查，必须在任何Start/Resume之前调用。
+    /// 使用当次PLC状态，六个Word严格==1；读失败/超时同样拒绝，不走业务严重异常作废。
+    /// </summary>
+    private async Task<bool> EnsureLineCranesHomedForStartAsync(int line)
+    {
+        var result = await LineCraneHomingGuard.CheckAsync(line, async (craneNo, ct) =>
+        {
+            var crane = _craneCache.GetOrCreateService(craneNo);
+            return await crane.ReadStatusAsync(ct);
+        });
+        if (result.CanStart) return true;
+
+        string message = result.BuildFailureMessage();
+        Console.WriteLine($"[HomeViewModel] {message}");
+        MessageBox.Show(message, $"{line}号线不能启动/恢复 - 回原点状态未满足",
+            MessageBoxButton.OK, MessageBoxImage.Warning);
+        return false;
+    }
+
+    /// <summary>
+    /// 仅研磨天车保留原XYZ显示坐标检查：首次全零后延时500ms复核，
+    /// 连续两次全零才阻止启动；1/2号线已移除此规则，不再调用本方法。
     /// </summary>
     private async Task<bool> EnsureCranePositionsReadyForStartAsync(
         IEnumerable<(int CraneNo, string CraneName)> cranes, string context)
@@ -1883,41 +1903,24 @@ public sealed class HomeViewModel : ObservableObject
         return false;
     }
 
-    /// <summary>按天车归属暂停对应引擎，并在主页面线程显示明确告警。</summary>
+    /// <summary>仅研磨天车仍使用旧XYZ全零告警；1/2号线已删除该检查和对应回调。</summary>
     private void HandleCraneZeroPositionAlarm(CraneZeroPositionAlarm alarm)
     {
         // 先在当前线程立即关掉派发门，UI调度延迟不能留下继续派发的窗口。
-        if (alarm.CraneNo is 1 or 2)
-        {
-            _line1Engine?.Pause();
-            _line1RearEngine?.Pause();
-        }
-        else if (alarm.CraneNo is 3 or 4)
-        {
-            _line2Engine?.Pause();
-            _line2RearEngine?.Pause();
-        }
-        else if (alarm.CraneNo == _cfg.Grinding.CraneNo)
-        {
-            _grindingEngine?.PauseForCraneZeroPosition();
-        }
+        if (alarm.CraneNo != _cfg.Grinding.CraneNo) return;
+        _grindingEngine?.PauseForCraneZeroPosition();
 
         string message =
             $"{alarm.CraneName}连续两次读取到XYZ全为0，疑似天车断电后坐标丢失。\n\n" +
             $"检查位置：{alarm.Context}\n" +
             $"第一次：{alarm.First}\n第二次：{alarm.Second}\n\n" +
             "对应引擎已暂停，当前任务和缓存未清除。请确认天车坐标恢复正常后，再点击启动继续。";
-        string scope = alarm.CraneNo is 1 or 2 ? "1号线"
-            : alarm.CraneNo is 3 or 4 ? "2号线"
-            : "研磨";
-        _attentionEvents.Record(AttentionEventKind.SafetyAlarm, scope,
+        _attentionEvents.Record(AttentionEventKind.SafetyAlarm, "研磨",
             $"{alarm.CraneName}坐标保护", message);
 
         void UpdateUiAndShowAlarm()
         {
-            if (alarm.CraneNo is 1 or 2) IsLine1Running = false;
-            else if (alarm.CraneNo is 3 or 4) IsLine2Running = false;
-            else if (alarm.CraneNo == _cfg.Grinding.CraneNo) IsGrindingRunning = false;
+            IsGrindingRunning = false;
 
             Console.WriteLine($"[HomeViewModel] ⚠ {message.Replace(Environment.NewLine, " | ")}");
             MessageBox.Show(message, "天车坐标异常 - 引擎已暂停",
@@ -2742,11 +2745,7 @@ public sealed class HomeViewModel : ObservableObject
             lockM818: lockM818, lockM821: lockM821);
         Console.WriteLine("[HomeViewModel] 2号线后端流程引擎已创建");
 
-        // 天车坐标保护统一回到主页面：后台派发确认全零后，暂停对应整线并弹窗。
-        _line1Engine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
-        _line1RearEngine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
-        _line2Engine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
-        _line2RearEngine.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
+        // 仅研磨保留原XYZ全零回调；1/2号线改为主页面启动前读取回原点完成标志。
         _grindingEngine!.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
         _line1RearEngine.OnRearCraneSafetyAlarm = message => HandleLineSafetyAlarm(1, "后天车安全异常", message);
         _line2RearEngine.OnRearCraneSafetyAlarm = message => HandleLineSafetyAlarm(2, "后天车安全异常", message);
