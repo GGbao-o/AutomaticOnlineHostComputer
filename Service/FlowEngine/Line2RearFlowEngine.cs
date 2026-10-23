@@ -3104,13 +3104,6 @@ public sealed class Line2RearFlowEngine : IDisposable
     private static string YN(bool b) => b ? "1" : "0";
 
     /// <summary>
-    /// 后天车进入平衡料架/研磨上料架分流区前，确认机械手2和机械手3都已降到各自的
-    /// “离开料架区”Y阈值（<c>balancing.m2ReleaseLocksBelowY</c> / <c>m3ReleaseLocksBelowY</c>）以下。
-    /// 复用提前放锁阈值：低于该Y表示机械手已离开料架争夺区。
-    /// 任一机械手未满足就一直轮询等待，无超时；状态读取失败或报警同样继续等待，
-    /// 不暂停引擎、不移动后天车、保持持件和位置锁。
-    /// </summary>
-    /// <summary>
     /// 异常自动作废：清该斜床的 PLC 下发数据、清内存维护的工件数据并回空闲、清后天车任务牌、
     /// 由调用方只结本动作快照，并更新实际收尾结果。
     /// <para>
@@ -3194,30 +3187,50 @@ public sealed class Line2RearFlowEngine : IDisposable
         Console.WriteLine($"│ [分流] ▶ 本线已启动（等待{waited.ElapsedMilliseconds}ms），继续进入分流区");
     }
 
+    /// <summary>
+    /// ST020长板/强制动平衡及ST021短板在拿到M818、M821且目的地允许后，共用此锁内等待。
+    /// 两台机械手都必须实际Y低于各自提前放锁阈值，且各自D5007严格等于1才允许进入分流区。
+    /// 每轮Y与回原点值来自同一次实时状态读取，不沿用上次页面/轮询结果，也不写回原点信号。
+    /// 未满足或状态读失败时无限轮询，不暂停、不移动、不退磁、不释放或重新获取位置锁。
+    /// 原候选阶段报警门禁保持原位；动作取消仍向外抛出，由原finally处理本动作持锁。
+    /// </summary>
     private async Task WaitManipulatorsClearOfRackAsync(CancellationToken ct)
     {
         int m2Below = _cfg.Balancing.M2ReleaseLocksBelowY;
         int m3Below = _cfg.Balancing.M3ReleaseLocksBelowY;
         int pollMs = Math.Max(_cfg.Grinding.SignalPollIntervalMs, 200);
         int waitCount = 0;
-        Console.WriteLine($"│   分流前确认机械手2(Y<{m2Below})、机械手3(Y<{m3Below})已离开料架区...");
+        Console.WriteLine($"│   分流前确认机械手2(Y<{m2Below}且D5007=1)、机械手3(Y<{m3Below}且D5007=1)...");
         while (true)
         {
             ct.ThrowIfCancellationRequested();
             int? m2Y = null, m3Y = null;
+            // 本轮先设为未知，读取失败不能复用上一轮的D5007=1。
+            short? m2YHome = null, m3YHome = null;
             string m2Err = "", m3Err = "";
-            try { var s = await _manipulatorCache.GetOrCreateService(2).ReadStatusAsync(ct); m2Y = s?.YPos; }
+            try
+            {
+                var s = await _manipulatorCache.GetOrCreateService(2).ReadStatusAsync(ct);
+                m2Y = s?.YPos;
+                m2YHome = s?.YHomeCompleted; // D5007，与本轮实际Y来自同一个PLC快照。
+            }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { m2Err = ex.Message; }
-            try { var s = await _manipulatorCache.GetOrCreateService(3).ReadStatusAsync(ct); m3Y = s?.YPos; }
+            try
+            {
+                var s = await _manipulatorCache.GetOrCreateService(3).ReadStatusAsync(ct);
+                m3Y = s?.YPos;
+                m3YHome = s?.YHomeCompleted; // 两台分别读取，不能用机械手2的标志代替机械手3。
+            }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { m3Err = ex.Message; }
 
-            bool m2Clear = m2Y is int y2 && y2 < m2Below;
-            bool m3Clear = m3Y is int y3 && y3 < m3Below;
+            // 原实际Y条件保留，再增加严格D5007==1；两台都通过才退出持锁等待。
+            bool m2Clear = ManipulatorRackPositionGate.IsClear(m2Y, m2YHome, m2Below);
+            bool m3Clear = ManipulatorRackPositionGate.IsClear(m3Y, m3YHome, m3Below);
             if (m2Clear && m3Clear)
             {
-                Console.WriteLine($"│   机械手2 Y={m2Y}(<{m2Below})、机械手3 Y={m3Y}(<{m3Below}) 已离开料架区 ✓");
+                Console.WriteLine($"│   机械手2 Y={m2Y}(<{m2Below}) D5007={m2YHome}、机械手3 Y={m3Y}(<{m3Below}) D5007={m3YHome} 均满足分流条件 ✓");
                 return;
             }
 
@@ -3226,7 +3239,9 @@ public sealed class Line2RearFlowEngine : IDisposable
             {
                 string m2Text = m2Y.HasValue ? m2Y.Value.ToString() : (string.IsNullOrEmpty(m2Err) ? "读失败" : $"读失败({m2Err})");
                 string m3Text = m3Y.HasValue ? m3Y.Value.ToString() : (string.IsNullOrEmpty(m3Err) ? "读失败" : $"读失败({m3Err})");
-                Console.WriteLine($"│   [分流等待] 机械手2 Y={m2Text}(需<{m2Below}) 机械手3 Y={m3Text}(需<{m3Below})，继续等待；保持持件和位置锁");
+                string m2HomeText = m2YHome?.ToString() ?? "未知";
+                string m3HomeText = m3YHome?.ToString() ?? "未知";
+                Console.WriteLine($"│   [分流等待] 机械手2 Y={m2Text}(需<{m2Below}) D5007={m2HomeText}(需=1) 机械手3 Y={m3Text}(需<{m3Below}) D5007={m3HomeText}(需=1)，继续等待；保持持件和位置锁");
             }
             await Task.Delay(pollMs, ct);
         }
