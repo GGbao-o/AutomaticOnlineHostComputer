@@ -78,8 +78,9 @@ public sealed class HomeViewModel : ObservableObject
         }
         else
         {
-            if (!await EnsureCranePositionsReadyForStartAsync(
-                    new[] { (_cfg.Grinding.CraneNo, "研磨天车") }, "研磨引擎启动/恢复前"))
+            // 研磨与1/2号线采用同一回原点值规则，但只读配置中的一台研磨天车。
+            // 三个Word全为1才允许Start/Resume；不再依据XYZ显示坐标是否全零判断。
+            if (!await EnsureGrindingCraneHomedForStartAsync())
                 return;
 
             lock (_lineSafetyPopupLock) _grindingSafetyPopupShown = false;
@@ -1851,31 +1852,24 @@ public sealed class HomeViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 仅研磨天车保留原XYZ显示坐标检查：首次全零后延时500ms复核，
-    /// 连续两次全零才阻止启动；1/2号线已移除此规则，不再调用本方法。
+    /// 研磨启动/恢复前实时读取配置天车的D5006/7/8，复用严格==1及5秒超时规则。
+    /// 拒绝启动仅显示本次原始值/未知和错误，不执行软暂停、急停、回原点或工件作废。
+    /// 原运行中的动作和研磨FIFO/Pending保持原状，人工核对后再次点击会重新读取。
     /// </summary>
-    private async Task<bool> EnsureCranePositionsReadyForStartAsync(
-        IEnumerable<(int CraneNo, string CraneName)> cranes, string context)
+    private async Task<bool> EnsureGrindingCraneHomedForStartAsync()
     {
-        foreach (var (craneNo, craneName) in cranes)
+        var result = await LineCraneHomingGuard.CheckGrindingAsync(_cfg.Grinding.CraneNo, async (craneNo, ct) =>
         {
-            try
-            {
-                var crane = _craneCache.GetOrCreateService(craneNo);
-                var alarm = await CraneZeroPositionGuard.CheckAsync(
-                    crane, craneNo, craneName, context, CancellationToken.None);
-                if (alarm == null) continue;
+            var crane = _craneCache.GetOrCreateService(craneNo);
+            return await crane.ReadStatusAsync(ct);
+        });
+        if (result.IsReady) return true;
 
-                HandleCraneZeroPositionAlarm(alarm);
-                return false;
-            }
-            catch (Exception ex)
-            {
-                // 本保护只识别“成功读取且连续两次全零”；通信失败不能伪装成坐标丢失。
-                Console.WriteLine($"[天车坐标保护] [{craneName}] {context} 读取异常，交由现有通信异常流程处理: {ex.Message}");
-            }
-        }
-        return true;
+        string message = result.BuildFailureMessage("研磨线路");
+        Console.WriteLine($"[HomeViewModel] {message}");
+        MessageBox.Show(message, "研磨线路不能启动/恢复 - 回原点状态未满足",
+            MessageBoxButton.OK, MessageBoxImage.Warning);
+        return false;
     }
 
     /// <summary>
@@ -1901,35 +1895,6 @@ public sealed class HomeViewModel : ObservableObject
         MessageBox.Show(message, $"{line}号线待人工确认 - 禁止恢复",
             MessageBoxButton.OK, MessageBoxImage.Warning);
         return false;
-    }
-
-    /// <summary>仅研磨天车仍使用旧XYZ全零告警；1/2号线已删除该检查和对应回调。</summary>
-    private void HandleCraneZeroPositionAlarm(CraneZeroPositionAlarm alarm)
-    {
-        // 先在当前线程立即关掉派发门，UI调度延迟不能留下继续派发的窗口。
-        if (alarm.CraneNo != _cfg.Grinding.CraneNo) return;
-        _grindingEngine?.PauseForCraneZeroPosition();
-
-        string message =
-            $"{alarm.CraneName}连续两次读取到XYZ全为0，疑似天车断电后坐标丢失。\n\n" +
-            $"检查位置：{alarm.Context}\n" +
-            $"第一次：{alarm.First}\n第二次：{alarm.Second}\n\n" +
-            "对应引擎已暂停，当前任务和缓存未清除。请确认天车坐标恢复正常后，再点击启动继续。";
-        _attentionEvents.Record(AttentionEventKind.SafetyAlarm, "研磨",
-            $"{alarm.CraneName}坐标保护", message);
-
-        void UpdateUiAndShowAlarm()
-        {
-            IsGrindingRunning = false;
-
-            Console.WriteLine($"[HomeViewModel] ⚠ {message.Replace(Environment.NewLine, " | ")}");
-            MessageBox.Show(message, "天车坐标异常 - 引擎已暂停",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess()) UpdateUiAndShowAlarm();
-        else dispatcher.BeginInvoke((Action)UpdateUiAndShowAlarm);
     }
 
     /// <summary>后天车无法完成退磁/回升时，立即暂停对应整线并在主页面显示安全告警。</summary>
@@ -2745,8 +2710,7 @@ public sealed class HomeViewModel : ObservableObject
             lockM818: lockM818, lockM821: lockM821);
         Console.WriteLine("[HomeViewModel] 2号线后端流程引擎已创建");
 
-        // 仅研磨保留原XYZ全零回调；1/2号线改为主页面启动前读取回原点完成标志。
-        _grindingEngine!.OnCraneZeroPositionDetected = HandleCraneZeroPositionAlarm;
+        // 1/2号线及研磨均在主页面启动前读取回原点完成标志，不再绑定旧XYZ全零回调。
         _line1RearEngine.OnRearCraneSafetyAlarm = message => HandleLineSafetyAlarm(1, "后天车安全异常", message);
         _line2RearEngine.OnRearCraneSafetyAlarm = message => HandleLineSafetyAlarm(2, "后天车安全异常", message);
         _line1RearEngine.OnRearCraneX11FinalSafetyAlarm = message => HandleLineSafetyAlarm(1, "后天车X11取料失败", message, recordLegacyEvent: false);

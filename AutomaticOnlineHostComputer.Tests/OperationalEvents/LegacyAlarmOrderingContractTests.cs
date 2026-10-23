@@ -40,7 +40,6 @@ public sealed class LegacyAlarmOrderingContractTests
     }
 
     [Theory]
-    [InlineData("private void HandleCraneZeroPositionAlarm")]
     [InlineData("private void HandleSharedManipulatorSafetyAlarm")]
     [InlineData("private void HandleRearCraneWarning")]
     public void Unrelated_alarm_handlers_keep_their_single_record_and_popup(string signature)

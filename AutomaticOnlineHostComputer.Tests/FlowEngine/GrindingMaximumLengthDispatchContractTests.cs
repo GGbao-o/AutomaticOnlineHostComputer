@@ -27,12 +27,13 @@ public sealed class GrindingMaximumLengthDispatchContractTests
         int peek = method.IndexOf("TryPeekCache", StringComparison.Ordinal);
         int resolveLength = method.IndexOf("ResolveDispatchWorkpieceLengthAsync", StringComparison.Ordinal);
         int match = method.IndexOf("FindReadyGrinder(dispatchWp.Length)", StringComparison.Ordinal);
-        int zeroGuard = method.IndexOf("EnsureGrindingCranePositionReadyAsync", StringComparison.Ordinal);
+        int finalCheck = method.IndexOf("IsReadyGrinderForLength(ready, dispatchWp.Length)", StringComparison.Ordinal);
         int dequeue = method.IndexOf("TryDequeueCache", StringComparison.Ordinal);
         int pending = method.IndexOf("ready.PendingWorkpiece = wp", StringComparison.Ordinal);
 
-        Assert.True(peek >= 0 && peek < resolveLength && resolveLength < match && match < zeroGuard && zeroGuard < dequeue,
-            "必须先窥视FIFO、补足/确认长度并选择长度匹配机台，之后才能执行天车零位保护和出队。");
+        Assert.True(peek >= 0 && peek < resolveLength && resolveLength < match && match < finalCheck && finalCheck < dequeue,
+            "必须先窥视FIFO、补足/确认长度并选择长度匹配机台，最终复核机台准入后才能出队；启动时的回原点门禁不在派发中重复执行。");
+        Assert.DoesNotContain("EnsureGrindingCranePositionReadyAsync", method, StringComparison.Ordinal);
         Assert.True(dequeue < pending, "Pending只能在长度匹配并成功出队之后写入。");
         Assert.Contains("_cfg.Grinding.CanProcessLength", source, StringComparison.Ordinal);
         Assert.Contains("M700来源且FIFO长度为0", source, StringComparison.Ordinal);
