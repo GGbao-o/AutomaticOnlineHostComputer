@@ -84,8 +84,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
     /// 天车通信服务（汇川 PLC，Modbus TCP）。
     /// <para>
     /// 每台天车实例化一个 CraneService，传入对应 IP 地址。<br/>
-    /// 公共 API 均通过 IDeviceClient 的 ReadAsync / WriteAsync 访问，
-    /// 不直接调用 ModbusTcpClient 内部私有方法。
+    /// 寄存器 API 通过 IDeviceClient 的 ReadAsync / WriteAsync 访问；
+    /// 新增手动JOG单独使用FC05写线圈及严格FC01回读，不改变原寄存器访问路径。
     /// </para>
     /// <para>5台天车 IP：
     ///   1号线天车前 192.168.2.81；1号线天车后 192.168.2.82；
@@ -270,6 +270,32 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             await WriteRegAsync(Addr.D_ManualMode, 2, "手动操作使能 D4500", ct);
             _manualModeSet = true;
         }
+
+        /// <summary>
+        /// 新增手动JOG入口，仅写M70～M75：先沿用手动模式使能，再按固定时长输出脉冲。
+        /// 不使用原手动按钮5秒整趟令牌，持续时间大于5秒也不会被提前截断；各设备IO仍有超时。
+        /// </summary>
+        public async Task JogPulseAsync(int coilAddress, int durationMs, CancellationToken ct = default)
+        {
+            //校验参数
+            ManualJogPulse.Validate(coilAddress, durationMs); // 参数不合法时不切模式、不写线圈。
+            //确保手动模式
+            await EnsureManualModeAsync(ct);
+            //开始执行
+            await ManualJogPulse.RunAsync(CreateJogOperations(coilAddress), coilAddress, durationMs, ct);
+        }
+
+        /// <summary>仅重试原手动JOG的OFF和回读，不切模式、不启动任何新运动。</summary>
+        public Task ResetJogAsync(int coilAddress)
+            => ManualJogPulse.ResetAsync(CreateJogOperations(coilAddress), coilAddress);
+
+        private ManualJogOperations CreateJogOperations(int coilAddress) => new(
+            // ON单次发送；OFF的重试由专用收尾控制，原生产写入重试策略不变。
+            (value, token) => SafeIoAsync(t => _client.WriteCoilAsync(coilAddress, value, t),
+                $"手动JOG M{coilAddress}={(value ? 1 : 0)}", token, MaxWriteIoAttempts),
+            token => SafeIoAsync(t => _client.ReadCoilCheckedAsync(coilAddress, t),
+                $"手动JOG M{coilAddress}复位回读", token, MaxWriteIoAttempts),
+            (ms, token) => Task.Delay(ms, token));
 
         // ─── 急停 / 下压急停 ─────────────────────────────────────────
 

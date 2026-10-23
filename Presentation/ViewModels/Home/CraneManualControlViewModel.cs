@@ -5,6 +5,7 @@ using System.Windows.Input;
 using AutomaticOnlineHostComputer.Communication.DeviceAddresses;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Infrastructure.Logging;
+using AutomaticOnlineHostComputer.Infrastructure.Config;
 
 namespace AutomaticOnlineHostComputer.Presentation.ViewModels.Home;
 
@@ -53,6 +54,16 @@ public sealed class CraneManualControlViewModel : ObservableObject
 {
     private readonly CraneConnectionCache _craneCache;
     private readonly ManipulatorConnectionCache _manipulatorCache;
+    private readonly MotionConfig _cfg;
+    private int _jogRunning;
+    // 只有复位未确认时保留原设备。再次点击只重试该设备OFF，不能直接发新的ON。
+    private JogResetTarget? _pendingJogReset;
+    private sealed record JogResetTarget(CraneService Service, int CoilAddress, string DeviceName);
+
+    public bool CanJog => _selectedDevice != null && System.Threading.Volatile.Read(ref _jogRunning) == 0;
+    public bool CanJogX => CanJog && IsCraneOnly;
+    private string _jogStatus = "单击JOG后定时写0；机械手无X轴。";
+    public string JogStatus { get => _jogStatus; private set => SetField(ref _jogStatus, value); }
 
     // ═══════════════════════════════════════════════════════════════
     //  下拉框数据
@@ -74,6 +85,7 @@ public sealed class CraneManualControlViewModel : ObservableObject
                 OnPropertyChanged(nameof(SelectedDeviceDisplay));
                 OnPropertyChanged(nameof(IsCraneSelected));
                 OnPropertyChanged(nameof(IsCraneOnly));
+                NotifyJogAvailability();
                 IsMagnetizeFeedback = null;
                 IsDemagnetizeFeedback = null;
                 IsPlateFeedback = null;
@@ -585,6 +597,14 @@ public sealed class CraneManualControlViewModel : ObservableObject
     public ICommand RelativeMoveZPlusCommand { get; }
     public ICommand RelativeMoveZMinusCommand { get; }
 
+    // 新JOG独立于原D4503～D4505相对点动命令，按M线圈输出定时脉冲。
+    public ICommand JogXPlusCommand { get; }
+    public ICommand JogXMinusCommand { get; }
+    public ICommand JogYPlusCommand { get; }
+    public ICommand JogYMinusCommand { get; }
+    public ICommand JogZPlusCommand { get; }
+    public ICommand JogZMinusCommand { get; }
+
     // ═══════════════════════════════════════════════════════════════
     //  构造
     // ═══════════════════════════════════════════════════════════════
@@ -593,10 +613,11 @@ public sealed class CraneManualControlViewModel : ObservableObject
     /// 构造手动控制 VM。
     /// 参数缓存需先调用 <c>LoadFromMachineRows()</c> 装载 IP 映射。
     /// </summary>
-    public CraneManualControlViewModel(CraneConnectionCache craneCache, ManipulatorConnectionCache manipulatorCache)
+    public CraneManualControlViewModel(CraneConnectionCache craneCache, ManipulatorConnectionCache manipulatorCache, MotionConfig cfg)
     {
         _craneCache = craneCache;
         _manipulatorCache = manipulatorCache;
+        _cfg = cfg;
 
         // ── 构建下拉框 8 项（名称占位，LoadAsync 后刷新） ──────────
         DeviceItems = new List<ManualDeviceItem>
@@ -645,12 +666,80 @@ public sealed class CraneManualControlViewModel : ObservableObject
         RelativeMoveZPlusCommand  = new AsyncRelayCommand(RelativeMoveZPlusAsync,  nameof(RelativeMoveZPlusCommand));
         RelativeMoveZMinusCommand = new AsyncRelayCommand(RelativeMoveZMinusAsync, nameof(RelativeMoveZMinusCommand));
 
+        JogXPlusCommand = new AsyncRelayCommand(() => JogAsync(CraneAddress.M_JogXPlus, "X+"), nameof(JogXPlusCommand));
+        JogXMinusCommand = new AsyncRelayCommand(() => JogAsync(CraneAddress.M_JogXMinus, "X−"), nameof(JogXMinusCommand));
+        JogYPlusCommand = new AsyncRelayCommand(() => JogAsync(CraneAddress.M_JogYPlus, "Y+"), nameof(JogYPlusCommand));
+        JogYMinusCommand = new AsyncRelayCommand(() => JogAsync(CraneAddress.M_JogYMinus, "Y−"), nameof(JogYMinusCommand));
+        JogZPlusCommand = new AsyncRelayCommand(() => JogAsync(CraneAddress.M_JogZPlus, "Z+"), nameof(JogZPlusCommand));
+        JogZMinusCommand = new AsyncRelayCommand(() => JogAsync(CraneAddress.M_JogZMinus, "Z−"), nameof(JogZMinusCommand));
+
         Console.WriteLine("[CraneManualVM] 手动控制VM已创建（8设备：5天车+3机械手）。");
     }
 
     // ═══════════════════════════════════════════════════════════════
     //  公共方法
     // ═══════════════════════════════════════════════════════════════
+
+    private void NotifyJogAvailability()
+    {
+        OnPropertyChanged(nameof(CanJog));
+        OnPropertyChanged(nameof(CanJogX));
+    }
+
+    /// <summary>
+    /// 六个新JOG共用一个非排队互斥。点击时固定设备/服务/地址/时长；切换设备不会把OFF写到别处。
+    /// 只控制手动线圈，不调用任何线路、区域锁、工件或业务异常恢复入口。
+    /// </summary>
+    private async Task JogAsync(int coilAddress, string direction)
+    {
+        var device = SelectedDevice;
+        if (device == null) return;
+        if (device.DeviceType == ManualDeviceType.Manipulator
+            && coilAddress is CraneAddress.M_JogXPlus or CraneAddress.M_JogXMinus)
+            return; // UI禁用之外的命令层兜底：机械手没有X轴。
+        if (System.Threading.Interlocked.CompareExchange(ref _jogRunning, 1, 0) != 0) return;
+
+        CraneService? service = null;
+        string name = device.ShortName;
+        try
+        {
+            NotifyJogAvailability();
+            if (_pendingJogReset is { } pending)
+            {
+                JogStatus = $"正在重试 {pending.DeviceName} M{pending.CoilAddress}复位，本次不启动新JOG…";
+                await pending.Service.ResetJogAsync(pending.CoilAddress);
+                _pendingJogReset = null;
+                JogStatus = $"{pending.DeviceName} M{pending.CoilAddress}=0已确认；再次点击JOG可执行新动作。";
+                return;
+            }
+
+            // 在首次await之前解析并固定原设备服务，后续不再读取SelectedDevice决定写入对象。
+            service = device.DeviceType == ManualDeviceType.Manipulator
+                ? _manipulatorCache.GetOrCreateService(device.Index)
+                : _craneCache.GetOrCreateService(device.Index);
+            int durationMs = _cfg.ManualControl.JogPulseDurationMs;
+            JogStatus = $"{name} JOG {direction}，M{coilAddress}，持续{durationMs}ms…";
+            Console.WriteLine($"[手动JOG] {JogStatus}");
+            await service.JogPulseAsync(coilAddress, durationMs);
+            JogStatus = $"{name} JOG {direction}完成，M{coilAddress}=0已回读确认。";
+        }
+        catch (ManualJogResetException ex)
+        {
+            if (service != null) _pendingJogReset = new JogResetTarget(service, coilAddress, name);
+            JogStatus = $"JOG复位未确认：{ex.Message}。再次点击任一可用JOG仅重试原线圈复位。";
+            Console.WriteLine($"[手动JOG] {name} {ex}");
+        }
+        catch (Exception ex)
+        {
+            JogStatus = $"{name} JOG未完成：{ex.Message}";
+            Console.WriteLine($"[手动JOG] {name} {ex}");
+        }
+        finally
+        {
+            System.Threading.Volatile.Write(ref _jogRunning, 0);
+            NotifyJogAvailability(); // 只恢复新JOG按钮；原停止/急停等按钮不受此互斥影响。
+        }
+    }
 
     /// <summary>缓存 IP 映射更新后刷新下拉框名称和选中设备显示文本。</summary>
     public void NotifyMappingsUpdated()

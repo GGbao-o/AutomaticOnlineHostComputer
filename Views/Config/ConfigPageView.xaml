@@ -453,6 +453,21 @@
                                 </StackPanel>
                             </Border>
 
+                            <!-- 仅新增的手动M70～M75 JOG使用，自动线路不读取此值。 -->
+                            <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="手动JOG" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="持续时间" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding ManualJogPulseDurationMs, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ParamTextBoxStyle}" Width="80" />
+                                        <TextBlock Text="ms" Style="{StaticResource ParamLabelStyle}" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"
+                                               Text="填写正整数，默认1000。新JOG点击后定时写0并回读；修改影响下一次点击，保存后持久化。" />
+                                </StackPanel>
+                            </Border>
+
                             <!-- 机械手安全位 -->
                             <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">

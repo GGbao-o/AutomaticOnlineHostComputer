@@ -607,6 +607,7 @@
                 </GroupBox>
 
                 <GroupBox Grid.Row="6" Header="设备操作">
+                    <StackPanel>
                     <UniformGrid
                         Margin="8"
                         Columns="4"
@@ -674,6 +675,17 @@
                             Content="接液盘关闭"
                             Visibility="{Binding ManualControl.IsCraneOnly, Converter={StaticResource BoolToVis}}" />
                     </UniformGrid>
+                    <!-- 与原相对移动按钮分开：FC05线圈定时JOG，机械手无X，六向共享手动互斥。 -->
+                    <UniformGrid Margin="8,0,8,0" Columns="3" Rows="2">
+                        <Button Content="JOG X+" Command="{Binding ManualControl.JogXPlusCommand}" IsEnabled="{Binding ManualControl.CanJogX}" />
+                        <Button Content="JOG Y+" Command="{Binding ManualControl.JogYPlusCommand}" IsEnabled="{Binding ManualControl.CanJog}" />
+                        <Button Content="JOG Z+" Command="{Binding ManualControl.JogZPlusCommand}" IsEnabled="{Binding ManualControl.CanJog}" />
+                        <Button Content="JOG X−" Command="{Binding ManualControl.JogXMinusCommand}" IsEnabled="{Binding ManualControl.CanJogX}" />
+                        <Button Content="JOG Y−" Command="{Binding ManualControl.JogYMinusCommand}" IsEnabled="{Binding ManualControl.CanJog}" />
+                        <Button Content="JOG Z−" Command="{Binding ManualControl.JogZMinusCommand}" IsEnabled="{Binding ManualControl.CanJog}" />
+                    </UniformGrid>
+                    <TextBlock Margin="11,3,11,8" Text="{Binding ManualControl.JogStatus}" TextWrapping="Wrap" Foreground="{StaticResource TextMainBrush}" />
+                    </StackPanel>
                 </GroupBox>
             </Grid>
         </Border>

@@ -303,6 +303,34 @@ namespace AutomaticOnlineHostComputer.Communication.Clients
             return (resp[2] & 0x01) != 0;
         }
 
+        /// <summary>
+        /// 手动JOG复位专用的严格线圈读取。只在新增JOG路径检查FC01、单字节数量及响应长度，
+        /// 防止异常帧被解释成false；原ReadCoilAsync及生产输入读取行为保持不变。
+        /// </summary>
+        internal async Task<bool> ReadCoilCheckedAsync(int address, CancellationToken ct = default)
+        {
+            if ((uint)address > ushort.MaxValue) throw new ArgumentOutOfRangeException(nameof(address));
+            var pdu = new byte[] { 0x01, (byte)(address >> 8), (byte)address, 0x00, 0x01 };
+            var resp = await SendRequestAsync(pdu, 2, ct);
+            if (resp.Length != 3 || resp[0] != 0x01 || resp[1] != 1)
+                throw new IOException($"FC01线圈{address}回读响应无效，不能确认JOG已复位");
+            return (resp[2] & 1) != 0;
+        }
+
+        /// <summary>
+        /// 写单个线圈（FC05），地址为0基十进制地址，不是保持寄存器D地址。
+        /// ON在线路编码为FF00，OFF为0000；必须收到功能码、地址、值完全一致的回显才成功。
+        /// 本方法不重试，避免写1响应丢失后重放运动；手动JOG仅对幂等写0做独立重试。
+        /// </summary>
+        public async Task WriteCoilAsync(int address, bool value, CancellationToken ct = default)
+        {
+            if ((uint)address > ushort.MaxValue) throw new ArgumentOutOfRangeException(nameof(address));
+            var pdu = new byte[] { 0x05, (byte)(address >> 8), (byte)address, value ? (byte)0xFF : (byte)0x00, 0x00 };
+            var resp = await SendRequestAsync(pdu, 4, ct);
+            if (resp.Length != pdu.Length || !resp.AsSpan().SequenceEqual(pdu))
+                throw new IOException($"FC05线圈{address}写{(value ? 1 : 0)}回显不匹配，写入结果未确认");
+        }
+
         /// <summary>读输入寄存器（FC=04）。D63488等只读区必须用此方法。</summary>
         public async Task<int[]> ReadInputRegistersAsync(int startAddr, int count, CancellationToken ct = default)
         {

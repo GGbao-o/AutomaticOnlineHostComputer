@@ -31,6 +31,8 @@ public sealed class MotionConfig
     public ZAxisSection ZAxis { get; set; } = new();
     /// <summary>安全检查参数</summary>
     public SafetySection Safety { get; set; } = new();
+    /// <summary>仅手动操作页使用的参数，不影响自动线路或原有相对/绝对移动。</summary>
+    public ManualControlSection ManualControl { get; set; } = new();
     /// <summary>抖动松料参数</summary>
     public ShakeSection Shake { get; set; } = new();
     /// <summary>流程引擎参数</summary>
@@ -107,6 +109,12 @@ public sealed class MotionConfig
         /// D100 读到 0（无有效读数）或任务板长无效时不校验。
         /// </summary>
         public int PlateLengthToleranceMm { get; set; } = 15;
+    }
+
+    public sealed class ManualControlSection
+    {
+        /// <summary>手动JOG写1成功后保持多久再写0(ms)，必须>0；每次点击固定本次值，默认1000。</summary>
+        public int JogPulseDurationMs { get; set; } = 1000;
     }
 
     public sealed class ShakeSection

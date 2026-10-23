@@ -373,6 +373,9 @@
     "stableRangeMm": 1,
     "afterMoveMinSettleDelayMs": 700
   },
+  "manualControl": {
+    "jogPulseDurationMs": 1000
+  },
   "grinding": {
     "zFactor1": 0.9537,
     "zFactor2": 0.866,

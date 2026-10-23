@@ -97,6 +97,9 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     public int Crane4HomeX { get => GetHomeX(4); set => SetHomeX(4, value); }
     public int Crane5HomeX { get => GetHomeX(5); set => SetHomeX(5, value); }
 
+    /// <summary>仅新手动JOG按钮的保持时长(ms)，点击时取快照；原保存按钮持久化，不改变自动业务。</summary>
+    public int ManualJogPulseDurationMs { get => _cfg.ManualControl.JogPulseDurationMs; set { _cfg.ManualControl.JogPulseDurationMs = value; OnPropertyChanged(); } }
+
     // 四项直接绑定共享配置，各入口每轮读取最新值；不是归位X，也不是相对退避距离。
     // 允许有符号整数，负数/0不代表关闭；保存继续使用本页原有的_cfg.Save()。
     /// <summary>1号前天车放行：2号实际X>=此阈值(mm)。</summary>

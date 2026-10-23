@@ -25,6 +25,14 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceAddresses
     /// </summary>
     public static class CraneAddress
     {
+        // 手动JOG直接使用Modbus线圈(FC05)，不是D寄存器。机械手没有X轴，由手动页另行禁用X。
+        public const int M_JogXPlus = 70;
+        public const int M_JogXMinus = 71;
+        public const int M_JogYPlus = 72;
+        public const int M_JogYMinus = 73;
+        public const int M_JogZPlus = 74;
+        public const int M_JogZMinus = 75;
+
         // ═══════════════════════════════════════════════════════════════
         // 从天车读取（FC03 读保持寄存器）
         // ═══════════════════════════════════════════════════════════════

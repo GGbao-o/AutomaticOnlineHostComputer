@@ -236,7 +236,7 @@ public sealed class HomeViewModel : ObservableObject
         Crane2R = new CraneCardViewModel(4, _craneCache);
         CraneGL = new CraneCardViewModel(5, _craneCache);
 
-        ManualControl = new CraneManualControlViewModel(_craneCache, _manipulatorCache);
+        ManualControl = new CraneManualControlViewModel(_craneCache, _manipulatorCache, _cfg);
         ForkManualControl = new ForkManualControlViewModel();
         if (Application.Current != null)
             Application.Current.Exit += (_, _) => ForkManualControl.Dispose();

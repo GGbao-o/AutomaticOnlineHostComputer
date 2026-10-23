@@ -46,6 +46,12 @@ HomeViewModel构造调用MotionConfig.Load；CreateConfigPageViewModel把同一_
 
 源码仅将派发前比较改为`length <= _cfg.Grinding.D200MinLengthMm`；配置模型属性为`D200MinLengthMm`，页面绑定为`GrindingD200MinLengthMm`。主项目构建及现有研磨长度匹配、FIFO派发、磨石准入共8项测试通过，另核对JSON默认、XAML绑定和其他原判断保留；未进行PLC实机联调。
 
+### 1.5 手动JOG持续时间（2026-10-23）
+
+`manualControl.jogPulseDurationMs`默认1000ms，配置页“其他→手动JOG→持续时间”编辑。只有新增M70～M75手动JOG读取此值，每次点击固定本次时长；页面编辑影响下一次，保存持久化，外部JSON不热加载。必须为正整数，非法值在设备IO前拒绝。它不改变原相对移动/绝对移动、不改变JOG速度，也没有生产线路消费者。
+
+单击后写1、等待、finally独立写0并回读，OFF最多3次独立清理；失败只报告手动JOG复位未确认，不暂停线路或清业务状态。详情见[手动JOG定时按钮](2026-10-23手动JOG定时按钮.md)。
+
 ## 2. 三种坐标不能混用
 
 - 数据库显示坐标及X/Y/Z偏移：用于主绝对移动目标。
