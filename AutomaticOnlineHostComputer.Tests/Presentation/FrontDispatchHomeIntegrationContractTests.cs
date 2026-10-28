@@ -40,7 +40,7 @@ public sealed class FrontDispatchHomeIntegrationContractTests
             RepositoryRoot.Find(), "Docs", "全线业务逻辑详解.md"));
 
         int sequenceColumn = view.IndexOf("Binding=\"{Binding Sequence}\"", StringComparison.Ordinal);
-        int orderColumn = view.IndexOf("Binding=\"{Binding QueueOrderText}\"", StringComparison.Ordinal);
+        int orderColumn = view.IndexOf("Binding=\"{Binding QueueOrderText, Mode=OneWay}\"", StringComparison.Ordinal);
         Assert.True(sequenceColumn >= 0 && orderColumn > sequenceColumn, "顺序列必须位于序号列之后。");
         Assert.Contains("Header=\"顺序\"", view, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding CanToggleRun}\"", view, StringComparison.Ordinal);

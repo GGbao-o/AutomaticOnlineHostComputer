@@ -348,10 +348,16 @@
                                 Width="50"
                                 Binding="{Binding Sequence}"
                                 Header="序号" />
+                            <!--
+                                顺序、任务起点、分配线路、动平衡、跳过镗都是只有getter的计算显示值。
+                                这五列禁止进入编辑并显式单向绑定，防止双击生成双向编辑绑定后抛异常。
+                                只限制这些列；长度、直径等原可编辑列及交互按钮继续沿用原行为。
+                            -->
                             <DataGridTextColumn
                                 Width="50"
-                                Binding="{Binding QueueOrderText}"
-                                Header="顺序" />
+                                Binding="{Binding QueueOrderText, Mode=OneWay}"
+                                Header="顺序"
+                                IsReadOnly="True" />
                             <DataGridTextColumn
                                 Width="50"
                                 Binding="{Binding Length}"
@@ -382,16 +388,19 @@
                                 Header="圆角大小" />
                             <DataGridTextColumn
                                 Width="80"
-                                Binding="{Binding StartSourceText}"
-                                Header="任务起点" />
+                                Binding="{Binding StartSourceText, Mode=OneWay}"
+                                Header="任务起点"
+                                IsReadOnly="True" />
                             <DataGridTextColumn
                                 Width="70"
-                                Binding="{Binding AssignedLineText}"
-                                Header="分配线路" />
+                                Binding="{Binding AssignedLineText, Mode=OneWay}"
+                                Header="分配线路"
+                                IsReadOnly="True" />
                             <DataGridTextColumn
                                 Width="50"
-                                Binding="{Binding BalancingText}"
-                                Header="动平衡" />
+                                Binding="{Binding BalancingText, Mode=OneWay}"
+                                Header="动平衡"
+                                IsReadOnly="True" />
                             <DataGridTextColumn
                                 Width="250"
                                 Binding="{Binding Step}"
@@ -402,8 +411,9 @@
                                 Header="工序" />
                             <DataGridTextColumn
                                 Width="50"
-                                Binding="{Binding SkipBoringText}"
-                                Header="跳过镗" />
+                                Binding="{Binding SkipBoringText, Mode=OneWay}"
+                                Header="跳过镗"
+                                IsReadOnly="True" />
                             <!--<DataGridTextColumn
                                 Width="50"
                                 Binding="{Binding BoringProcess}"
