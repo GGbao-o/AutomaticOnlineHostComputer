@@ -107,6 +107,8 @@ public sealed class Line1RearFlowEngine : IDisposable
         public bool Idle => St == SkewState.Idle && Ok;
         /// <summary>最新轮询的CNC信号快照</summary>
         public bool RqData, RqLoad, RqUnload, Clamped;
+        /// <summary>对应斜床门开确认：Modbus10359或FANUC#1006原始值必须==1，尾座张开不能代替。</summary>
+        public bool DoorOpen;
         /// <summary>本轮CNC信号是否新鲜。轮询失败时禁止用旧RqData/RqUnload派发动作。</summary>
         public bool SignalFresh;
         /// <summary>状态轮询版本。超时/新一轮启动会递增, 防止旧轮询晚返回覆盖新状态。</summary>
@@ -460,8 +462,15 @@ public sealed class Line1RearFlowEngine : IDisposable
                 for (int i = 0; i < 5; i++)
                 {
                     var b = _beds[i];
-                    if (b == null || !b.Ok) { pollTasks[i] = Task.CompletedTask; continue; }
+                    if (b == null || !b.Ok)
+                    {
+                        // 本轮未读设备也属于许可未知；即使随后重连成功，仍须等新快照确认门开。
+                        if (b != null) { b.SignalFresh = false; b.DoorOpen = false; }
+                        pollTasks[i] = Task.CompletedTask;
+                        continue;
+                    }
                     b.SignalFresh = false; // 每轮先标无效, PollBed成功后再置true, 防止沿用上一轮请求信号。
+                    b.DoorOpen = false; // 本轮尚未读成功，不沿用旧门开许可。
                     if (Interlocked.CompareExchange(ref b.PollInFlight, 1, 0) != 0)
                     {
                         Interlocked.Increment(ref b.PollVersion);
@@ -751,12 +760,12 @@ public sealed class Line1RearFlowEngine : IDisposable
         {
             if (logDetails)
             {
-                Console.WriteLine("│   [上料候选] 无可用斜床(需同时满足:空闲+已连接+CNC请求数据)");
+                Console.WriteLine("│   [上料候选] 无可用斜床(需同时满足:空闲+已连接+有效快照+CNC请求数据+门开确认)");
                 for (int i = 0; i < 5; i++)
                 {
                     var b = _beds[i];
                     if (b == null) continue;
-                    Console.WriteLine($"│     {b.Code}: St={b.St} Ok={b.Ok} Fresh={b.SignalFresh} RqData={b.RqData} RqLoad={b.RqLoad} → {(IsReadyForLoad(b) ? "可用" : "不可用")}");
+                    Console.WriteLine($"│     {b.Code}: St={b.St} Ok={b.Ok} Fresh={b.SignalFresh} RqData={b.RqData} RqLoad={b.RqLoad} 门开确认={(b.SignalFresh ? YN(b.DoorOpen) : "未知")} → {(IsReadyForLoad(b) ? "可用" : "不可用")}");
                 }
             }
             return scan;
@@ -865,6 +874,14 @@ public sealed class Line1RearFlowEngine : IDisposable
                     Console.WriteLine($"│   {b.Code} {wp.IdentityText} 完工记录未写入job2, 本轮暂不下料, 下轮重试");
                     continue;
                 }
+            }
+
+            // 完工状态同步和job2导出仍在门判断前完成；门未开只跳过本床候选，不清板、不暂停。
+            // 此处仅消费本轮已提交的快照，不在候选扫描中额外读PLC或持锁等门。
+            if (!b.DoorOpen)
+            {
+                if (logDetails) Console.WriteLine($"│   [下料候选] {b.Code}门开未确认(要求原10359/#1006=1)，跳过本轮");
+                continue;
             }
 
             if (!await CanUnloadDestinationAcceptAsync(fds, wp, ct))
@@ -1055,7 +1072,8 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
     }
 
-    private static bool IsReadyForLoad(SkewCtx? b) => b != null && b.Idle && b.SignalFresh && b.RqData;
+    // 锁外候选和拿到后天车锁后的重扫共用此入口，门关床不进入版长匹配，不影响其它合格床。
+    private static bool IsReadyForLoad(SkewCtx? b) => b != null && b.Idle && b.SignalFresh && b.RqData && b.DoorOpen;
 
     // ═══════════════════════════════════════════════════════════════════
     private async Task PollBedWithCleanupAsync(SkewCtx b, CancellationTokenSource bedCts,
@@ -1074,8 +1092,9 @@ public sealed class Line1RearFlowEngine : IDisposable
     private async Task PollBed(SkewCtx b, CancellationToken ct, Line1RearDeviceStatus ds, int idx, long pollVersion)
     {
         string sg = "--", st = "?", fail = "本轮信号未刷新"; bool ok = false;
-        bool rqData = false, rqLoad = false, rqUnload = false, clamped = false;
+        bool rqData = false, rqLoad = false, rqUnload = false, clamped = false, doorOpen = false;
         b.SignalFresh = false;
+        b.DoorOpen = false;
         try
         {
             if (b.Code == "ST112")
@@ -1083,8 +1102,8 @@ public sealed class Line1RearFlowEngine : IDisposable
                 var snap = b.F!.LatestSnapshot;
                 if (snap.Connected)
                 {
-                    rqData = snap.RqData; rqLoad = snap.RqLoad; clamped = snap.Clamped; rqUnload = snap.RqUnload;
-                    sg = $"请求数据={YN(snap.RqData)} 请求上料={YN(snap.RqLoad)} 夹紧={YN(snap.Clamped)} 请求下料={YN(snap.RqUnload)} 张开={YN(snap.Opened)}";
+                    rqData = snap.RqData; rqLoad = snap.RqLoad; clamped = snap.Clamped; rqUnload = snap.RqUnload; doorOpen = snap.DoorOpen;
+                    sg = $"请求数据={YN(snap.RqData)} 请求上料={YN(snap.RqLoad)} 夹紧={YN(snap.Clamped)} 请求下料={YN(snap.RqUnload)} 张开={YN(snap.Opened)} 门开确认={YN(snap.DoorOpen)}";
                     if (snap.RqUnload) st = "请求下料"; else if (snap.RqLoad) st = "请求上料"; else if (snap.Clamped) st = "尾座顶紧"; else if (snap.RqData) st = "请求数据"; else st = "空闲";
                     ok = true;
                 }
@@ -1096,8 +1115,8 @@ public sealed class Line1RearFlowEngine : IDisposable
             else
             {
                 var s = await b.M!.ReadSignalsAsync(ct);
-                rqData = s.rqData; rqLoad = s.rqLoad; clamped = s.clamped; rqUnload = s.rqUnload;
-                sg = $"请求数据={YN(s.rqData)} 请求上料={YN(s.rqLoad)} 夹紧={YN(s.clamped)} 请求下料={YN(s.rqUnload)} 张开={YN(s.opened)}";
+                rqData = s.rqData; rqLoad = s.rqLoad; clamped = s.clamped; rqUnload = s.rqUnload; doorOpen = s.doorOpen;
+                sg = $"请求数据={YN(s.rqData)} 请求上料={YN(s.rqLoad)} 夹紧={YN(s.clamped)} 请求下料={YN(s.rqUnload)} 张开={YN(s.opened)} 门开确认={YN(s.doorOpen)}";
                 if (s.rqUnload) st = "请求下料"; else if (s.rqLoad) st = "请求上料"; else if (s.clamped) st = "尾座顶紧"; else if (s.rqData) st = "请求数据"; else st = "空闲";
                 ok = true;
             }
@@ -1112,6 +1131,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         if (ok)
         {
             b.RqData = rqData; b.RqLoad = rqLoad; b.Clamped = clamped; b.RqUnload = rqUnload;
+            b.DoorOpen = doorOpen; // 通过原PollVersion校验后一起提交，过期结果不能覆盖新门状态。
             if (clamped && b.St == SkewState.Idle) { b.St = SkewState.Machining; Console.WriteLine($"│   ⚡ {b.Code} 同步: CNC已夹紧 → Machining"); }
             else if (clamped && rqUnload && b.St == SkewState.Machining) { b.St = SkewState.WaitingUnload; Console.WriteLine($"│   ⚡ {b.Code} 同步: 请求下料 → WaitingUnload"); }
             else if (!clamped && rqUnload && b.St == SkewState.Idle) { b.St = SkewState.WaitingUnload; Console.WriteLine($"│   ⚡ {b.Code} 同步: 空闲+请求下料 → WaitingUnload"); }
@@ -1120,6 +1140,7 @@ public sealed class Line1RearFlowEngine : IDisposable
         else
         {
             b.RqData = b.RqLoad = b.RqUnload = b.Clamped = false;
+            b.DoorOpen = false;
         }
         // ── Wp 恢复标记: 引擎重启后CNC显示正在加工/等待下料但本地Wp=null → 需人工确认
         if ((b.St == SkewState.Machining || b.St == SkewState.WaitingUnload) && b.Wp == null)
@@ -1319,6 +1340,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             bed.St = SkewState.Idle;
             bed.RqData = bed.RqLoad = bed.RqUnload = bed.Clamped = false;
             bed.SignalFresh = false;
+            bed.DoorOpen = false;
             bed.CompletionExported = false;
             bed.WpRecoveryNeeded = false;
             bed.X11UnloadMissWarningShown = false;
@@ -2865,6 +2887,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 bed.St = SkewState.Idle;
                 bed.RqData = bed.RqLoad = bed.RqUnload = bed.Clamped = false;
                 bed.SignalFresh = false;
+                bed.DoorOpen = false;
                 bed.CompletionExported = false;
                 bed.WpRecoveryNeeded = false;
                 bed.X11UnloadMissWarningShown = false;
@@ -3415,6 +3438,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             bed.St = SkewState.Idle;
             bed.RqData = bed.RqLoad = bed.RqUnload = bed.Clamped = false;
             bed.SignalFresh = false;
+            bed.DoorOpen = false;
             bed.CompletionExported = false;
             bed.WpRecoveryNeeded = false;
             bed.X11UnloadMissWarningShown = false;

@@ -18,6 +18,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public bool Clamped { get; set; }
         public bool RqUnload { get; set; }
         public bool Opened { get; set; }
+        /// <summary>#1006原始值严格等于1；与#1005尾座张开独立，错误快照默认false。</summary>
+        public bool DoorOpen { get; set; }
         public string? Error { get; set; }
         public DateTime CapturedAt { get; set; } = DateTime.MinValue;
     }
@@ -132,7 +134,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         }
 
         /// <summary>
-        /// Worker同时承担两项工作：优先处理业务命令，并在空隙中按500ms刷新#1001~#1005快照。
+        /// Worker同时承担两项工作：优先处理业务命令，并在空隙中按500ms刷新#1001~#1006快照。
         /// 离线设备的连接阻塞只发生在自己的Worker，不占用UI线程，也不会拖住其他斜床Worker。
         /// </summary>
         private void WorkerLoop(CancellationToken ct)
@@ -214,6 +216,11 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 double rqUnload = _sdk.GetMacro(FanucSkewBedAddress.RequestUnload);
                 ct.ThrowIfCancellationRequested();
                 double opened = _sdk.GetMacro(FanucSkewBedAddress.TailstockOpened);
+                ct.ThrowIfCancellationRequested();
+                // 仍在本设备原Worker上读取；六个信号全部成功后才发布同一份快照。
+                // 不能把#1005尾座张开当作门开，也不能把门开非0值一律当作1。
+                double doorOpenRaw = _sdk.GetMacro(FanucSkewBedAddress.AutoDoorOpen);
+                ct.ThrowIfCancellationRequested();
 
                 lock (_snapshotLock)
                 {
@@ -225,6 +232,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                         Clamped = Math.Abs(clamped) > 0.01,
                         RqUnload = Math.Abs(rqUnload) > 0.01,
                         Opened = Math.Abs(opened) > 0.01,
+                        DoorOpen = doorOpenRaw == 1.0,
                         CapturedAt = DateTime.UtcNow
                     };
                 }
@@ -250,6 +258,7 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 _latestSnapshot = new FanucSignalSnapshot
                 {
                     Connected = false,
+                    DoorOpen = false, // 未读全/读取失败不能沿用上一份成功快照的门开=true。
                     Error = error,
                     CapturedAt = DateTime.UtcNow
                 };
@@ -473,7 +482,8 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             }, $"SafeSet #{addr}");
         }
 
-        public Task<(bool rqData, bool rqLoad, bool clamped, bool rqUnload, bool opened)> ReadSignalsAsync(CancellationToken ct = default)
+        /// <summary>显式读取同样返回六个信号，依旧由SafeCallAsync派到本设备Worker执行。</summary>
+        public Task<(bool rqData, bool rqLoad, bool clamped, bool rqUnload, bool opened, bool doorOpen)> ReadSignalsAsync(CancellationToken ct = default)
         {
             return SafeCallAsync(() =>
             {
@@ -486,8 +496,10 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
                 bool rqUnload = Math.Abs(_sdk.GetMacro(FanucSkewBedAddress.RequestUnload)) > 0.01;
                 ct.ThrowIfCancellationRequested();
                 bool opened = Math.Abs(_sdk.GetMacro(FanucSkewBedAddress.TailstockOpened)) > 0.01;
-                Console.WriteLine($"[FANUC-SDK] 快照 #{FanucSkewBedAddress.RequestData}={rqData} #{FanucSkewBedAddress.RequestLoad}={rqLoad} #{FanucSkewBedAddress.TailstockClamped}={clamped} #{FanucSkewBedAddress.RequestUnload}={rqUnload} #{FanucSkewBedAddress.TailstockOpened}={opened}");
-                return (rqData, rqLoad, clamped, rqUnload, opened);
+                ct.ThrowIfCancellationRequested();
+                bool doorOpen = _sdk.GetMacro(FanucSkewBedAddress.AutoDoorOpen) == 1.0;
+                Console.WriteLine($"[FANUC-SDK] 快照 #{FanucSkewBedAddress.RequestData}={rqData} #{FanucSkewBedAddress.RequestLoad}={rqLoad} #{FanucSkewBedAddress.TailstockClamped}={clamped} #{FanucSkewBedAddress.RequestUnload}={rqUnload} #{FanucSkewBedAddress.TailstockOpened}={opened} 门开确认(原#1006=1)={doorOpen}");
+                return (rqData, rqLoad, clamped, rqUnload, opened, doorOpen);
             }, "读斜床信号快照", ct, maxAttempts: 1);
         }
 

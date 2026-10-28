@@ -56,7 +56,9 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
             => SafeCallAsync(token => ReadBoolRawAsync(ModbusSkewBedAddress.TailstockOpened, token), "读10358尾座张开", ct);
 
         public Task<bool> IsDoorOpenAsync(CancellationToken ct = default)
-            => SafeCallAsync(token => ReadBoolRawAsync(ModbusSkewBedAddress.DoorOpen, token), "读10359门开", ct);
+            // 门开准入必须是原始Word=1，不能复用其它信号的“非0即true”解释。
+            => SafeCallAsync(async token => (await _client.ReadIntAsync(ModbusSkewBedAddress.DoorOpen, token)) == 1,
+                "读10359门开(严格等于1)", ct);
 
         public Task<bool> IsTool1LifeEndAsync(CancellationToken ct = default)
             => SafeCallAsync(token => ReadBoolRawAsync(ModbusSkewBedAddress.Tool1LifeEnd, token), "读10360刀具1寿命", ct);
@@ -82,30 +84,36 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public Task<double> GetMachiningTimeAsync(CancellationToken ct = default)
             => SafeCallAsync(token => ReadFloatRawAsync(ModbusSkewBedAddress.MachiningTime, token), "读10362加工时间", ct);
 
-        /// <summary>一次读5个关键信号: 请求数据/请求上料/夹紧/请求下料/张开。</summary>
-        public async Task<(bool rqData, bool rqLoad, bool clamped, bool rqUnload, bool opened)> ReadSignalsAsync(CancellationToken ct = default)
+        /// <summary>
+        /// 一次FC03读取请求数据/请求上料/夹紧/请求下料/尾座张开及门开确认。
+        /// 门开10359与尾座张开10358独立；只有门开严格==1，前五个信号沿用原非0语义。
+        /// </summary>
+        public async Task<(bool rqData, bool rqLoad, bool clamped, bool rqUnload, bool opened, bool doorOpen)> ReadSignalsAsync(CancellationToken ct = default)
         {
             return await SafeCallAsync(async token =>
             {
                 const int start = ModbusSkewBedAddress.RequestData;        // 10352
-                const int end = ModbusSkewBedAddress.TailstockOpened;      // 10358
+                const int end = ModbusSkewBedAddress.DoorOpen;             // 10359，仍为一次连续块读。
                 var r = await _client.ReadAsync(start, end - start + 1, token);
 
-                bool At(int address)
+                int ValueAt(int address)
                 {
                     int index = address - start;
                     if ((uint)index >= (uint)r.IntValues.Length)
                         throw new InvalidOperationException($"斜床信号快照缺少地址{address}。");
-                    return r.IntValues[index] != 0;
+                    return r.IntValues[index];
                 }
+
+                bool At(int address) => ValueAt(address) != 0;
 
                 return (
                     At(ModbusSkewBedAddress.RequestData),
                     At(ModbusSkewBedAddress.RequestLoad),
                     At(ModbusSkewBedAddress.TailstockClamped),
                     At(ModbusSkewBedAddress.RequestUnload),
-                    At(ModbusSkewBedAddress.TailstockOpened));
-            }, "读10352~10358斜床信号快照", ct);
+                    At(ModbusSkewBedAddress.TailstockOpened),
+                    ValueAt(ModbusSkewBedAddress.DoorOpen) == 1);
+            }, "读10352~10359斜床信号快照(含门开)", ct);
         }
 
         // ─── 写入加工参数 ────────────────────────────────────────────
