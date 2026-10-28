@@ -794,6 +794,7 @@ public sealed class GrindingFlowEngine : IDisposable
     /// </summary>
     private async Task<WorkpieceCache?> ResolveDispatchWorkpieceLengthAsync(WorkpieceCache wp, CancellationToken ct)
     {
+        //有工件长度 说明是不需要做动平衡的板  直接返回工件信息
         if (wp.Length > 0) return wp;
 
         if (_mc65?.IsConnected != true)
@@ -802,9 +803,10 @@ public sealed class GrindingFlowEngine : IDisposable
                 Console.WriteLine("[GrindingEngine] ⏳ M700来源且FIFO长度为0，但MC65未连接，不能读取D200进行研磨机长度匹配");
             return null;
         }
-
+        //这种是做了动平衡 没有长度
         try
         {
+            //派发前读取d200长度
             var d200 = await _mc65.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, ct);
             double length = d200.IntValues.Length > 0 ? d200.IntValues[0] : 0;
             // 原380下限改为共享配置；不合格仍只保留队头等待，不暂停、不丢弃、不出队。
@@ -1814,7 +1816,7 @@ public sealed class GrindingFlowEngine : IDisposable
             if (wp.Diameter <= 0)
                 throw new InvalidOperationException($"工件直径无效 d={wp.Diameter}, 不能计算取放料Z");
             //工件长度=0时候 这个工件是从动平衡过来的
-            if (wp.Length == 0)
+            if (wp.Length == 0) 
             {
                 if (_mc65?.IsConnected != true)
                     throw new InvalidOperationException("工件长度为0且MC65未连接, 不能从D200补长");
@@ -1822,6 +1824,7 @@ public sealed class GrindingFlowEngine : IDisposable
                 // M3放板时允许Length=0, 但研磨参数下发前必须用2号位D200补到有效长度。
                 var d200 = await _mc65.ReadAsync(MitsubishiMcClient.DeviceD, 200, 1, ct);
                 double len = d200.IntValues.Length > 0 ? d200.IntValues[0] : 0;
+                //长度<=0是无效的
                 if (len <= 0)
                     throw new InvalidOperationException($"D200测长无效 len={len}, 暂停避免向研磨机发送长度0");
                 //重新赋值工件信息

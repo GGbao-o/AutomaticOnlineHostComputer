@@ -1666,6 +1666,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                                 Interlocked.Exchange(ref _frontCraneActive, 1);
                                 try
                                 {
+                                    //前天车流程
                                     await ProcessCraneFrontAsync(craneWp, ct);
                                 }
                                 finally
@@ -2253,7 +2254,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
             return removed;
         }
     }
-
+    //前天车流程
     private async Task ProcessCraneFrontAsync(WorkpieceCache wp, CancellationToken ct = default)
     {
         int pickupStableDelayMs = _cfg.Grinding.X11StableDelayMs;
@@ -2427,6 +2428,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 await Task.Delay(500, ct);
             }
             Console.WriteLine("[Line1Front] [前天车] ③ 获取ZoneMT(打号机↔中转架碰撞区)...");
+            //拿锁
             // ZoneMT准入：拿锁后先复核三个架位；全满释放重抢，有空位但暂停则持锁无限等启动。
             // 获取和读取都放在原try/finally内，通信/取消异常仍由原收尾释放实际持有的锁。
             bool zoneMtLocked = false;
@@ -2446,6 +2448,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
 
                     // 判断1：拿锁后实时读取本线M811/M812/M813，不沿用锁外预检结果。
                     var lockedRackStatus = await _rackSvc!.ReadAllStatusAsync(ct);
+                    //三个中转架都有板
                     if (lockedRackStatus.Station1HasPlate && lockedRackStatus.Station2HasPlate && lockedRackStatus.Station3HasPlate)
                     {
                         _safety.MarkerTransferCollisionLock.Release();
@@ -2462,7 +2465,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                         }
                         continue;
                     }
-
+                    //下面是中转架有空位了 判断线路是否暂停
                     // 判断2：有空位后再看本引擎volatile暂停位。暂停时保留当前板、动作及ZoneMT。
                     // 按现场要求没有业务超时；启动后直接继续，不新增恢复后的空位复核或回队。
                     if (_paused)
@@ -2474,6 +2477,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     }
                     break;
                 }
+                //已经拿到锁了   这里可能还会加条件
+                
+                
                 // 1号前天车进入打号前，已完成空位/暂停判断且持有ZoneMT。
                 // 实时读2号实际X>=配置阈值才继续；不满足持锁无限等，不回队、不丢板、不发运动。
                 // 取消或读取失败仍进入本层原catch/finally，避免把未知坐标当作已退开。
@@ -2597,6 +2603,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
         action.SetTarget("ST107", "进入打号机放料/取回交接阶段");
         action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(mxOff, myOff, safeZ), "XY到ST107打号机上方");
         action.MarkCommandSent();
+        //天车移动
         await crane.MoveAbsoluteAsync(mxOff, myOff, -1, ct: ct);
         action.Confirm(new FlowActionPosition(mxOff, myOff, safeZ), "ST107目标XY命令成功返回");
         action.BeginStep(FlowActionStep.FineTuneTarget, new FlowActionPosition(mxOff, myOff, safeZ), "ST107放料前XY微调");

@@ -53,14 +53,14 @@
                 Click="MenuItem_Click"
                 Header="设备状态大屏(常用)"
                 Tag="flowStatus" />
-            <MenuItem
+            <!--<MenuItem
                 Click="MenuItem_Click"
                 Header="运行诊断"
                 Tag="runtimeDiagnostics" />
             <MenuItem
                 Click="MenuItem_Click"
                 Header="在制工件"
-                Tag="inProcessWorkpieces" />
+                Tag="inProcessWorkpieces" />-->
             <MenuItem
                 x:Name="AttentionMonitorMenuItem"
                 Click="MenuItem_Click"

@@ -5,8 +5,8 @@
     Title="应急处理中心"
     Width="900"
     Height="680"
-    WindowStartupLocation="CenterOwner"
-    ResizeMode="CanResize">
+    ResizeMode="CanResize"
+    WindowStartupLocation="CenterOwner">
     <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -22,8 +22,8 @@
             <TextBlock
                 Margin="0,6,0,0"
                 Foreground="#B91C1C"
-                TextWrapping="Wrap"
-                Text="用于现场故障后的人工介入：请先人工确认磁铁、工件、天车/机械手已经处理到安全状态，再清设备参数、上位机缓存和明确持有的软件锁。" />
+                Text="用于现场故障后的人工介入：请先人工确认磁铁、工件、天车/机械手已经处理到安全状态，再清设备参数、上位机缓存和明确持有的软件锁。"
+                TextWrapping="Wrap" />
         </StackPanel>
 
         <TabControl Grid.Row="1">
@@ -35,22 +35,35 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <WrapPanel Margin="0,0,0,10" VerticalAlignment="Center">
-                        <TextBlock Margin="0,0,8,0" VerticalAlignment="Center" Text="线体" />
-                        <ComboBox x:Name="FrontLineBox" Width="120" SelectionChanged="Front_SelectionChanged">
-                            <ComboBoxItem Content="1号线" Tag="1" IsSelected="True" />
+                        <TextBlock
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center"
+                            Text="线体" />
+                        <ComboBox
+                            x:Name="FrontLineBox"
+                            Width="120"
+                            SelectionChanged="Front_SelectionChanged">
+                            <ComboBoxItem
+                                Content="1号线"
+                                IsSelected="True"
+                                Tag="1" />
                             <ComboBoxItem Content="2号线" Tag="2" />
                         </ComboBox>
-                        <Button Margin="18,0,0,0" Width="100" Content="刷新实时诊断" Click="RefreshFront_Click" />
+                        <Button
+                            Width="100"
+                            Margin="18,0,0,0"
+                            Click="RefreshFront_Click"
+                            Content="刷新实时诊断" />
                     </WrapPanel>
                     <TextBox
                         x:Name="FrontInfoBox"
                         Grid.Row="1"
+                        AcceptsReturn="True"
                         FontFamily="Consolas"
                         IsReadOnly="True"
                         Text="正在读取实时诊断..."
                         TextWrapping="Wrap"
-                        VerticalScrollBarVisibility="Auto"
-                        AcceptsReturn="True" />
+                        VerticalScrollBarVisibility="Auto" />
                     <StackPanel
                         Grid.Row="2"
                         Margin="0,12,0,0"
@@ -60,13 +73,13 @@
                             x:Name="ContinueFrontButton"
                             Width="230"
                             Margin="0,0,10,0"
-                            Content="板已在货叉，确认安全后继续"
-                            Click="ContinueFront_Click" />
+                            Click="ContinueFront_Click"
+                            Content="板已在货叉，确认安全后继续" />
                         <Button
                             x:Name="DiscardFrontButton"
                             Width="200"
-                            Content="丢弃当前工件并回Idle"
-                            Click="DiscardFront_Click" />
+                            Click="DiscardFront_Click"
+                            Content="丢弃当前工件并回Idle" />
                     </StackPanel>
                 </Grid>
             </TabItem>
@@ -79,39 +92,68 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <WrapPanel Margin="0,0,0,10" VerticalAlignment="Center">
-                        <TextBlock Margin="0,0,8,0" VerticalAlignment="Center" Text="线体" />
-                        <ComboBox x:Name="SkewLineBox" Width="120" SelectionChanged="Skew_SelectionChanged">
-                            <ComboBoxItem Content="1号线" Tag="1" IsSelected="True" />
+                        <TextBlock
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center"
+                            Text="线体" />
+                        <ComboBox
+                            x:Name="SkewLineBox"
+                            Width="120"
+                            SelectionChanged="Skew_SelectionChanged">
+                            <ComboBoxItem
+                                Content="1号线"
+                                IsSelected="True"
+                                Tag="1" />
                             <ComboBoxItem Content="2号线" Tag="2" />
                         </ComboBox>
-                        <TextBlock Margin="18,0,8,0" VerticalAlignment="Center" Text="斜床" />
-                        <ComboBox x:Name="SkewBedBox" Width="150" SelectionChanged="Skew_SelectionChanged" />
-                        <Button Margin="18,0,0,0" Width="90" Content="刷新诊断" Click="RefreshSkew_Click" />
-                        <TextBlock Margin="18,0,8,0" VerticalAlignment="Center" Text="来源结案" />
+                        <TextBlock
+                            Margin="18,0,8,0"
+                            VerticalAlignment="Center"
+                            Text="斜床" />
+                        <ComboBox
+                            x:Name="SkewBedBox"
+                            Width="150"
+                            SelectionChanged="Skew_SelectionChanged" />
+                        <Button
+                            Width="90"
+                            Margin="18,0,0,0"
+                            Click="RefreshSkew_Click"
+                            Content="刷新诊断" />
+                        <TextBlock
+                            Margin="18,0,8,0"
+                            VerticalAlignment="Center"
+                            Text="来源结案" />
                         <ComboBox x:Name="SourceRackBox" Width="90" />
                         <ComboBox x:Name="SourceResolutionBox" Width="170">
-                            <ComboBoxItem Content="仍在来源位" Tag="StillAtSource" IsSelected="True" />
+                            <ComboBoxItem
+                                Content="仍在来源位"
+                                IsSelected="True"
+                                Tag="StillAtSource" />
                             <ComboBoxItem Content="确认天车持件" Tag="OnCarrier" />
                             <ComboBoxItem Content="已在目标待交接" Tag="AtTargetPendingHandoff" />
                             <ComboBoxItem Content="已人工移走" Tag="RemovedManually" />
                         </ComboBox>
-                        <Button Margin="8,0,0,0" Width="130" Content="提交来源结案" Click="ResolveSource_Click" />
+                        <Button
+                            Width="130"
+                            Margin="8,0,0,0"
+                            Click="ResolveSource_Click"
+                            Content="提交来源结案" />
                     </WrapPanel>
                     <TextBox
                         x:Name="SkewInfoBox"
                         Grid.Row="1"
+                        AcceptsReturn="True"
                         IsReadOnly="True"
                         TextWrapping="Wrap"
-                        VerticalScrollBarVisibility="Auto"
-                        AcceptsReturn="True" />
+                        VerticalScrollBarVisibility="Auto" />
                     <Button
                         x:Name="ClearSkewButton"
                         Grid.Row="2"
+                        Width="150"
                         Margin="0,12,0,0"
                         HorizontalAlignment="Right"
-                        Width="150"
-                        Content="执行斜床应急"
-                        Click="ClearSkew_Click" />
+                        Click="ClearSkew_Click"
+                        Content="执行斜床应急" />
                 </Grid>
             </TabItem>
 
@@ -123,32 +165,45 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <WrapPanel Margin="0,0,0,10" VerticalAlignment="Center">
-                        <TextBlock Margin="0,0,8,0" VerticalAlignment="Center" Text="位置" />
-                        <ComboBox x:Name="BalancePositionBox" Width="240" SelectionChanged="Balance_SelectionChanged">
-                            <ComboBoxItem Content="M817 - 1号线动平衡下料架1" Tag="M817" IsSelected="True" />
+                        <TextBlock
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center"
+                            Text="位置" />
+                        <ComboBox
+                            x:Name="BalancePositionBox"
+                            Width="240"
+                            SelectionChanged="Balance_SelectionChanged">
+                            <ComboBoxItem
+                                Content="M817 - 1号线动平衡下料架1"
+                                IsSelected="True"
+                                Tag="M817" />
                             <ComboBoxItem Content="M818 - 2号线动平衡下料架1" Tag="M818" />
                             <ComboBoxItem Content="M821 - 2号线短板中转位" Tag="M821" />
                             <ComboBoxItem Content="M720 - 研磨上料架1号位" Tag="M720" />
                             <ComboBoxItem Content="M710 - 动平衡料架1" Tag="M710" />
                             <ComboBoxItem Content="M700 - 动平衡料架2" Tag="M700" />
                         </ComboBox>
-                        <Button Margin="18,0,0,0" Width="90" Content="刷新诊断" Click="RefreshBalance_Click" />
+                        <Button
+                            Width="90"
+                            Margin="18,0,0,0"
+                            Click="RefreshBalance_Click"
+                            Content="刷新诊断" />
                     </WrapPanel>
                     <TextBox
                         x:Name="BalanceInfoBox"
                         Grid.Row="1"
+                        AcceptsReturn="True"
                         IsReadOnly="True"
                         TextWrapping="Wrap"
-                        VerticalScrollBarVisibility="Auto"
-                        AcceptsReturn="True" />
+                        VerticalScrollBarVisibility="Auto" />
                     <Button
                         x:Name="ClearBalanceButton"
                         Grid.Row="2"
+                        Width="170"
                         Margin="0,12,0,0"
                         HorizontalAlignment="Right"
-                        Width="170"
-                        Content="执行动平衡应急"
-                        Click="ClearBalance_Click" />
+                        Click="ClearBalance_Click"
+                        Content="执行动平衡应急" />
                 </Grid>
             </TabItem>
 
@@ -160,31 +215,44 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <WrapPanel Margin="0,0,0,10" VerticalAlignment="Center">
-                        <TextBlock Margin="0,0,8,0" VerticalAlignment="Center" Text="目标" />
-                        <ComboBox x:Name="GrindingTargetBox" Width="240" SelectionChanged="Grinding_SelectionChanged">
-                            <ComboBoxItem Content="ST709 - 研磨上料架3号位FIFO队头" Tag="ST709" IsSelected="True" />
+                        <TextBlock
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center"
+                            Text="目标" />
+                        <ComboBox
+                            x:Name="GrindingTargetBox"
+                            Width="240"
+                            SelectionChanged="Grinding_SelectionChanged">
+                            <ComboBoxItem
+                                Content="ST709 - 研磨上料架3号位FIFO队头"
+                                IsSelected="True"
+                                Tag="ST709" />
                             <ComboBoxItem Content="ST701 - 研磨机1(新代)" Tag="ST701" />
                             <ComboBoxItem Content="ST702 - 研磨机2(新代)" Tag="ST702" />
                             <ComboBoxItem Content="ST703 - 研磨机3(西门子)" Tag="ST703" />
                             <ComboBoxItem Content="ST704 - 研磨机4(西门子)" Tag="ST704" />
                         </ComboBox>
-                        <Button Margin="18,0,0,0" Width="90" Content="刷新诊断" Click="RefreshGrinding_Click" />
+                        <Button
+                            Width="90"
+                            Margin="18,0,0,0"
+                            Click="RefreshGrinding_Click"
+                            Content="刷新诊断" />
                     </WrapPanel>
                     <TextBox
                         x:Name="GrindingInfoBox"
                         Grid.Row="1"
+                        AcceptsReturn="True"
                         IsReadOnly="True"
                         TextWrapping="Wrap"
-                        VerticalScrollBarVisibility="Auto"
-                        AcceptsReturn="True" />
+                        VerticalScrollBarVisibility="Auto" />
                     <Button
                         x:Name="ClearGrindingButton"
                         Grid.Row="2"
+                        Width="160"
                         Margin="0,12,0,0"
                         HorizontalAlignment="Right"
-                        Width="160"
-                        Content="执行研磨应急"
-                        Click="ClearGrinding_Click" />
+                        Click="ClearGrinding_Click"
+                        Content="执行研磨应急" />
                 </Grid>
             </TabItem>
 
@@ -196,33 +264,59 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <DockPanel Margin="0,0,0,10">
-                        <TextBlock VerticalAlignment="Center" Foreground="#B91C1C"
-                                   Text="仅显示已暂停且必须人工确认的搬运动作；不会自动移动设备、释放锁或清理缓存。" />
-                        <Button DockPanel.Dock="Right" Width="110" Content="刷新账本" Click="RefreshActionLedger_Click" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Foreground="#B91C1C"
+                            Text="仅显示已暂停且必须人工确认的搬运动作；不会自动移动设备、释放锁或清理缓存。" />
+                        <Button
+                            Width="110"
+                            Click="RefreshActionLedger_Click"
+                            Content="刷新账本"
+                            DockPanel.Dock="Right" />
                     </DockPanel>
                     <WrapPanel Grid.Row="1" Margin="0,0,0,10">
-                        <TextBlock VerticalAlignment="Center" Margin="0,0,8,0" Text="动作账本结案" />
+                        <TextBlock
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center"
+                            Text="动作账本结案" />
                         <ComboBox x:Name="GrindingActionOperationBox" Width="240" />
-                        <ComboBox x:Name="GrindingActionResolutionBox" Width="150" Margin="8,0,0,0">
-                            <ComboBoxItem Content="仍在来源位" Tag="StillAtSource" IsSelected="True" />
+                        <ComboBox
+                            x:Name="GrindingActionResolutionBox"
+                            Width="150"
+                            Margin="8,0,0,0">
+                            <ComboBoxItem
+                                Content="仍在来源位"
+                                IsSelected="True"
+                                Tag="StillAtSource" />
                             <ComboBoxItem Content="确认天车持件" Tag="OnCarrier" />
                             <ComboBoxItem Content="已在目标待交接" Tag="AtTargetPendingHandoff" />
                             <ComboBoxItem Content="已人工移走" Tag="RemovedManually" />
                         </ComboBox>
-                        <Button Width="130" Margin="8,0,0,0" Content="提交动作结案" Click="ResolveGrindingAction_Click" />
+                        <Button
+                            Width="130"
+                            Margin="8,0,0,0"
+                            Click="ResolveGrindingAction_Click"
+                            Content="提交动作结案" />
                     </WrapPanel>
-                    <TextBox x:Name="ActionLedgerInfoBox" Grid.Row="2" FontFamily="Consolas" IsReadOnly="True"
-                             TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AcceptsReturn="True" />
+                    <TextBox
+                        x:Name="ActionLedgerInfoBox"
+                        Grid.Row="2"
+                        AcceptsReturn="True"
+                        FontFamily="Consolas"
+                        IsReadOnly="True"
+                        TextWrapping="Wrap"
+                        VerticalScrollBarVisibility="Auto" />
                 </Grid>
             </TabItem>
+
         </TabControl>
 
         <Button
             Grid.Row="2"
-            Margin="0,14,0,0"
             Width="90"
+            Margin="0,14,0,0"
             HorizontalAlignment="Right"
-            Content="关闭"
-            Click="Close_Click" />
+            Click="Close_Click"
+            Content="关闭" />
     </Grid>
 </Window>

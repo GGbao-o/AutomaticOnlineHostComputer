@@ -1588,6 +1588,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             action.RegisterLock("ZoneTS");
             sharedLocked = bed.Code == "ST108";
             Console.WriteLine("│ ZoneTS已获取 ✓，当前可进入中转架取料");
+            //这里已经拿到锁了
 
             // 2号后天车本趟上料已拿齐ZoneMT+ZoneTS，尚未开始中转架取料运动。
             // 实时读1号实际X<=配置阈值；不满足保留这两把区域锁及本板预约，人工移车后再放行。
