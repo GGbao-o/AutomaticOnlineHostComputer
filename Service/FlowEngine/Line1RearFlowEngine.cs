@@ -2120,6 +2120,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             throw;
         }
         Console.WriteLine("│ [握手] ⑥ 清上一步信号 → 写天车上料到位 → 等CNC夹紧(F3=1)...");
+        //法兰克系统写窗  写1101=0
         if (isF) bed.F!.SafeSetMacro(1101, 0); // 清#1101
         else { 
             //写10374=0
@@ -2165,11 +2166,14 @@ public sealed class Line1RearFlowEngine : IDisposable
         loadState.ZMayBeDown = false;
         loadState.ZSafeAfterPlace = true;
         Console.WriteLine("│ [握手] ⑧ 清上一步信号 → 写天车上料完成,CNC启动加工");
+        //法兰克写窗 清1102
         if (isF) bed.F!.SafeSetMacro(1102, 0); // 清#1102
-        else await bed.M!.ClearTailstockClampAsync(ct); // 清10371=0
+        //这一行注释掉  10-28注释的 今洲写窗上料完成不需要清理远程尾做顶紧信号 10371
+        // else await bed.M!.ClearTailstockClampAsync(ct); // 清10371=0
         operationalTracker.BeginMonitorStep(OperationalMonitorStepKind.DownstreamNotification, $"{bed.Code}CNC上料完成", "CNC上料完成通知调用已开始，结果未知");
         action.BeginStep(FlowActionStep.NotifyDownstream, new FlowActionPosition(bx + _ox, yAbs, sz), "CNC上料完成通知");
         action.MarkCommandSent();
+        //斜床远程启动
         if (!isF) await bed.M!.RemoteStartAsync(ct); else await bed.F!.SetCraneLoadDoneAsync(ct);
         action.Confirm(new FlowActionPosition(bx + _ox, yAbs, sz), "CNC上料完成通知成功返回");
         operationalTracker.CompleteMonitorStep(OperationalMonitorStepKind.DownstreamNotification, $"{bed.Code}CNC上料完成", "CNC上料完成通知成功返回");
@@ -2313,6 +2317,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             //先移动xy   移动到xy指定位置
             action.BeginStep(FlowActionStep.MoveXYToSource, new FlowActionPosition(bx + _ox, yPick, 0), "XY到斜床取料位");
             action.MarkCommandSent();
+            //直接移动到斜床二次偏移位置
             await cr.MoveAbsoluteAsync(bx + _ox, yPick, -1, ct: ct);
             action.Confirm(new FlowActionPosition(bx + _ox, yPick, 0), "斜床取料位XY已到位");
             //进行微调
@@ -2352,7 +2357,10 @@ public sealed class Line1RearFlowEngine : IDisposable
             if (isF) bed.F!.SafeSetMacro(1103, 0); // 清#1103
             else
             {
+                //今洲斜床操作：
+                //远程启动 10372=0
                 await bed.M!.ClearRemoteStartAsync(ct);
+                //尾做顶紧信号 10371=0
                 await bed.M!.ClearTailstockClampAsync(ct);
             } // 清10372=0, 清10371=0(防夹紧残留)
 
@@ -2363,6 +2371,7 @@ public sealed class Line1RearFlowEngine : IDisposable
             //y回数据库坐标   z升安全高度
             action.BeginStep(FlowActionStep.MoveXYToTarget, new FlowActionPosition(bx + _ox, by + _oy, unlz), "斜床取料后Y回数据库安全位置");
             action.MarkCommandSent();
+            //回斜床中心位置
             await cr.MoveAbsoluteAsync(-1, by + _oy, -1, ct: ct);
             action.Confirm(new FlowActionPosition(bx + _ox, by + _oy, unlz), "斜床取料后Y安全位置到位");
             //z升安全高度
@@ -3263,7 +3272,9 @@ public sealed class Line1RearFlowEngine : IDisposable
             ct.ThrowIfCancellationRequested();
             try
             {
+                //写远程尾做张开=1
                 await bed.M!.OpenTailstockAsync(ct);
+                //读尾做张开到最大
                 if (await bed.M!.IsTailstockOpenedAsync(ct))
                 {
                     Console.WriteLine($"│   ✓ 信号[尾座张开]已就绪(等待{waited}ms, 通信恢复{recoveries}次)");

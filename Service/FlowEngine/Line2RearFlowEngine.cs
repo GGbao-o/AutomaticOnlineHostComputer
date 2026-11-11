@@ -683,7 +683,7 @@ public sealed class Line2RearFlowEngine : IDisposable
         _ => 99
     };
 
-    // ═════════判断斜床可以上料 空闲+已连接+请求数据══════════════════════════════════════════════════════════
+    // ═════════判断斜床可以上料 空闲+已连接+请求数据  加了bed.wp==null══════════════════════════════════════════════════════════
     private List<SkewCtx> GetReadyBedsByPriority()
     {
         var result = new List<SkewCtx>(5);
@@ -1737,8 +1737,10 @@ public sealed class Line2RearFlowEngine : IDisposable
             double doorOpenValue;
             try
             {
+                //!读取斜床门开信号
                 doorOpenValue = await bed.F!.ReadDoorOpenValueAsync(ct);
             }
+            //! 斜床门信号不对 直接抛异常
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 throw new InvalidOperationException($"{bed.Code}上料微调后读取门开 {doorAddress} 失败，无法确认门开：{ex.Message}", ex);
