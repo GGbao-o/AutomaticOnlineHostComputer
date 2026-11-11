@@ -55,10 +55,12 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public Task<bool> IsTailstockOpenedAsync(CancellationToken ct = default)
             => SafeCallAsync(token => ReadBoolRawAsync(ModbusSkewBedAddress.TailstockOpened, token), "读10358尾座张开", ct);
 
-        public Task<bool> IsDoorOpenAsync(CancellationToken ct = default)
-            // 门开准入必须是原始Word=1，不能复用其它信号的“非0即true”解释。
-            => SafeCallAsync(async token => (await _client.ReadIntAsync(ModbusSkewBedAddress.DoorOpen, token)) == 1,
-                "读10359门开(严格等于1)", ct);
+        public async Task<bool> IsDoorOpenAsync(CancellationToken ct = default)
+            => await ReadDoorOpenValueAsync(ct) == 1;
+
+        /// <summary>实时单读10359。保留原始Word，便于到位复核失败时报告实际读值。</summary>
+        internal Task<int> ReadDoorOpenValueAsync(CancellationToken ct = default)
+            => SafeCallAsync(token => _client.ReadIntAsync(ModbusSkewBedAddress.DoorOpen, token), "读10359门开", ct);
 
         public Task<bool> IsTool1LifeEndAsync(CancellationToken ct = default)
             => SafeCallAsync(token => ReadBoolRawAsync(ModbusSkewBedAddress.Tool1LifeEnd, token), "读10360刀具1寿命", ct);

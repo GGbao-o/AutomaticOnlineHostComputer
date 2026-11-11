@@ -35,6 +35,28 @@ public sealed class SkewDoorCandidateContractTests
     [Theory]
     [InlineData(typeof(Line1RearFlowEngine))]
     [InlineData(typeof(Line2RearFlowEngine))]
+    public void Idle_bed_with_retained_workpiece_is_skipped_until_its_memory_is_reset(Type type)
+    {
+        using var fixture = new RearFixture(type);
+        var oldWorkpiece = new WorkpieceCache { PlateNo = "OLD-PLATE", Sequence = "1" };
+        fixture.Set(fixture.Bed, "Wp", oldWorkpiece);
+        fixture.Set(fixture.Bed, "DoorOpen", true);
+        object other = fixture.AddBed(1, "OTHER-BED");
+        fixture.Set(other, "DoorOpen", true);
+
+        var ready = (IList)fixture.Invoke("GetReadyBedsByPriority")!;
+        Assert.Same(other, Assert.Single(ready.Cast<object>()));
+        Assert.Equal(oldWorkpiece, fixture.Get(fixture.Bed, "Wp"));
+        Assert.False((bool)fixture.GetEngine("_paused")!);
+
+        fixture.Invoke("ResetSkewMemoryState", fixture.Code);
+        Assert.Null(fixture.Get(fixture.Bed, "Wp"));
+        Assert.Contains(fixture.Bed, ((IList)fixture.Invoke("GetReadyBedsByPriority")!).Cast<object>());
+    }
+
+    [Theory]
+    [InlineData(typeof(Line1RearFlowEngine))]
+    [InlineData(typeof(Line2RearFlowEngine))]
     public async Task Closed_door_preserves_workpiece_and_completion_export_while_blocking_unload(Type type)
     {
         using var fixture = new RearFixture(type);

@@ -765,7 +765,7 @@ public sealed class Line1RearFlowEngine : IDisposable
                 {
                     var b = _beds[i];
                     if (b == null) continue;
-                    Console.WriteLine($"│     {b.Code}: St={b.St} Ok={b.Ok} Fresh={b.SignalFresh} RqData={b.RqData} RqLoad={b.RqLoad} 门开确认={(b.SignalFresh ? YN(b.DoorOpen) : "未知")} → {(IsReadyForLoad(b) ? "可用" : "不可用")}");
+                    Console.WriteLine($"│     {b.Code}: St={b.St} Ok={b.Ok} Fresh={b.SignalFresh} RqData={b.RqData} RqLoad={b.RqLoad} 有旧工件={YN(b.Wp.HasValue)} 门开确认={(b.SignalFresh ? YN(b.DoorOpen) : "未知")} → {(IsReadyForLoad(b) ? "可用" : "不可用")}");
                 }
             }
             return scan;
@@ -1072,8 +1072,8 @@ public sealed class Line1RearFlowEngine : IDisposable
         }
     }
 
-    // 锁外候选和拿到后天车锁后的重扫共用此入口，门关床不进入版长匹配，不影响其它合格床。
-    private static bool IsReadyForLoad(SkewCtx? b) => b != null && b.Idle && b.SignalFresh && b.RqData && b.DoorOpen;
+    // 初扫和后天车锁后重扫共用此判断。CNC状态同步可能先回Idle，保留旧Wp的床不能接新板。
+    private static bool IsReadyForLoad(SkewCtx? b) => b != null && b.Idle && b.Wp == null && b.SignalFresh && b.RqData && b.DoorOpen;
 
     // ═══════════════════════════════════════════════════════════════════
     private async Task PollBedWithCleanupAsync(SkewCtx b, CancellationTokenSource bedCts,
@@ -1771,8 +1771,26 @@ public sealed class Line1RearFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             action.Confirm(new FlowActionPosition(bx + _ox, by + _oy, sz), "斜床目标XY微调完成");
 
-            // 到这里才绑定斜床工件: X11已确认吸住、Z已升安全、后天车已到目标斜床上方。
-            // 在此之前异常按“工件仍在中转架/后天车”处理, 避免Idle斜床残留旧Wp。
+            // 候选门开来自轮询快照；持板到位并完成微调后，重新读目标床门开再进入请求数据握手。
+            operation.ThrowIfInvalid();
+            string doorAddress = bed.F != null ? "#1006" : "10359";
+            double doorOpenValue;
+            try
+            {
+                doorOpenValue = bed.F != null
+                    ? await bed.F.ReadDoorOpenValueAsync(ct)
+                    : await bed.M!.ReadDoorOpenValueAsync(ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                throw new InvalidOperationException($"{bed.Code}上料微调后读取门开 {doorAddress} 失败，无法确认门开：{ex.Message}", ex);
+            }
+            operation.ThrowIfInvalid();
+            if (doorOpenValue != 1.0)
+                throw new InvalidOperationException($"{bed.Code}上料微调后门开复核失败：{doorAddress}={doorOpenValue}，要求等于1");
+            Console.WriteLine($"│ [上料] {bed.Code} 微调后门开复核通过：{doorAddress}=1");
+
+            // X11已确认持件、Z已升安全、目标微调和门开复核均通过后，才绑定斜床工件。
             bed.Wp = wp;
             SetRearCraneTask(wp, "斜床上料握手中", rs, bed.Code);
             bed.CompletionExported = false; // 新工件开始加工前清除job2导出标志, 完工时只追加一次。

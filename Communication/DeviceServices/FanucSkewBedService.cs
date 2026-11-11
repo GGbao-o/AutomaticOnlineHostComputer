@@ -510,6 +510,10 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public Task<bool> IsRequestUnloadAsync(CancellationToken ct = default) => ReadMacroBoolAsync(FanucSkewBedAddress.RequestUnload, ct);
         public Task<bool> IsTailstockOpenedAsync(CancellationToken ct = default) => ReadMacroBoolAsync(FanucSkewBedAddress.TailstockOpened, ct);
 
+        /// <summary>通过本机Worker实时单读#1006，保留原值供严格比较和异常诊断。</summary>
+        internal Task<double> ReadDoorOpenValueAsync(CancellationToken ct = default)
+            => SafeCallAsync(() => _sdk.GetMacro(FanucSkewBedAddress.AutoDoorOpen), "读 #1006 门开", ct);
+
         public async Task SendMachiningParamsAsync(double rollerLength, double rollerDiameter, double borePlugSize, int mode, CancellationToken ct = default)
         {
             const int maxAttempts = 3;
