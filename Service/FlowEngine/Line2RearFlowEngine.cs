@@ -1731,26 +1731,13 @@ public sealed class Line2RearFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             action.Confirm(new FlowActionPosition(bx + _ox, by + _oy, sz), "斜床目标XY微调完成");
 
-            // 候选门开来自轮询快照；持板到位并完成微调后，重新读目标床门开再进入请求数据握手。
+            // 2号线均为沈阳斜床。微调完成后实时确认#1006门开及#1007机床Y轴安全，均为1才进入握手。
             operation.ThrowIfInvalid();
-            const string doorAddress = "#1006";
-            double doorOpenValue;
-            try
-            {
-                //!读取斜床门开信号
-                doorOpenValue = await bed.F!.ReadDoorOpenValueAsync(ct);
-            }
-            //! 斜床门信号不对 直接抛异常
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                throw new InvalidOperationException($"{bed.Code}上料微调后读取门开 {doorAddress} 失败，无法确认门开：{ex.Message}", ex);
-            }
+            //! 判断沈阳斜床是否门信号 和y轴尾做信号都是对的
+            await bed.F!.VerifyLoadDoorAndYAxisAsync(bed.Code, ct);
             operation.ThrowIfInvalid();
-            if (doorOpenValue != 1.0)
-                throw new InvalidOperationException($"{bed.Code}上料微调后门开复核失败：{doorAddress}={doorOpenValue}，要求等于1");
-            Console.WriteLine($"│ [上料] {bed.Code} 微调后门开复核通过：{doorAddress}=1");
 
-            // X11已确认持件、Z已升安全、目标微调和门开复核均通过后，才绑定斜床工件。
+            // X11已确认持件、Z已升安全、目标微调和机床复核均通过后，才绑定斜床工件。
             bed.Wp = wp;
             SetRearCraneTask(wp, "斜床上料握手中", rs, bed.Code);
             bed.CompletionExported = false; // 新工件开始加工前清除job2导出标志, 完工时只追加一次。

@@ -1771,26 +1771,31 @@ public sealed class Line1RearFlowEngine : IDisposable
                 actionId: actionId, physicalTracker: physicalTracker, ct: ct);
             action.Confirm(new FlowActionPosition(bx + _ox, by + _oy, sz), "斜床目标XY微调完成");
 
-            // 候选门开来自轮询快照；持板到位并完成微调后，重新读目标床门开再进入请求数据握手。
+            // 持板微调后用实时信号复核。锦州检查10359，沈阳还要求#1007确认机床Y轴在安全位置。
             operation.ThrowIfInvalid();
-            string doorAddress = bed.F != null ? "#1006" : "10359";
-            double doorOpenValue;
-            try
+            if (bed.F is { } fanuc)
             {
-                doorOpenValue = bed.F != null
-                    ? await bed.F.ReadDoorOpenValueAsync(ct)
-                    : await bed.M!.ReadDoorOpenValueAsync(ct);
+                await fanuc.VerifyLoadDoorAndYAxisAsync(bed.Code, ct);
             }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
+            else
             {
-                throw new InvalidOperationException($"{bed.Code}上料微调后读取门开 {doorAddress} 失败，无法确认门开：{ex.Message}", ex);
+                int doorOpenValue;
+                try
+                {
+                    doorOpenValue = await bed.M!.ReadDoorOpenValueAsync(ct);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    throw new InvalidOperationException($"{bed.Code}上料微调后读取门开 10359 失败，无法确认门开：{ex.Message}", ex);
+                }
+                operation.ThrowIfInvalid();
+                if (doorOpenValue != 1)
+                    throw new InvalidOperationException($"{bed.Code}上料微调后门开复核失败：10359={doorOpenValue}，要求等于1");
+                Console.WriteLine($"│ [上料] {bed.Code} 微调后门开复核通过：10359=1");
             }
             operation.ThrowIfInvalid();
-            if (doorOpenValue != 1.0)
-                throw new InvalidOperationException($"{bed.Code}上料微调后门开复核失败：{doorAddress}={doorOpenValue}，要求等于1");
-            Console.WriteLine($"│ [上料] {bed.Code} 微调后门开复核通过：{doorAddress}=1");
 
-            // X11已确认持件、Z已升安全、目标微调和门开复核均通过后，才绑定斜床工件。
+            // X11已确认持件、Z已升安全、目标微调和机床复核均通过后，才绑定斜床工件。
             bed.Wp = wp;
             SetRearCraneTask(wp, "斜床上料握手中", rs, bed.Code);
             bed.CompletionExported = false; // 新工件开始加工前清除job2导出标志, 完工时只追加一次。

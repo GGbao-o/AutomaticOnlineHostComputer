@@ -510,9 +510,55 @@ namespace AutomaticOnlineHostComputer.Communication.DeviceServices
         public Task<bool> IsRequestUnloadAsync(CancellationToken ct = default) => ReadMacroBoolAsync(FanucSkewBedAddress.RequestUnload, ct);
         public Task<bool> IsTailstockOpenedAsync(CancellationToken ct = default) => ReadMacroBoolAsync(FanucSkewBedAddress.TailstockOpened, ct);
 
-        /// <summary>通过本机Worker实时单读#1006，保留原值供严格比较和异常诊断。</summary>
-        internal Task<double> ReadDoorOpenValueAsync(CancellationToken ct = default)
-            => SafeCallAsync(() => _sdk.GetMacro(FanucSkewBedAddress.AutoDoorOpen), "读 #1006 门开", ct);
+        /// <summary>上料微调后在本机Worker连续读门开和Y轴安全位置，使用本次宏变量原值。</summary>
+        internal async Task VerifyLoadDoorAndYAxisAsync(string stationCode, CancellationToken ct)
+        {
+            (double doorOpen, double ySafe) signals;
+            try
+            {
+                signals = await SafeCallAsync(() =>
+                {
+                    double doorOpen = ReadSignal(FanucSkewBedAddress.AutoDoorOpen, "门开");
+                    ct.ThrowIfCancellationRequested();
+                    double ySafe = ReadSignal(FanucSkewBedAddress.YAxisSafePos, "Y轴安全位置");
+                    return (doorOpen, ySafe);
+                }, "读 #1006 门开和 #1007 Y轴安全位置", ct);
+            }
+            catch (Exception ex)
+            {
+                ct.ThrowIfCancellationRequested();
+                throw new InvalidOperationException(
+                    $"{stationCode}上料微调后无法确认门开 #1006 和Y轴安全位置 #1007：{ex.Message}", ex);
+            }
+
+            ct.ThrowIfCancellationRequested();
+            // ! 非1属于设备状态不满足，在通信重试之外判定，避免将门关或Y未到位当成通信故障重连。
+            string values = RequireLoadDoorAndYAxis(stationCode, signals.doorOpen, signals.ySafe);
+            Console.WriteLine($"[FANUC-SDK] {stationCode} 上料微调后复核通过：{values}");
+
+            double ReadSignal(int address, string name)
+            {
+                try
+                {
+                    return _sdk.GetMacro(address);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    throw new InvalidOperationException($"{name} #{address} 读取失败：{ex.Message}", ex);
+                }
+            }
+        }
+
+        internal static string RequireLoadDoorAndYAxis(string stationCode, double doorOpen, double ySafe)
+        {
+            string values = $"门开 #1006={doorOpen}，Y轴安全位置 #1007={ySafe}";
+            if (doorOpen == 1.0 && ySafe == 1.0)
+                return values;
+
+            string reason = doorOpen == 1.0 ? "Y轴安全位置" : ySafe == 1.0 ? "门开" : "门开和Y轴安全位置";
+            //! 信号不对 门信号和y轴信号不为1 直接抛异常
+            throw new InvalidOperationException($"{stationCode}上料微调后复核失败：{reason}未通过。{values}，两项都要求等于1");
+        }
 
         public async Task SendMachiningParamsAsync(double rollerLength, double rollerDiameter, double borePlugSize, int mode, CancellationToken ct = default)
         {

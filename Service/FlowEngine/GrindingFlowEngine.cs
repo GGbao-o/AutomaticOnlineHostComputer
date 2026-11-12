@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.Clients;
+using AutomaticOnlineHostComputer.Communication.DeviceAddresses;
 using AutomaticOnlineHostComputer.Communication.DeviceServices;
 using AutomaticOnlineHostComputer.Domain.Models;
 using AutomaticOnlineHostComputer.Infrastructure.Config;
@@ -2565,6 +2566,38 @@ public sealed class GrindingFlowEngine : IDisposable
             action.Confirm(new FlowActionPosition(null, null, _cfg.Grinding.SafeZHeight), "研磨机取料后Z安全到位");
             physicalTracker?.TryConfirmSafeZ(_cfg.Grinding.SafeZHeight, _cfg.AbsMove.Tolerance, "研磨机取料后Z升安全命令成功返回");
             operationalTracker.ConfirmSafeZ(_cfg.Grinding.SafeZHeight, _cfg.AbsMove.Tolerance, "研磨机取料后Z升安全命令成功返回");
+
+            // 取料时的X11=1只是先前的持件确认。尾座松开且Z升安全后，再读一次才能去ST710。
+            ct.ThrowIfCancellationRequested();
+            if (!IsGrindingActionCurrent(actionVersion)) throw new OperationCanceledException(ct);
+            operationalTracker.BeginX11Stage("研磨下料Z安全到位后持件复核");
+            operationalTracker.BeginX11Attempt();
+            bool heldAfterRise;
+            try
+            {
+                heldAfterRise = await crane.ReadXBitAsync(CraneAddress.D_X11_HasPlate, ct);
+            }
+            catch (Exception ex)
+            {
+                // 底层X区读取也可能包装取消异常，恢复真正的取消语义，避免作废已取消的旧动作。
+                ct.ThrowIfCancellationRequested();
+                operationalTracker.FailX11();
+                operationalTracker.MarkHoldingUnknown("取料时X11=1，Z升安全后X11读取失败，当前持件状态未知");
+                throw new InvalidOperationException(
+                    $"{grinder.StationCode}下料 {craneName} Z已升安全，复读X11（63497）失败，持件状态未知：{ex.Message}", ex);
+            }
+            ct.ThrowIfCancellationRequested();
+            if (!IsGrindingActionCurrent(actionVersion)) throw new OperationCanceledException(ct);
+            operationalTracker.CompleteX11(heldAfterRise, DateTime.UtcNow);
+            physicalTracker?.TryObserveX11(heldAfterRise);
+            action.RecordFeedback(FlowActionPosition.Unknown, heldAfterRise, null, "Z升安全后复读X11");
+            if (!heldAfterRise)
+            {
+                operationalTracker.MarkHoldingUnknown("取料时X11=1，Z升安全后X11=0，工件去向待现场确认");
+                throw new InvalidOperationException(
+                    $"{grinder.StationCode}下料 {craneName} Z已升安全，但X11（63497）=0，未检测到持件（取料时X11=1），请现场核对工件位置");
+            }
+            Console.WriteLine($"[GrindingEngine] [{craneName}] {grinder.StationCode} 下料Z升安全后复核X11=1，继续检查ST710/M720");
 
             // ── ⑦ XY 移到下料架 ST710（加偏移）───────────────
             // 主循环预检到实际放料之间要等待门开、松尾座、Z升安全。

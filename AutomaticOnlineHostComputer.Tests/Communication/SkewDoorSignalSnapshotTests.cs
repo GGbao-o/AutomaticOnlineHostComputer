@@ -9,6 +9,29 @@ namespace AutomaticOnlineHostComputer.Tests.Communication;
 public sealed class SkewDoorSignalSnapshotTests
 {
     [Theory]
+    [InlineData(1.0, 1.0, null)]
+    [InlineData(0.0, 1.0, "门开未通过")]
+    [InlineData(1.0, 0.0, "Y轴安全位置未通过")]
+    [InlineData(2.0, -1.0, "门开和Y轴安全位置未通过")]
+    [InlineData(1.0, 1.01, "Y轴安全位置未通过")]
+    public void Fanuc_load_check_requires_both_raw_values_to_be_exactly_one(double door, double ySafe, string? failureReason)
+    {
+        const string station = "ST606";
+        if (failureReason == null)
+        {
+            Assert.Equal("门开 #1006=1，Y轴安全位置 #1007=1",
+                FanucSkewBedService.RequireLoadDoorAndYAxis(station, door, ySafe));
+            return;
+        }
+
+        var ex = Assert.Throws<InvalidOperationException>(() => FanucSkewBedService.RequireLoadDoorAndYAxis(station, door, ySafe));
+        Assert.Contains(station, ex.Message);
+        Assert.Contains(failureReason, ex.Message);
+        Assert.Contains($"#1006={door}", ex.Message);
+        Assert.Contains($"#1007={ySafe}", ex.Message);
+    }
+
+    [Theory]
     [InlineData(1, true)]
     [InlineData(0, false)]
     [InlineData(2, false)]

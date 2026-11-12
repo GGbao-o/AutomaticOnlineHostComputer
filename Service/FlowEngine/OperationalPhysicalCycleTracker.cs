@@ -188,6 +188,10 @@ internal sealed class OperationalPhysicalCycleTracker
     public void ConfirmHolding(string reason) => Try(() =>
         _holdingWorkpiece = EvidenceValue<bool>.Confirmed(true, NonBlank(reason, "调用点确认当前持件")));
 
+    /// <summary>持件复核失败时标为未知，保留X11实读结果，等待现场确认工件去向。</summary>
+    public void MarkHoldingUnknown(string reason) => Try(() =>
+        _holdingWorkpiece = EvidenceValue<bool>.Unknown(NonBlank(reason, "当前持件状态未知")));
+
     public void BeginPlacementMagnetOff(string target) => Try(() =>
     {
         BeginMagnetOff();
