@@ -49,6 +49,8 @@ public sealed class GrindingFlowEngine : IDisposable
     private volatile bool _paused;   // 暂停标志(volatile: 主页面+引擎线程跨线程可见)
     private volatile bool _fastNextCycle; // UnloadFromGrinderAsync完成后设true, 缩短主循环延迟快速响应
     private int _cycleCount;         // 主循环轮次计数
+    private readonly RackSignalConfirmation _unloadRackConfirmation = new();
+    private int _unloadRackSampleCycle = -1;
     private readonly Dictionary<string, DateTime> _waitingLogAtUtc = new(StringComparer.Ordinal);
     private static readonly TimeSpan WaitingLogHeartbeat = TimeSpan.FromSeconds(10);
 
@@ -859,6 +861,7 @@ public sealed class GrindingFlowEngine : IDisposable
             // ── 暂停检查 ──────────────────────────────────────────
             if (_paused)
             {
+                _unloadRackConfirmation.Reset();
                 await Task.Delay(500, ct);
                 continue;
             }
@@ -1005,29 +1008,7 @@ public sealed class GrindingFlowEngine : IDisposable
                             continue; // 西门子单机模式仅跳过本轮自动下料
                         }
 
-                        bool unloadRackOk = false; // MC64未连接/读失败时保守等待, 不允许盲放到ST710。
-                        if (_mc64?.IsConnected == true)
-                        {
-                            try
-                            {
-                                var r = await _mc64.ReadMAlignedWordAsync(720, 1, ct);
-                                unloadRackOk = r.IntValues.Length > 0 && (r.IntValues[0] & 1) != 0;
-                                if (!unloadRackOk && _cycleCount % 10 == 1)
-                                    Console.WriteLine($"[GrindingEngine] [{g.Name}] ⏳ 下料架不可用(MC64 M720=0), 等待...");
-                            }
-                            catch (Exception ex)
-                            {
-                                unloadRackOk = false;
-                                Console.WriteLine($"[GrindingEngine] [{g.Name}] 读取下料架MC64 M720失败, 已失效连接等待重连: {ex.Message}");
-                                await _mcCache.InvalidateAsync("192.168.2.64", 9000);
-                                _mc64 = null;
-                            }
-                        }
-                        else if (_cycleCount % 10 == 1)
-                        {
-                            Console.WriteLine($"[GrindingEngine] [{g.Name}] ⏳ 下料架MC64未连接, 等待连接恢复后再下料...");
-                        }
-                        if (!unloadRackOk) continue; // 下料架不可用→等下轮
+                        if (!await ConfirmGrindingUnloadRackCandidateAsync(ct)) continue;
 
                         if (await _craneLock.WaitAsync(0, ct))
                         {
@@ -1270,80 +1251,61 @@ public sealed class GrindingFlowEngine : IDisposable
         }
     }
 
-    /// <summary>
-    /// 确认研磨机下料架(ST710)当前可放料。
-    /// M720=1同时表示下料架无板且允许天车放版。
-    /// 下料从研磨机取起后再确认一次, 宁可暂停人工确认, 不能盲目去占用下料架。
-    /// </summary>
-    private async Task<bool> ConfirmGrindingUnloadRackReadyAsync(string context, CancellationToken ct)
+    /// <summary>本轮多个研磨机共用同一个ST710样本；停线或读异常清零。</summary>
+    private async Task<bool> ConfirmGrindingUnloadRackCandidateAsync(CancellationToken ct)
     {
-        if (_mc64?.IsConnected != true)
-        {
-            Console.WriteLine($"[GrindingEngine] {context}: MC64未连接, ST710/M720状态未知");
-            return false;
-        }
+        if (_unloadRackSampleCycle == _cycleCount)
+            return _unloadRackConfirmation.IsConfirmed(_cfg.RackSignalConfirmation);
+        _unloadRackSampleCycle = _cycleCount;
 
         try
         {
-            var r = await _mc64.ReadMAlignedWordAsync(720, 1, ct);
-            int raw = r.IntValues.Length > 0 ? r.IntValues[0] : 0;
-            bool m720CanPlace = (raw & 1) != 0;
-            if (!m720CanPlace || _cycleCount % 10 == 1)
-                Console.WriteLine($"[GrindingEngine] {context}: ST710/M720={(m720CanPlace ? "无板且允许放料" : "不可放料")} raw=0x{raw:X4}");
-            return m720CanPlace;
+            bool canPlace = await ReadGrindingUnloadRackCanPlaceAsync(ct);
+            ct.ThrowIfCancellationRequested();
+            return _unloadRackConfirmation.Observe("ST710/MC64 M720 下料候选", canPlace, true, _cfg.RackSignalConfirmation);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            Console.WriteLine($"[GrindingEngine] {context}: 读取ST710/M720失败, 保守等待/暂停: {ex.Message}");
-            await _mcCache.InvalidateAsync("192.168.2.64", 9000);
-            _mc64 = null;
+            _unloadRackConfirmation.Reset($"ST710/MC64 M720 下料候选读取失败（{ex.Message}）");
+            if (_mc64 != null)
+            {
+                await _mcCache.InvalidateAsync("192.168.2.64", 9000);
+                _mc64 = null;
+            }
             return false;
         }
     }
 
-    /// <summary>
-    /// 研磨天车已经确认持件并升到安全Z后的ST710二次确认。
-    /// 有效读取到M720=0只表示下料架暂不允许放料，保持本趟天车和工件原地等待；
-    /// 连接、读取或取消异常仍是状态未知，必须交由外层暂停并保留持件事实。
-    /// </summary>
+    private async Task<bool> ReadGrindingUnloadRackCanPlaceAsync(CancellationToken ct)
+    {
+        var client = _mc64;
+        if (client?.IsConnected != true)
+            throw new InvalidOperationException("MC64未连接，ST710/M720状态未知");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(3000);
+        var result = await client.ReadMAlignedWordAsync(720, 1, timeout.Token);
+        if (result.IntValues.Length < 1)
+            throw new InvalidOperationException("MC64 M720返回字数不足");
+        return (result.IntValues[0] & 1) != 0;
+    }
+
+    /// <summary>安全Z和X11确认后重新计数，保持持件与天车锁，原地等待M720连续放行。</summary>
     private async Task WaitForGrindingUnloadRackReadyAsync(CancellationToken ct)
     {
-        int waitCount = 0;
-        while (true)
+        try
         {
-            if (_mc64?.IsConnected != true)
-                throw new InvalidOperationException("MC64未连接, ST710/M720状态未知");
-
-            try
-            {
-                //读取
-                var r = await _mc64.ReadMAlignedWordAsync(720, 1, ct);
-                int raw = r.IntValues.Length > 0 ? r.IntValues[0] : 0;
-                bool m720CanPlace = (raw & 1) != 0;
-                if (m720CanPlace)
-                {
-                    if (waitCount > 0)
-                        Console.WriteLine($"[GrindingEngine] 持件等待ST710/M720结束，已允许放料 raw=0x{raw:X4}");
-                    return;
-                }
-
-                waitCount++;
-                if (waitCount == 1 || waitCount % 10 == 0)
-                    Console.WriteLine($"[GrindingEngine] 持件等待ST710/M720允许放料 raw=0x{raw:X4}，保持安全Z和本趟天车锁");
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[GrindingEngine] 持件等待ST710/M720读取失败，状态未知并暂停: {ex.Message}");
-                await _mcCache.InvalidateAsync("192.168.2.64", 9000);
-                _mc64 = null;
-                throw new InvalidOperationException("持件等待ST710/M720时读取失败, 成品仍由天车保持, 暂停等待人工确认", ex);
-            }
-
-            await Task.Delay(_cfg.Grinding.SignalPollIntervalMs, ct);
+            await RackSignalConfirmation.CheckAsync(ReadGrindingUnloadRackCanPlaceAsync, true,
+                "ST710/MC64 M720 持件安全Z下料复核", _cfg.RackSignalConfirmation, ct, waitUntilConfirmed: true);
+            // 本趟即将占用目标架，下一次候选从新样本开始累积。
+            _unloadRackConfirmation.Reset();
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            Console.WriteLine($"[GrindingEngine] ST710/MC64 M720 持件复核失败，状态未知并暂停：{ex.Message}");
+            _unloadRackConfirmation.Reset();
+            await _mcCache.InvalidateAsync("192.168.2.64", 9000);
+            _mc64 = null;
+            throw new InvalidOperationException("持件等待ST710/M720时读取失败，成品仍由天车保持，暂停等待人工确认", ex);
         }
     }
 

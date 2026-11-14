@@ -7,20 +7,19 @@ namespace AutomaticOnlineHostComputer.Tests.FlowEngine;
 public sealed class FrontCraneZoneMtAdmissionContractTests
 {
     [Theory]
-    [InlineData("Line1FrontFlowEngine.cs", "Station1HasPlate", "Station2HasPlate", "Station3HasPlate")]
-    [InlineData("Line2FrontFlowEngine.cs", "Station4HasPlate", "Station5HasPlate", "Station6HasPlate")]
-    public void Full_racks_release_before_polling_outside_then_retry_acquisition(
-        string file, string first, string second, string third)
+    [InlineData("Line1FrontFlowEngine.cs")]
+    [InlineData("Line2FrontFlowEngine.cs")]
+    public void No_confirmed_empty_rack_releases_before_polling_outside_then_reacquires(string file)
     {
         string gate = Gate(file);
-        Assert.Contains($"if (lockedRackStatus.{first} && lockedRackStatus.{second} && lockedRackStatus.{third})", gate);
+        Assert.Contains("singleWindow: true", gate);
+        Assert.Contains("if (lockedRack == null)", gate);
         int release = gate.IndexOf("_safety.MarkerTransferCollisionLock.Release();", StringComparison.Ordinal);
         int reset = gate.IndexOf("zoneMtLocked = false;", release, StringComparison.Ordinal);
         int ledger = gate.IndexOf("action.TryReleaseLock(\"ZoneMT\");", reset, StringComparison.Ordinal);
-        int outsideRead = gate.IndexOf("var outsideRackStatus = await _rackSvc.ReadAllStatusAsync(ct);", ledger, StringComparison.Ordinal);
+        int outsideRead = gate.IndexOf("await RackSignalConfirmation.FindEmptyTransferRackAsync(", ledger, StringComparison.Ordinal);
         int retry = gate.IndexOf("continue;", outsideRead, StringComparison.Ordinal);
         Assert.True(release >= 0 && reset > release && ledger > reset && outsideRead > ledger && retry > outsideRead);
-        Assert.Contains($"!outsideRackStatus.{first} || !outsideRackStatus.{second} || !outsideRackStatus.{third}", gate);
         Assert.Contains("while (true)", gate[..release]);
     }
 
@@ -54,7 +53,7 @@ public sealed class FrontCraneZoneMtAdmissionContractTests
         int acquisition = source.IndexOf("MarkerTransferCollisionLock.WaitAsync", guardedTry, StringComparison.Ordinal);
         int held = source.IndexOf("zoneMtLocked = true;", acquisition, StringComparison.Ordinal);
         int register = source.IndexOf("action.RegisterLock(\"ZoneMT\");", held, StringComparison.Ordinal);
-        int read = source.IndexOf("var lockedRackStatus = await _rackSvc!.ReadAllStatusAsync(ct);", register, StringComparison.Ordinal);
+        int read = source.IndexOf("string? lockedRack = await RackSignalConfirmation.FindEmptyTransferRackAsync", register, StringComparison.Ordinal);
         int marking = source.IndexOf("await MarkingHandshakeAsync", read, StringComparison.Ordinal);
         Assert.True(marker >= 0 && flags > marker && guardedTry > flags && acquisition > guardedTry);
         Assert.True(held > acquisition && register > held && read > register && marking > read);

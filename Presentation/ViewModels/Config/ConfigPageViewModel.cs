@@ -111,6 +111,18 @@ public sealed class ConfigPageViewModel : INotifyPropertyChanged
     /// <summary>4号后天车上料放行：3号实际X<=此阈值(mm)。</summary>
     public int Crane4MaxCrane3X { get => _cfg.CranePeerXAdmission.Crane4MaxCrane3X; set { _cfg.CranePeerXAdmission.Crane4MaxCrane3X = value; OnPropertyChanged(); } }
 
+    public int RackSignalConsecutiveReads
+    {
+        get => _cfg.RackSignalConfirmation.ConsecutiveReads;
+        set { _cfg.RackSignalConfirmation.ConsecutiveReads = value; OnPropertyChanged(); }
+    }
+
+    public int RackSignalSampleIntervalMs
+    {
+        get => _cfg.RackSignalConfirmation.SampleIntervalMs;
+        set { _cfg.RackSignalConfirmation.SampleIntervalMs = value; OnPropertyChanged(); }
+    }
+
     // 机械手1是两线共用设备。分线路配置表示“首次离开货叉区并允许货叉启动”的安全点；
     // 取板待机Y表示货叉放行后继续前往的预定位点，两者不能混为一个配置。
     public int Manipulator1Line1SafeY { get => _cfg.SkewBed.Manipulator1Line1SafeY; set { _cfg.SkewBed.Manipulator1Line1SafeY = value; OnPropertyChanged(); } }

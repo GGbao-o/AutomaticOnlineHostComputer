@@ -403,6 +403,21 @@
                         <!-- 左列 -->
                         <StackPanel Grid.Column="0" Margin="0,0,10,0">
 
+                            <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeaderStyle}" Text="料架信号连续确认" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="连续次数 (1～20)" Width="150" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding RackSignalConsecutiveReads, UpdateSourceTrigger=LostFocus}" Style="{StaticResource ParamTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="采样间隔 (20～5000 ms)" Width="150" Style="{StaticResource ParamLabelStyle}" />
+                                        <TextBox Text="{Binding RackSignalSampleIntervalMs, UpdateSourceTrigger=LostFocus}" Style="{StaticResource ParamTextBoxStyle}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
                             <!-- 天车归位 -->
                             <Border Padding="12,10" Margin="0,0,0,10" Background="{StaticResource SectionBgBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">

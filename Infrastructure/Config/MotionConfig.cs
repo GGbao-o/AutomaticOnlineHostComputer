@@ -370,6 +370,18 @@ public sealed class MotionConfig
     /// <summary>取天车归位X(有配置用配置, 没有用默认)</summary>
     public int GetCraneHomeX(int craneNo) => CraneHomeX.TryGetValue(craneNo, out var x) ? x : 1000;
 
+    /// <summary>中转架和下料架PLC信号的连续确认配置。</summary>
+    public RackSignalConfirmationSection RackSignalConfirmation { get; set; } = new();
+
+    public sealed class RackSignalConfirmationSection
+    {
+        private volatile int _consecutiveReads = 3;
+        private volatile int _sampleIntervalMs = 100;
+
+        public int ConsecutiveReads { get => _consecutiveReads; set => _consecutiveReads = Math.Clamp(value, 1, 20); }
+        public int SampleIntervalMs { get => _sampleIntervalMs; set => _sampleIntervalMs = Math.Clamp(value, 20, 5000); }
+    }
+
     /// <summary>前后天车持锁进入共享区前，对另一台天车实际显示X的四个独立放行阈值。</summary>
     public CranePeerXAdmissionSection CranePeerXAdmission { get; set; } = new();
 

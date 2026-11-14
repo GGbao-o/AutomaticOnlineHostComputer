@@ -53,7 +53,7 @@ public sealed class RearLoadX11FailureContractTests
         string source = ReadFlowSource(fileName);
         string method = ExtractMethod(source, "private async Task DoLoad");
 
-        int rackCheck = method.IndexOf("RackHasPhysicalPlateSnapshot(rs)", StringComparison.Ordinal);
+        int rackCheck = method.IndexOf("await ConfirmTransferRackPlateAsync(rs, ct)", StringComparison.Ordinal);
         int sourceUnchanged = method.IndexOf("bool sourceUnchanged", StringComparison.Ordinal);
         int requestData = method.IndexOf("IsRequestDataAsync(ct)", StringComparison.Ordinal);
         Assert.True(rackCheck >= 0, $"{fileName} 未找到锁后来源有板检查");

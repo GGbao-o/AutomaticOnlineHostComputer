@@ -424,6 +424,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
         public string ForkCommand { get; set; } = "无命令";
 
         public bool RackConnected { get; set; }
+        // 只由独立PLC轮询推进，各架位分别计数；后端多次消费同一快照不会增加计数。
+        internal RackSignalConfirmation[] TransferRackPlateConfirmation { get; } = { new(), new(), new() };
         public bool RackRequestPickup { get; set; }
         public int RackPlateLength { get; set; }
         public bool TransferRack1Free { get; set; }
@@ -887,10 +889,25 @@ public sealed class Line1FrontFlowEngine : IDisposable
     /// </summary>
     private async Task RefreshRackSnapshotAsync(Line1DeviceStatus ds, CancellationToken ct)
     {
+        bool sampled = false;
+        try
+        {
+            sampled = await RefreshRackSnapshotCoreAsync(ds, ct);
+        }
+        finally
+        {
+            if (!sampled)
+                foreach (var confirmation in ds.TransferRackPlateConfirmation)
+                    confirmation.Reset("1号线中转架候选 PLC读失败或已离线");
+        }
+    }
+
+    private async Task<bool> RefreshRackSnapshotCoreAsync(Line1DeviceStatus ds, CancellationToken ct)
+    {
         if (_rackSvc == null)
         {
             ds.RackConnected = false;
-            return;
+            return false;
         }
 
         if (!_rackSvc.IsConnected)
@@ -906,13 +923,13 @@ public sealed class Line1FrontFlowEngine : IDisposable
             {
                 ds.RackConnected = false;
                 if (_cycleCount % 10 == 1) Console.WriteLine("[Line1Front] ⚠ 独立刷新中转架重连超时(5s)");
-                return;
+                return false;
             }
             catch (Exception ex)
             {
                 ds.RackConnected = false;
                 if (_cycleCount % 10 == 1) Console.WriteLine($"[Line1Front] ⚠ 独立刷新中转架重连失败: {ex.Message}");
-                return;
+                return false;
             }
         }
 
@@ -922,6 +939,11 @@ public sealed class Line1FrontFlowEngine : IDisposable
             using var timeoutCts = new CancellationTokenSource(5000);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
             var rs = await _rackSvc.ReadAllStatusAsync(linked.Token);
+
+            linked.Token.ThrowIfCancellationRequested();
+            ds.TransferRackPlateConfirmation[0].Observe("1号线上料候选 ST105/MC63 M811", rs.Station1HasPlate, true, _cfg.RackSignalConfirmation);
+            ds.TransferRackPlateConfirmation[1].Observe("1号线上料候选 ST101/MC63 M812", rs.Station2HasPlate, true, _cfg.RackSignalConfirmation);
+            ds.TransferRackPlateConfirmation[2].Observe("1号线上料候选 ST106/MC63 M813", rs.Station3HasPlate, true, _cfg.RackSignalConfirmation);
 
             ds.RackConnected = true;
             ds.RackRequestPickup = rs.RequestPickup;
@@ -943,6 +965,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
                 ds.M817SnapshotValid = false;
                 if (_cycleCount % 10 == 1) Console.WriteLine($"[Line1Front] ⚠ M817快照读取失败: {ex.Message} → 后端禁止向M817放料");
             }
+            return true;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -956,6 +979,7 @@ public sealed class Line1FrontFlowEngine : IDisposable
             ds.M817SnapshotValid = false;
             if (_cycleCount % 10 == 1) Console.WriteLine($"[Line1Front] ⚠ 独立刷新中转架状态失败: {ex.Message}");
         }
+        return false;
     }
 
     private void ScheduleDeviceReconnects(CancellationToken ct)
@@ -1158,6 +1182,8 @@ public sealed class Line1FrontFlowEngine : IDisposable
             // 暂停状态: 跳过本轮，500ms后重试
             if (_paused)
             {
+                foreach (var confirmation in DeviceStatus.TransferRackPlateConfirmation)
+                    confirmation.Reset();
                 await Task.Delay(500, ct); continue;
             }
             try
@@ -2415,18 +2441,9 @@ public sealed class Line1FrontFlowEngine : IDisposable
             //      打号期间只持ZoneMT, 后天车仍可在ST108侧持ZoneTS工作。
             //      真正进入中转架前再拿ZoneTS; 放料二次判断只看物理空位信号。
             Console.WriteLine("[Line1Front] [前天车] ③ 等中转架空位...");
-            while (_rackSvc?.IsConnected == true)
-            {
-                try
-                {
-                    //读取中转架是否有空位置
-                    var crs = await _rackSvc.ReadAllStatusAsync(ct);
-                    if (!crs.Station1HasPlate || !crs.Station2HasPlate || !crs.Station3HasPlate) break;
-                    Console.WriteLine("[Line1Front] [前天车] 中转架1/2/3全满, 等后天车取走...");
-                }
-                catch { /* 读失败→等下轮 */ }
-                await Task.Delay(500, ct);
-            }
+            if (_rackSvc == null) throw new InvalidOperationException("中转架服务未初始化");
+            await RackSignalConfirmation.FindEmptyTransferRackAsync(_rackSvc.ReadRackSignalMaskAsync,
+                1, "打号前锁外候选", _cfg.RackSignalConfirmation, ct, retryReadFailures: true);
             Console.WriteLine("[Line1Front] [前天车] ③ 获取ZoneMT(打号机↔中转架碰撞区)...");
             //拿锁
             // ZoneMT准入：拿锁后先复核三个架位；全满释放重抢，有空位但暂停则持锁无限等启动。
@@ -2447,22 +2464,18 @@ public sealed class Line1FrontFlowEngine : IDisposable
                     Console.WriteLine("[Line1Front] [前天车] ZoneMT已获取 ✓");
 
                     // 判断1：拿锁后实时读取本线M811/M812/M813，不沿用锁外预检结果。
-                    var lockedRackStatus = await _rackSvc!.ReadAllStatusAsync(ct);
-                    //三个中转架都有板
-                    if (lockedRackStatus.Station1HasPlate && lockedRackStatus.Station2HasPlate && lockedRackStatus.Station3HasPlate)
+                    string? lockedRack = await RackSignalConfirmation.FindEmptyTransferRackAsync(_rackSvc.ReadRackSignalMaskAsync,
+                        1, "拿ZoneMT后复核", _cfg.RackSignalConfirmation, ct, singleWindow: true);
+                    if (lockedRack == null)
                     {
                         _safety.MarkerTransferCollisionLock.Release();
                         zoneMtLocked = false;
                         action.TryReleaseLock("ZoneMT");
-                        Console.WriteLine("[Line1Front] [前天车] 拿锁后中转架1/2/3全满，已释放ZoneMT，锁外等空位...");
+                        Console.WriteLine("[Line1Front] [前天车] 拿锁后未确认稳定空位，已释放ZoneMT，锁外等空位...");
                         // 锁外持续读，后天车才能拿ZoneMT取板腾空位；有空位后重新拿锁、再次读。
-                        while (true)
-                        {
-                            await Task.Delay(500, ct);
-                            var outsideRackStatus = await _rackSvc.ReadAllStatusAsync(ct);
-                            if (!outsideRackStatus.Station1HasPlate || !outsideRackStatus.Station2HasPlate || !outsideRackStatus.Station3HasPlate)
-                                break;
-                        }
+                        await Task.Delay(_cfg.RackSignalConfirmation.SampleIntervalMs, ct);
+                        await RackSignalConfirmation.FindEmptyTransferRackAsync(_rackSvc.ReadRackSignalMaskAsync,
+                            1, "释放ZoneMT后锁外等空位", _cfg.RackSignalConfirmation, ct);
                         continue;
                     }
                     //下面是中转架有空位了 判断线路是否暂停
@@ -2803,19 +2816,10 @@ public sealed class Line1FrontFlowEngine : IDisposable
         try
         {
             if (_rackSvc == null || !_rackSvc.IsConnected) throw new InvalidOperationException("中转架服务未连接");
-            // ── 读三个中转架状态 ──
-            var status = await _rackSvc.ReadAllStatusAsync(ct);
-            Console.WriteLine(
-                $"[Line1Front] [中转架] M811={status.Station1HasPlate} M812={status.Station2HasPlate} M813={status.Station3HasPlate}");
-
-            // ── 按优先级选空位 (M811→ST105, M812→ST101, M813→ST106) ──
-            //    现场策略：前端放料的二次判断只看物理信号。即使软件缓存残留，只要物理信号无板就允许放；
-            //    放料后的OnRackPlaced必须成功，否则暂停弹窗要求人工补缓存。
-            string? rackStation = null;
-            if (!status.Station1HasPlate) rackStation = "ST105";
-            else if (!status.Station2HasPlate) rackStation = "ST101";
-            else if (!status.Station3HasPlate) rackStation = "ST106";
-            else throw new InvalidOperationException("1号线3个中转架全满，无法放料！");//抛出异常  finally会释放ZoneTS+ZoneMT
+            // 打号已结束，重新采样选实际放料位。仅确认三架持续全满才走原异常收尾。
+            string rackStation = await RackSignalConfirmation.FindEmptyTransferRackAsync(_rackSvc.ReadRackSignalMaskAsync,
+                1, "打号后最终选位", _cfg.RackSignalConfirmation, ct, stopWhenFull: true)
+                ?? throw new InvalidOperationException("1号线三个中转架已连续确认全满，无法放料");
 
             FlowAlarmPresentationContext.RecordTransferPhase("ST107", rackStation, "中转架放料");
             if (!TryGetStationCoords(rackStation, out int rx, out int ry, out int rz))

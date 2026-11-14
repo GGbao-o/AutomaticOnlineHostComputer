@@ -8,8 +8,8 @@ public sealed class GrindingUnloadM720WaitContractTests
         string source = Read("Service", "FlowEngine", "GrindingFlowEngine.cs");
 
         Assert.Contains("WaitForGrindingUnloadRackReadyAsync", source, StringComparison.Ordinal);
-        Assert.Contains("while (true)", source, StringComparison.Ordinal);
-        Assert.Contains("await Task.Delay(_cfg.Grinding.SignalPollIntervalMs, ct)", source, StringComparison.Ordinal);
+        Assert.Contains("RackSignalConfirmation.CheckAsync(ReadGrindingUnloadRackCanPlaceAsync, true,", source, StringComparison.Ordinal);
+        Assert.Contains("waitUntilConfirmed: true", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ST710/M720动作前确认失败", source, StringComparison.Ordinal);
     }
 

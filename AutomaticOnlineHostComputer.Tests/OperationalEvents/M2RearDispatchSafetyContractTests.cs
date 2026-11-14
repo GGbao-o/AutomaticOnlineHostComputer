@@ -85,8 +85,9 @@ public sealed class M2RearDispatchSafetyContractTests
         string source = ReadFlowSource("Line1RearFlowEngine.cs");
 
         Assert.Contains("await WaitForM720CanPlaceBeforePlaceAsync(wp, ct);", source, StringComparison.Ordinal);
-        Assert.Contains("while (!await ReadM720CanPlaceBeforePlaceAsync(ct))", source, StringComparison.Ordinal);
-        Assert.Contains("M720二次确认=不可放料，保持持板等待", source, StringComparison.Ordinal);
+        Assert.Contains("RackSignalConfirmation.CheckAsync(ReadM720CanPlaceBeforePlaceAsync, true,", source, StringComparison.Ordinal);
+        Assert.Contains("bool waitUntilConfirmed = true", source, StringComparison.Ordinal);
+        Assert.Contains("throw new InvalidOperationException(\"MC65 M720二次确认返回字数不足\")", source, StringComparison.Ordinal);
         Assert.DoesNotContain("M720二次确认=不可放料, 禁止放料", source, StringComparison.Ordinal);
     }
 

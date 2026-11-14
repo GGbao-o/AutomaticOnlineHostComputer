@@ -45,6 +45,8 @@ public sealed class Line2RearFlowEngine : IDisposable
     private volatile bool _paused;
     private volatile bool _fastNextCycle; // DoLoad/DoUnload完成后设true, 主循环缩短延迟
     private int _cycleCount;
+    private readonly RackSignalConfirmation[] _unloadRackConfirmation = { new(), new() };
+    private readonly int[] _unloadRackSampleCycle = { -1, -1 };
     private readonly RearSkewDispatchLogGate _dispatchLogGate = new();
 
     // ── 后天车 ──
@@ -417,7 +419,12 @@ public sealed class Line2RearFlowEngine : IDisposable
 
         while (!ct.IsCancellationRequested)
         {
-            if (_paused) { await Task.Delay(500, ct); continue; }
+            if (_paused)
+            {
+                foreach (var confirmation in _unloadRackConfirmation) confirmation.Reset();
+                await Task.Delay(500, ct);
+                continue;
+            }
             try
             {
                 _cycleCount++; 
@@ -641,11 +648,11 @@ public sealed class Line2RearFlowEngine : IDisposable
     {
         var racks = new List<string>(3);
         var fd = _frontDs;
-        if (fd == null || !fd.RackConnected) return racks;
+        if (fd == null || !fd.RackConnected || fd.DisplaySnapshotPaused) return racks;
 
-        if (!fd.TransferRack4Free) racks.Add("ST016");
-        if (!fd.TransferRack5Free) racks.Add("ST017");
-        if (!fd.TransferRack6Free) racks.Add("ST018");
+        if (fd.TransferRackPlateConfirmation[0].IsConfirmed(_cfg.RackSignalConfirmation)) racks.Add("ST016");
+        if (fd.TransferRackPlateConfirmation[1].IsConfirmed(_cfg.RackSignalConfirmation)) racks.Add("ST017");
+        if (fd.TransferRackPlateConfirmation[2].IsConfirmed(_cfg.RackSignalConfirmation)) racks.Add("ST018");
         Dictionary<string, long> seqSnapshot = _rackLedger.SnapshotArrivalSequences();
         racks.Sort((a, b) =>
         {
@@ -673,6 +680,29 @@ public sealed class Line2RearFlowEngine : IDisposable
             "ST018" => !fd.TransferRack6Free,
             _ => false
         };
+    }
+
+    private async Task<bool> ConfirmTransferRackPlateAsync(string rackCode, CancellationToken ct)
+    {
+        int index = TransferRackPhysicalPriority(rackCode);
+        if (index >= 3) throw new InvalidOperationException($"未知中转架 {rackCode}");
+        int address = 814 + index;
+        try
+        {
+            return await RackSignalConfirmation.CheckAsync(async token =>
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeout.CancelAfter(3000);
+                var mc63 = await EnsureMc63Async(timeout.Token);
+                int mask = await RackSignalConfirmation.ReadMc63RackMaskAsync(mc63, timeout.Token);
+                return RackSignalConfirmation.Bit(mask, address);
+            }, true, $"{rackCode}/MC63 M{address} 锁后取料复核", _cfg.RackSignalConfirmation, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            Console.WriteLine($"[上料] {rackCode}/MC63 M{address} 锁后读取失败，本轮不取料：{ex.Message}");
+            return false;
+        }
     }
 
     private static int TransferRackPhysicalPriority(string rackCode) => rackCode switch
@@ -859,7 +889,7 @@ public sealed class Line2RearFlowEngine : IDisposable
                 continue;
             }
 
-            if (!await CanUnloadDestinationAcceptAsync(fds, wp, ct))
+            if (!await CanUnloadDestinationAcceptAsync(wp, ct))
                 continue;
 
             // 机械手2/3任一报警或读不到状态时，只禁止新下料候选，不改变斜床的WaitingUnload状态。
@@ -905,48 +935,28 @@ public sealed class Line2RearFlowEngine : IDisposable
         return result;
     }
 
-    private async Task<bool> CanUnloadDestinationAcceptAsync(Line2FrontFlowEngine.Line2DeviceStatus? fds, WorkpieceCache wp, CancellationToken ct)
+    private async Task<bool> CanUnloadDestinationAcceptAsync(WorkpieceCache wp, CancellationToken ct)
     {
         bool needsBalancing = wp.Length >= 800 || wp.ForceBalancing;
-        if (needsBalancing)
-        {
-            if (fds == null)
-            {
-                Console.WriteLine("│   目的地不可用: frontDs=null");
-                return false;
-            }
-            if (!fds.DropRackSnapshotValid)
-            {
-                Console.WriteLine("│   目的地不可用: ST020/ST021握手快照无效(禁止按旧状态放料)");
-                return false;
-            }
-            if (!fds.M818CanPlace)
-            {
-                Console.WriteLine("│   目的地不可用: M818=0(ST020未允许天车放料)");
-                return false;
-            }
-            return true;
-        }
+        int index = needsBalancing ? 0 : 1;
+        string point = needsBalancing ? "ST020/MC63 M818" : "ST021/MC63 M820";
+        var confirmation = _unloadRackConfirmation[index];
+        // 同一路径单轮只采一份。多个斜床共用目的地，后天车锁后的候选重扫也不能重复计数。
+        if (_unloadRackSampleCycle[index] == _cycleCount)
+            return confirmation.IsConfirmed(_cfg.RackSignalConfirmation);
+        _unloadRackSampleCycle[index] = _cycleCount;
 
         try
         {
-            using var mcts = new CancellationTokenSource(3000);
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, mcts.Token);
-            var mc63 = await EnsureMc63Async(linked.Token);
-            var r = await mc63.ReadMAlignedWordAsync(800, 2, linked.Token);
-            var m816 = r.IntValues[1]; // 第2字=M816~M831, M820=bit4
-            bool m820CanPlace = (m816 & (1 << RackAddr.Bit_ST021_CanPlace)) != 0;
-            Console.WriteLine($"│   M820(ST021允许天车放料)={(m820CanPlace ? "1" : "0")} rawM816=0x{m816:X4}");
-            if (!m820CanPlace)
-            {
-                Console.WriteLine("│   目的地不可用: M820=0(ST021未允许天车放料)");
-                return false;
-            }
-            return true;
+            bool canPlace = needsBalancing
+                ? await ReadM818CanPlaceAsync(ct, log: false)
+                : await ReadM820CanPlaceAsync(ct, log: false);
+            ct.ThrowIfCancellationRequested();
+            return confirmation.Observe($"{point} 下料候选", canPlace, expected: true, _cfg.RackSignalConfirmation);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            Console.WriteLine($"│   M820按需读MC63失败: {ex.Message},下轮重试");
+            confirmation.Reset($"{point} 下料候选读取失败（{ex.Message}）");
             return false;
         }
     }
@@ -1560,8 +1570,8 @@ public sealed class Line2RearFlowEngine : IDisposable
                 () => _cfg.CranePeerXAdmission.Crane4MaxCrane3X, requireAtLeast: false, ct: ct,
                 validateAction: operation.ThrowIfInvalid);
 
-            if (!RackHasPhysicalPlateSnapshot(rs))
-                throw new InvalidOperationException($"中转架{rs}物理信号无板, 禁止后天车取料; 软件缓存将恢复等待人工/下轮确认");
+            // 本次锁内直接读来源PLC。尚未取板时信号不稳定可退回调度，保留本板缓存。
+            bool sourcePlateConfirmed = await ConfirmTransferRackPlateAsync(rs, ct);
             // 锁后复核（获取ZoneMT/ZoneTS可能持续较久）：
             //   ① 来源预约必须仍属于本动作、且中转架缓存身份未变（防止等锁期间工人取走+前台补入新板）；
             //   ② 目标斜床必须仍处于“请求数据”状态。
@@ -1580,11 +1590,17 @@ public sealed class Line2RearFlowEngine : IDisposable
             {
                 Console.WriteLine($"│ [上料] {bed.Code} 锁后复核请求数据读取失败: {ex.Message}");
             }
-            if (!sourceUnchanged || !targetRequestData)
+            operation.ThrowIfInvalid();
+            if (!sourcePlateConfirmed || !sourceUnchanged || !targetRequestData)
             {
                 _rackLedger.ReleaseReservation(rs, actionId);
                 bed.St = SkewState.Idle;
-                Console.WriteLine($"[上料] ⏳ 锁后复核未通过(来源未变={sourceUnchanged}, {bed.Code}请求数据={targetRequestData}), 未取中转架{rs}工件, 释放预约等待下一轮");
+                // 此时未发运动，交给原finally释放锁，跳过斜床共享区退避。
+                sharedLocked = false;
+                if (!sourcePlateConfirmed)
+                    _frontDs?.TransferRackPlateConfirmation[TransferRackPhysicalPriority(rs)].Reset();
+                ClearRearCraneTask();
+                Console.WriteLine($"[上料] 锁后复核未通过(物理有板确认={sourcePlateConfirmed}, 来源未变={sourceUnchanged}, {bed.Code}请求数据={targetRequestData})，释放预约，保留中转架{rs}工件等待下轮");
                 return;
             }
             cr = _craneCache.GetOrCreateService(CraneRearNo);
@@ -1684,6 +1700,7 @@ public sealed class Line2RearFlowEngine : IDisposable
             // 只有充磁成功且充磁后X11=1才提交中转架取走。
             if (!_rackLedger.CommitPickup(rs, actionId, out _, out _))
                 throw new InvalidOperationException($"中转架{rs}工件预约提交失败");
+            _frontDs?.TransferRackPlateConfirmation[TransferRackPhysicalPriority(rs)].Reset();
             action.BeginStep(FlowActionStep.MoveZSafeWithWorkpiece);
             action.MarkCommandSent();
             await cr.MoveAbsoluteAsync(-1, -1, sz, ct: ct);
@@ -2381,9 +2398,12 @@ public sealed class Line2RearFlowEngine : IDisposable
                     if (_lockM821 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M821路径保护)..."); await operation.AcquireAsync("M821", _lockM821, ct); action.RegisterLock("M821"); gotM821 = true; }
                     // 二次确认: M818=未允许放料时不释放分流锁、不移动、不退磁、不暂停，保持持件与安全Z
                     // 在锁内按轮询周期无限等待，直到 M818 恢复允许放料才允许进入分流区。
-                    await EnsureM818CanPlaceBeforePlaceAsync(wp, ct);
-                    // 锁内、目的地确认后再确认机械手2/3已离开料架区，之后才允许后天车进入分流区。
-                    await WaitManipulatorsClearOfRackAsync(ct);
+                    do
+                    {
+                        await EnsureM818CanPlaceBeforePlaceAsync(wp, ct);
+                        await WaitManipulatorsClearOfRackAsync(ct);
+                        // 最后一组信号若变化，重新等待目的地和机械手，避免长时间等待后沿用旧机械手位置。
+                    } while (!await EnsureM818CanPlaceBeforePlaceAsync(wp, ct, waitUntilConfirmed: false));
                 }
                 else//短板加锁M818 M821
                 {
@@ -2394,9 +2414,11 @@ public sealed class Line2RearFlowEngine : IDisposable
                     if (_lockM821 != null) { Console.WriteLine("│ [分流] 等待平衡锁(M821路径保护)..."); await operation.AcquireAsync("M821", _lockM821, ct); action.RegisterLock("M821"); gotM821 = true; }
                     // 二次确认: M820=未允许放料时不释放分流锁、不移动、不退磁、不暂停，保持持件与安全Z
                     // 在锁内按轮询周期无限等待，直到 M820 恢复允许放料才允许进入分流区。
-                    await EnsureM820CanPlaceBeforePlaceAsync(wp, ct);
-                    // 锁内、目的地确认后再确认机械手2/3已离开料架区，之后才允许后天车进入分流区。
-                    await WaitManipulatorsClearOfRackAsync(ct);
+                    do
+                    {
+                        await EnsureM820CanPlaceBeforePlaceAsync(wp, ct);
+                        await WaitManipulatorsClearOfRackAsync(ct);
+                    } while (!await EnsureM820CanPlaceBeforePlaceAsync(wp, ct, waitUntilConfirmed: false));
                 }
 
                 // ③ XY移动+放料(持锁中)
@@ -3041,40 +3063,18 @@ public sealed class Line2RearFlowEngine : IDisposable
     /// </para>
     /// PLC 读取失败、报文异常或动作取消仍按既有安全异常路径抛出。
     /// </summary>
-    private async Task EnsureM818CanPlaceBeforePlaceAsync(WorkpieceCache wp, CancellationToken ct)
-    {
-        int waitCount = 0;
-        while (!await ReadM818CanPlaceAsync(ct, log: waitCount == 0))
-        {
-            waitCount++;
-            if (waitCount == 1 || waitCount % 10 == 0)
-                Console.WriteLine($"│ [分流] ⚠ {wp.IdentityText} M818二次确认=未允许放料, 保持持件和安全Z持锁等待（{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1}秒）");
-            await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
-        }
-
-        if (waitCount > 0)
-            Console.WriteLine($"│ [分流] ✓ {wp.IdentityText} M818恢复允许放料, 结束持锁等待, 继续放料");
-    }
+    private Task<bool> EnsureM818CanPlaceBeforePlaceAsync(WorkpieceCache wp, CancellationToken ct, bool waitUntilConfirmed = true)
+        => RackSignalConfirmation.CheckAsync(token => ReadM818CanPlaceAsync(token, log: false), true,
+            $"ST020/MC63 M818 持件安全Z分流复核 {wp.IdentityText}", _cfg.RackSignalConfirmation, ct, waitUntilConfirmed);
 
     /// <summary>
     /// ST021 放料前的目的地二次确认。
     /// M820=未允许放料时不移动天车、不退磁、不暂停、也不释放分流锁，保持持件和安全 Z
     /// 按轮询周期无限等待，直到 M820 恢复允许放料才允许进入分流区。处理方式与 ST020 相同。
     /// </summary>
-    private async Task EnsureM820CanPlaceBeforePlaceAsync(WorkpieceCache wp, CancellationToken ct)
-    {
-        int waitCount = 0;
-        while (!await ReadM820CanPlaceAsync(ct, log: waitCount == 0))
-        {
-            waitCount++;
-            if (waitCount == 1 || waitCount % 10 == 0)
-                Console.WriteLine($"│ [分流] ⚠ {wp.IdentityText} M820二次确认=未允许放料, 保持持件和安全Z持锁等待（{waitCount * _cfg.Grinding.PollIntervalMs / 1000.0:F1}秒）");
-            await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);
-        }
-
-        if (waitCount > 0)
-            Console.WriteLine($"│ [分流] ✓ {wp.IdentityText} M820恢复允许放料, 结束持锁等待, 继续放料");
-    }
+    private Task<bool> EnsureM820CanPlaceBeforePlaceAsync(WorkpieceCache wp, CancellationToken ct, bool waitUntilConfirmed = true)
+        => RackSignalConfirmation.CheckAsync(token => ReadM820CanPlaceAsync(token, log: false), true,
+            $"ST021/MC63 M820 持件安全Z分流复核 {wp.IdentityText}", _cfg.RackSignalConfirmation, ct, waitUntilConfirmed);
 
     /// <summary>读取M818是否允许放料(=1)。读取失败和报文异常由调用方按安全异常处理。</summary>
     private async Task<bool> ReadM818CanPlaceAsync(CancellationToken ct, bool log)

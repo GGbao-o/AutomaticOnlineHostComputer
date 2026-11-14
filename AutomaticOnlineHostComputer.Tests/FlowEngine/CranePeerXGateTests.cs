@@ -226,7 +226,7 @@ public sealed class CranePeerXGateEntryTests
         else
         {
             int register = source.LastIndexOf("action.RegisterLock(\"ZoneTS\");", gate, StringComparison.Ordinal);
-            int recheck = source.IndexOf("if (!RackHasPhysicalPlateSnapshot(rs))", gate, StringComparison.Ordinal);
+            int recheck = source.IndexOf("await ConfirmTransferRackPlateAsync(rs, ct)", gate, StringComparison.Ordinal);
             Assert.True(register >= 0 && gate > register && recheck > gate);
             Assert.Contains("validateAction: operation.ThrowIfInvalid", call);
         }

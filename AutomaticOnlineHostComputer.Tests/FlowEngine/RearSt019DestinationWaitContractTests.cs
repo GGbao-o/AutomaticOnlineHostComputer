@@ -12,12 +12,11 @@ public sealed class RearSt019DestinationWaitContractTests
     public void St019_destination_busy_keeps_locks_and_waits_until_empty()
     {
         string source = ReadRear("Line1RearFlowEngine.cs");
-        string method = ExtractMethod(source, "private async Task EnsureM817EmptyBeforePlaceAsync(");
-
-        Assert.Contains("while (!await ReadM817EmptyAsync(ct, log: waitCount == 0))", method, StringComparison.Ordinal);
-        Assert.Contains("await Task.Delay(_cfg.Grinding.PollIntervalMs, ct);", method, StringComparison.Ordinal);
-        Assert.Contains("保持持件和安全Z持锁等待", method, StringComparison.Ordinal);
-        Assert.Contains("结束持锁等待", method, StringComparison.Ordinal);
+        int start = source.IndexOf("private Task<bool> EnsureM817EmptyBeforePlaceAsync(", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        string method = source[start..source.IndexOf(';', start)];
+        Assert.Contains("bool waitUntilConfirmed = true", method);
+        Assert.Contains("RackSignalConfirmation.CheckAsync(async token => !await ReadM817EmptyAsync(token, log: false), false,", method);
 
         // 持锁等待：等待循环里不得释放锁，也不得重新获取锁。
         Assert.DoesNotContain("ReleaseDivertLocks", method, StringComparison.Ordinal);
@@ -46,6 +45,7 @@ public sealed class RearSt019DestinationWaitContractTests
         int call = source.IndexOf("await EnsureM817EmptyBeforePlaceAsync(wp, ct);", StringComparison.Ordinal);
         int waitManipulators = source.IndexOf("await WaitManipulatorsClearOfRackAsync(ct);", call, StringComparison.Ordinal);
         Assert.True(call >= 0 && waitManipulators > call, "必须先完成目的地二次确认，再等待机械手2/3离开料架区");
+        Assert.True(source.IndexOf("EnsureM817EmptyBeforePlaceAsync(wp, ct, waitUntilConfirmed: false)", waitManipulators, StringComparison.Ordinal) > waitManipulators);
 
         int branchStart = source.LastIndexOf("bool gotM817 = false;", call, StringComparison.Ordinal);
         Assert.True(branchStart >= 0 && branchStart < call, "未找到分流分支入口");

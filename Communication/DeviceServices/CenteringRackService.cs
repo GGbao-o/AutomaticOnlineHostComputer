@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AutomaticOnlineHostComputer.Communication.Clients;
+using AutomaticOnlineHostComputer.Communication.Models;
 using Addr = AutomaticOnlineHostComputer.Communication.DeviceAddresses.CenteringRackAddress;
 
 namespace AutomaticOnlineHostComputer.Communication.DeviceServices;
@@ -91,14 +92,33 @@ public sealed class CenteringRackService : IDisposable
     /// M800~M816 通过读 M800 起始 1 字（16bit）按位提取；
     /// D100 单独用 D 区读字。
     /// </summary>
+    /// <summary>只读料架位信号，返回M800～M831的位图。动作复核无需读取D100。</summary>
+    internal async Task<int> ReadRackSignalMaskAsync(CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(5000);
+        ReadResult result;
+        try
+        {
+            result = await Client.ReadMAlignedWordAsync(Addr.M_ReadStartAddr, Addr.M_ReadWordCount, timeout.Token);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested && timeout.IsCancellationRequested)
+        {
+            throw new TimeoutException("MC63料架位读取超时（5秒）", ex);
+        }
+        if (result.IntValues.Length < 2)
+            throw new InvalidOperationException("MC63料架读取失败：M800起返回字数不足2");
+        return (result.IntValues[0] & 0xffff) | (result.IntValues[1] << 16);
+    }
+
     public async Task<CenteringRackStatus> ReadAllStatusAsync(CancellationToken ct = default)
     {
         // ── 读 M800 起始 2 字，覆盖 M800~M831 ──────────────────
         //    第1字 = M800~M815 (bit0~bit15)
         //    第2字 = M816~M831 (bit0~bit15，即 M816=第2字bit0)
-        var result = await Client.ReadMAlignedWordAsync(Addr.M_ReadStartAddr, Addr.M_ReadWordCount, ct);
-        ushort raw1 = (ushort)(result.IntValues.Length > 0 ? result.IntValues[0] : 0);
-        ushort raw2 = (ushort)(result.IntValues.Length > 1 ? result.IntValues[1] : 0);
+        int rackMask = await ReadRackSignalMaskAsync(ct);
+        ushort raw1 = (ushort)(rackMask & 0xffff);
+        ushort raw2 = (ushort)(rackMask >> 16);
 
         var status = new CenteringRackStatus
         {

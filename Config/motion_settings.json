@@ -446,6 +446,10 @@
     "4": -5000,
     "5": 2000
   },
+  "rackSignalConfirmation": {
+    "consecutiveReads": 3,
+    "sampleIntervalMs": 100
+  },
   "cranePeerXAdmission": {
     "crane1MinCrane2X": -16500,
     "crane2MaxCrane1X": 3300,
